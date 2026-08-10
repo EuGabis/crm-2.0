@@ -197,6 +197,45 @@ select jobname, active from cron.job;            -- conferir jobs
 select * from public.automation_runs order by created_at desc limit 20;
 ```
 
+## Email Marketing — EM CONSTRUÇÃO (leia antes de continuar)
+
+Spec: `docs/superpowers/specs/2026-08-10-email-marketing-design.md`
+Plano: `docs/superpowers/plans/2026-08-10-email-marketing.md`
+
+Torna real a aba **Marketing → E-mails** (hoje mock). Arquitetura **espelha o motor de
+Automações**: campanha vira fila de destinatários; `pg_cron` chama `/api/marketing/tick`
+a cada minuto; a rota envia em lotes de 100 via **Resend Batch** com a service role.
+
+**Decisões aprovadas:**
+- Envio real **+** métricas de abertura/clique (webhook do Resend, verificado por Svix).
+- Fila via pg_cron (rota/cron **separados** das automações, mesmo `AUTOMATION_SECRET`).
+- Descadastro com flag **dedicada** `contacts.marketing_opt_out` (não afeta transacionais,
+  que checam só `dnd`). Link de unsubscribe assinado (HMAC) + header `List-Unsubscribe`.
+- Composer com **editor rico (Tiptap)** + variáveis + trechos + 3–4 modelos.
+
+**Peças novas (quando implementadas):**
+- Migrações `0010_email_marketing.sql` (tabelas `email_campaigns`,
+  `email_campaign_recipients`, coluna `contacts.marketing_opt_out`, funções
+  `materialize_recipients`/`apply_email_event`) e `0011_marketing_cron.sql` (job
+  `lito-marketing-tick`, tabela `private.marketing_config`).
+- Rotas: `POST /api/marketing/tick` (protegida por `x-automation-secret`, fora do matcher
+  do proxy), `POST /api/marketing/resend-webhook` (Svix), `GET /api/marketing/unsubscribe`,
+  `POST /api/marketing/campaigns/[id]/send`.
+- Repo `src/lib/data/repos/db/campaigns.ts`; UI em `src/components/marketing/`.
+- Libs: `@tiptap/react` (+ starter-kit, link, image), `svix`.
+- Env nova: `RESEND_WEBHOOK_SECRET`. Passos manuais em produção (como no pg_cron das
+  automações): rota publicada + webhook criado no Resend + tracking de abertura/clique
+  ativado.
+
+**Fora da v1:** A/B test, drip, upload próprio de imagens (imagem por URL por enquanto).
+
+### Como pausar o envio de marketing (após implementado)
+
+```sql
+select cron.unschedule('lito-marketing-tick');   -- pausa o cron
+update public.email_campaigns set status = 'paused' where id = '<id>';  -- pausa uma campanha
+```
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
