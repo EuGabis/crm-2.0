@@ -53,15 +53,18 @@ function DropdownMenuGroup({ ...props }: MenuPrimitive.Group.Props) {
   return <MenuPrimitive.Group data-slot="dropdown-menu-group" {...props} />
 }
 
+// Renderiza um <div> simples (não Menu.GroupLabel): o GroupLabel do Base UI exige
+// um <Menu.Group> em volta e, sem ele, lança "MenuGroupContext is missing" (erro #31),
+// derrubando o menu inteiro. Como usamos o label solto, um div é o correto e seguro.
 function DropdownMenuLabel({
   className,
   inset,
   ...props
-}: MenuPrimitive.GroupLabel.Props & {
+}: React.ComponentProps<"div"> & {
   inset?: boolean
 }) {
   return (
-    <MenuPrimitive.GroupLabel
+    <div
       data-slot="dropdown-menu-label"
       data-inset={inset}
       className={cn(
