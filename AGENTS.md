@@ -197,39 +197,43 @@ select jobname, active from cron.job;            -- conferir jobs
 select * from public.automation_runs order by created_at desc limit 20;
 ```
 
-## Email Marketing — EM CONSTRUÇÃO (leia antes de continuar)
+## Email Marketing — CÓDIGO PRONTO (faltam passos manuais de produção)
 
 Spec: `docs/superpowers/specs/2026-08-10-email-marketing-design.md`
 Plano: `docs/superpowers/plans/2026-08-10-email-marketing.md`
 
-Torna real a aba **Marketing → E-mails** (hoje mock). Arquitetura **espelha o motor de
-Automações**: campanha vira fila de destinatários; `pg_cron` chama `/api/marketing/tick`
-a cada minuto; a rota envia em lotes de 100 via **Resend Batch** com a service role.
+Torna real a aba **Marketing → E-mails**. Arquitetura **espelha o motor de Automações**:
+a campanha vira fila de destinatários; `pg_cron` chama `/api/marketing/tick` a cada minuto;
+a rota envia em lotes de 100 via **Resend Batch** com a service role e grava status.
 
-**Decisões aprovadas:**
-- Envio real **+** métricas de abertura/clique (webhook do Resend, verificado por Svix).
-- Fila via pg_cron (rota/cron **separados** das automações, mesmo `AUTOMATION_SECRET`).
-- Descadastro com flag **dedicada** `contacts.marketing_opt_out` (não afeta transacionais,
-  que checam só `dnd`). Link de unsubscribe assinado (HMAC) + header `List-Unsubscribe`.
-- Composer com **editor rico (Tiptap)** + variáveis + trechos + 3–4 modelos.
-
-**Peças novas (quando implementadas):**
-- Migrações `0010_email_marketing.sql` (tabelas `email_campaigns`,
+**Implementado (branch `feat/email-marketing`):**
+- Migração `0010_email_marketing.sql` **aplicada** (tabelas `email_campaigns`,
   `email_campaign_recipients`, coluna `contacts.marketing_opt_out`, funções
-  `materialize_recipients`/`apply_email_event`) e `0011_marketing_cron.sql` (job
-  `lito-marketing-tick`, tabela `private.marketing_config`).
-- Rotas: `POST /api/marketing/tick` (protegida por `x-automation-secret`, fora do matcher
-  do proxy), `POST /api/marketing/resend-webhook` (Svix), `GET /api/marketing/unsubscribe`,
-  `POST /api/marketing/campaigns/[id]/send`.
-- Repo `src/lib/data/repos/db/campaigns.ts`; UI em `src/components/marketing/`.
-- Libs: `@tiptap/react` (+ starter-kit, link, image), `svix`.
-- Env nova: `RESEND_WEBHOOK_SECRET`. Passos manuais em produção (como no pg_cron das
-  automações): rota publicada + webhook criado no Resend + tracking de abertura/clique
-  ativado.
+  `materialize_recipients`/`apply_email_event` + wrappers públicos `publish_campaign`,
+  `add_campaign_recipients`, `ingest_email_event`).
+- Motor `src/lib/marketing/{engine,types}.ts`; template `src/lib/email/marketing-template.ts`;
+  unsubscribe HMAC `src/lib/marketing/unsubscribe.ts`.
+- Rotas: `POST /api/marketing/tick` (x-automation-secret; fora do matcher do proxy),
+  `POST /api/marketing/campaigns/[id]/{send,test}` (autenticadas),
+  `POST /api/marketing/resend-webhook` (Svix), `GET|POST /api/marketing/unsubscribe`.
+- Repo `db/campaigns.ts`; UI `src/components/marketing/` (lista, composer Tiptap, detalhe).
+  A **lista inteligente** é resolvida no client (mesmo `matchesConditions` da tela de
+  Contatos) e enviada como `contactIds` para `add_campaign_recipients`.
+- Migração `0011_marketing_cron.sql` (job `lito-marketing-tick`, `private.marketing_config`).
+- Libs: `@tiptap/*`, `svix`. Verificado local: tick sem header → 401; com header → 200.
 
-**Fora da v1:** A/B test, drip, upload próprio de imagens (imagem por URL por enquanto).
+**Passos manuais que FALTAM para ligar em produção:**
+1. `RESEND_WEBHOOK_SECRET` no `.env.local` e na Vercel (production+preview+development).
+2. Garantir `SUPABASE_SERVICE_ROLE_KEY` e `AUTOMATION_SECRET` na Vercel + **redeploy**.
+3. Resend → **Webhooks** → criar endpoint `https://lito-crm.vercel.app/api/marketing/resend-webhook`
+   (eventos email.delivered/opened/clicked/bounced/complained) e **ativar tracking** de
+   abertura/clique no domínio; copiar o signing secret para `RESEND_WEBHOOK_SECRET`.
+4. Aplicar `0011` no SQL Editor trocando o placeholder pelo `AUTOMATION_SECRET`.
 
-### Como pausar o envio de marketing (após implementado)
+**Fora da v1:** A/B test, drip, upload próprio de imagens (imagem por URL por enquanto),
+inserção de trechos no composer (só variáveis por ora).
+
+### Como pausar o envio de marketing
 
 ```sql
 select cron.unschedule('lito-marketing-tick');   -- pausa o cron
