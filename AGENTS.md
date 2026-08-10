@@ -139,8 +139,11 @@ Supabase). Peças:
 - Env: `RESEND_API_KEY` (privada), `EMAIL_FROM`, `NEXT_PUBLIC_APP_URL`.
   Provisionado via Vercel Marketplace (`vercel integration add resend/resend-email`);
   `vercel env pull` traz a chave. Projeto Vercel: `lito-crm`.
-- Sem domínio verificado no Resend, use `onboarding@resend.dev` (só entrega para o
-  e-mail dono da conta) — para produção, verificar domínio no painel do Resend.
+- **Domínio `news.litoaviation.com` verificado no Resend** (Hostinger DNS, região
+  São Paulo, desde 2026-08-10) — entrega para qualquer destinatário. Remetente
+  padrão: `Lito CRM <nao-responder@news.litoaviation.com>` (setado em `EMAIL_FROM`).
+  O `onboarding@resend.dev` só era necessário antes da verificação (entregava só ao
+  dono da conta) e não deve mais ser usado.
 
 ## Automações — EM CONSTRUÇÃO (leia antes de continuar)
 

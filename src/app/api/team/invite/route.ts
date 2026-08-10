@@ -109,7 +109,7 @@ export async function POST(request: Request) {
   try {
     const resend = new Resend(apiKey);
     const { error: sendError } = await resend.emails.send({
-      from: process.env.EMAIL_FROM ?? `${brand.name} <onboarding@resend.dev>`,
+      from: process.env.EMAIL_FROM ?? `${brand.name} <nao-responder@news.litoaviation.com>`,
       to: email,
       subject,
       html,

@@ -2,8 +2,8 @@
 // Uso: node scripts/test-email.mjs destinatario@exemplo.com
 //
 // Lê RESEND_API_KEY e EMAIL_FROM do .env.local.
-// Sem domínio verificado no Resend, o remetente precisa ser
-// "onboarding@resend.dev" e o destinatário o e-mail dono da conta.
+// Domínio news.litoaviation.com verificado no Resend: entrega para
+// qualquer destinatário (remetente nao-responder@news.litoaviation.com).
 import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -52,7 +52,7 @@ try {
 
   const resend = new Resend(apiKey);
   const { data, error } = await resend.emails.send({
-    from: read("EMAIL_FROM") || "Lito CRM <onboarding@resend.dev>",
+    from: read("EMAIL_FROM") || "Lito CRM <nao-responder@news.litoaviation.com>",
     to,
     subject,
     html,
