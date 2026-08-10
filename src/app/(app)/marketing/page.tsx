@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { SubNav } from "@/components/layout/subnav";
+import { CampaignsTab } from "@/components/marketing/campaigns-tab";
 import { KpiCard } from "@/components/shared/kpi-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -119,14 +120,6 @@ const TIKTOK_SONGS = [
   { title: "Funk do Verão 2026 — DJ Kaio", uses: "1,2 mi vídeos" },
   { title: "Aesthetic Morning — Lo-fi Brasil", uses: "840 mil vídeos" },
   { title: "Pagode do Escritório — Grupo Sintonia", uses: "512 mil vídeos" },
-];
-
-const EMAIL_CAMPAIGNS = [
-  { name: "Lançamento — Agente de IA", status: "Enviada", recipients: "4.820", open: "42,3%", click: "8,1%", date: "28 jul 2026" },
-  { name: "Newsletter de julho", status: "Enviada", recipients: "5.104", open: "38,9%", click: "5,4%", date: "15 jul 2026" },
-  { name: "Oferta 70% OFF — última chamada", status: "Agendada", recipients: "3.240", open: "—", click: "—", date: "10 ago 2026" },
-  { name: "Reengajamento — leads frios", status: "Rascunho", recipients: "1.876", open: "—", click: "—", date: "—" },
-  { name: "Boas-vindas — novos assinantes", status: "Enviada", recipients: "612", open: "61,7%", click: "14,2%", date: "1 jul 2026" },
 ];
 
 const SNIPPETS = [
@@ -445,27 +438,7 @@ export default function MarketingPage() {
             )}
           </>
         )}
-        {tab === "E-mails" && (
-          <>
-            <div className="mb-4 flex items-center justify-between">
-              <h1 className="text-lg font-bold text-slate-900">Campanhas de e-mail</h1>
-              <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => toast.info("Criação de campanha chega com o backend")}>
-                <Plus className="size-3.5" /> Nova campanha
-              </Button>
-            </div>
-            <MiniTable
-              headers={["Nome", "Status", "Destinatários", "Taxa de abertura", "Cliques", "Data"]}
-              rows={EMAIL_CAMPAIGNS.map((c) => [
-                c.name,
-                <StatusBadge key="s" value={c.status} />,
-                c.recipients,
-                c.open,
-                c.click,
-                c.date,
-              ])}
-            />
-          </>
-        )}
+        {tab === "E-mails" && <CampaignsTab />}
         {tab === "Trechos" && (
           <>
             <div className="mb-4">
