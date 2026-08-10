@@ -51,7 +51,7 @@ export async function processDueCampaigns(): Promise<{
   for (const camp of campaigns as any[]) {
     const { data: recips } = await db
       .from("email_campaign_recipients")
-      .select("id, contact_id, email, contacts(name, custom_fields)")
+      .select("id, contact_id, email, contacts(first_name, last_name, custom_fields)")
       .eq("campaign_id", camp.id)
       .eq("status", "pending")
       .order("created_at", { ascending: true })
@@ -69,7 +69,7 @@ export async function processDueCampaigns(): Promise<{
     const payloads = (recips as any[]).map((r) => {
       const contact = r.contacts ?? {};
       const vars: Record<string, string> = {
-        nome: contact.name ?? "",
+        nome: [contact.first_name, contact.last_name].filter(Boolean).join(" "),
         email: r.email ?? "",
         ...flattenCustom(contact.custom_fields),
       };
