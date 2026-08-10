@@ -152,13 +152,11 @@ begin
     and (
       aud_type = 'all'
       or (aud_type = 'tag' and aud_value = any (c.tags))
-      or (aud_type = 'smart_list' and exists (
-            select 1 from public.smart_lists sl
-            where sl.id = aud_value::uuid and sl.location_id = camp.location_id
-      ))
     )
   on conflict (campaign_id, contact_id) do nothing;
-
+  -- NB: 'smart_list' é no-op aqui — avaliado em TS (matchesConditions) e inserido
+  -- via public.add_campaign_recipients. Ver o arquivo real 0010 (add_campaign_recipients,
+  -- publish_campaign) — a versão aplicada tem só os branches all/tag.
   select count(*) into n from public.email_campaign_recipients where campaign_id = p_campaign_id;
   update public.email_campaigns set total = n, updated_at = now() where id = p_campaign_id;
   return n;
@@ -415,7 +413,9 @@ git commit -m "feat(marketing): rota /api/marketing/tick protegida + proxy"
 - `/send`: body `{ mode: "now"|"scheduled"; scheduledAt?: string }`. Valida sessão + que a campanha é da location do usuário; chama `private.materialize_recipients` (via rpc com service role) e seta `status`.
 - `/test`: envia UMA cópia da campanha renderizada para o e-mail do próprio usuário logado (não materializa fila).
 
-- [ ] **Step 1: `/send`** — `getUser()`; com o client **autenticado** (sessão) chamar `rpc('publish_campaign', { p_id, p_mode: mode, p_at: scheduledAt ?? null })`. O wrapper `public.publish_campaign` (criado na 0010) já checa membership via `private.user_locations()` e faz materialize + set status. Retornar a campanha atualizada.
+- [ ] **Step 1: `/send`** — `getUser()`; carregar a campanha (client autenticado).
+  - Se `audience.type === 'smart_list'`: buscar os contatos da location, filtrar com `matchesConditions(contact, conditions)` (extrair `matchesConditions` de `src/components/contacts/module-tabs.tsx` para um módulo **não-client** reusável, ex. `src/lib/data/smart-list.ts`, e importar dos dois lados), pegar os `contact_ids` e chamar `rpc('add_campaign_recipients', { p_campaign_id, p_ids })`.
+  - Em seguida (todos os tipos): `rpc('publish_campaign', { p_id, p_mode: mode, p_at: scheduledAt ?? null })` — checa membership, materializa all/tag (no-op p/ smart_list) e seta status. Retornar a campanha atualizada.
 - [ ] **Step 2: `/test`** — carrega a campanha (client autenticado), renderiza com `vars` do próprio usuário (nome/email do profile), `resend.emails.send(...)` único. Retorna `{ ok: true }`.
 - [ ] **Step 3: Verificar** criando uma campanha rascunho no banco (SQL) e chamando `/test` logado; conferir recebimento.
 - [ ] **Step 4: Build + commit**
