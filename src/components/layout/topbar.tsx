@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Bell, Headset, LifeBuoy, LogOut, Phone } from "lucide-react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -19,7 +18,6 @@ import { SupportPanel } from "./support-panel";
 import { WebphonePanel } from "./webphone-panel";
 
 export function Topbar() {
-  const router = useRouter();
   const [supportOpen, setSupportOpen] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
@@ -30,9 +28,16 @@ export function Topbar() {
 
   const signOut = async () => {
     const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push("/login");
-    router.refresh();
+    // Escopo "local": limpa a sessão/cookie deste dispositivo na hora, sem depender
+    // de uma chamada de rede que poderia falhar e travar o logout. O try/catch garante
+    // que, mesmo se algo der errado, ainda saímos para o /login.
+    try {
+      await supabase.auth.signOut({ scope: "local" });
+    } catch {
+      // ignora — segue para o login de qualquer forma
+    }
+    // Navegação dura: força o middleware a reavaliar já com o cookie limpo.
+    window.location.href = "/login";
   };
 
   return (
