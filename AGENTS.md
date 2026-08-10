@@ -179,12 +179,18 @@ Motivo de não usar Vercel Cron: no plano Hobby ele roda só 1×/dia.
   - `src/app/api/automations/tick/route.ts` — POST protegido por `x-automation-secret`.
   - **`src/proxy.ts`: `api/automations` saiu do matcher** — a chamada é máquina-a-máquina
     (pg_cron), não tem sessão; sem isso o middleware redirecionava para /login (307).
-  - Verificado local: sem header → 401; header errado → 401; header certo → executa.
-  - **Falta só a chave:** `SUPABASE_SERVICE_ROLE_KEY` (Supabase → Settings → API →
-    `service_role`) em `.env.local` e na Vercel. Sem ela a rota responde 500 com
-    "Motor de automações sem credenciais". `AUTOMATION_SECRET` já está no `.env.local`.
-- ⏳ **Tarefa 4 — PRÓXIMO PASSO:** migração `0009` do `pg_cron` (precisa da rota
-  publicada em produção + as duas variáveis na Vercel).
+  - **Verificado local com as chaves reais (2026-08-10):** sem header → 401;
+    header errado → 401; header certo → `200 {"processed":0,"errors":0}` (motor
+    conectou na service role e consultou a fila). `SUPABASE_SERVICE_ROLE_KEY` e
+    `AUTOMATION_SECRET` já estão no `.env.local`.
+- ✅ **Tarefa 4 — código pronto** (2026-08-10): migração
+  `0009_automation_cron.sql` — tabela `private.automation_config` (guarda
+  `tick_url` + `secret` fora do alcance da API), função `private.automation_tick()`
+  (chama a rota via `net.http_post`) e job `lito-automation-tick` (a cada minuto).
+  **Falta aplicar em produção (passos manuais):** (1) `SUPABASE_SERVICE_ROLE_KEY`
+  e `AUTOMATION_SECRET` na Vercel (production+preview+development); (2) redeploy de
+  produção; (3) rodar a `0009` no SQL Editor trocando o placeholder do secret pelo
+  valor real; (4) conferir `cron.job` ativo + `net._http_response` com status 200.
 - ⏳ Tarefas 5–7 — builder configurável, aba de execuções/logs com teste manual,
   galeria de 5 modelos prontos.
 - ⏳ Tarefa 8 — env vars em produção, deploy, teste ponta a ponta, doc final.
