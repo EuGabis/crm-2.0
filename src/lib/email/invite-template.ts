@@ -117,6 +117,9 @@ export function renderInviteEmail(data: InviteEmailData): { subject: string; htm
                   equipe de ${escapeHtml(data.companyName)} no ${brand.name}.
                   Se não esperava por isso, pode ignorar esta mensagem.
                 </p>
+                <p style="margin:6px 0 0;color:#cbd5e1;font-size:11px;line-height:1.6;">
+                  ${brand.address}
+                </p>
               </td>
             </tr>
           </table>

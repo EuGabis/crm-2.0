@@ -108,12 +108,23 @@ export async function POST(request: Request) {
 
   try {
     const resend = new Resend(apiKey);
+    // Reply-To = e-mail de quem convidou (respostas vão para o admin) — melhora a
+    // reputação (não é "no-reply puro"). List-Unsubscribe via mailto agrada o Outlook.
+    const inviter = user.email ?? undefined;
     const { error: sendError } = await resend.emails.send({
       from: senderAddress(),
       to: email,
       subject,
       html,
       text,
+      ...(inviter ? { replyTo: inviter } : {}),
+      ...(inviter
+        ? {
+            headers: {
+              "List-Unsubscribe": `<mailto:${inviter}?subject=Unsubscribe>`,
+            },
+          }
+        : {}),
     });
     if (sendError) {
       return Response.json({

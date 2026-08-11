@@ -1,7 +1,9 @@
 import { Resend } from "resend";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { brand } from "@/lib/config/brand";
-import { senderAddress } from "@/lib/email/sender";
+import { senderAddress, replyToAddress } from "@/lib/email/sender";
+import { renderCampaignEmail } from "@/lib/email/marketing-template";
+import { unsubscribeUrl } from "@/lib/marketing/unsubscribe";
 import type { ActionResult, RunContext, Step } from "./types";
 
 type Db = ReturnType<typeof createAdminClient>;
@@ -309,12 +311,21 @@ export async function runAction(step: Step, ctx: RunContext): Promise<ActionResu
 
       try {
         const resend = new Resend(apiKey);
+        const unsub = ctx.contactId ? unsubscribeUrl(ctx.contactId) : "#";
+        const bodyHtml = body.includes("<") ? body : `<p>${body.replace(/\n/g, "<br />")}</p>`;
+        const { html, text } = renderCampaignEmail({ subject, bodyHtml, unsubscribeUrl: unsub });
+        const reply = replyToAddress();
         const { error } = await resend.emails.send({
           from: senderAddress(),
           to: contact.email,
           subject,
-          html: body.includes("<") ? body : `<p>${body.replace(/\n/g, "<br />")}</p>`,
-          text: body.replace(/<[^>]+>/g, ""),
+          html,
+          text,
+          ...(reply ? { replyTo: reply } : {}),
+          headers: {
+            "List-Unsubscribe": `<${unsub}>`,
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+          },
         });
         if (error) return { status: "error", message: error.message };
         return { status: "ok", message: `E-mail enviado para ${contact.email}` };

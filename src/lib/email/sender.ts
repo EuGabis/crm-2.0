@@ -16,3 +16,14 @@ export function senderAddress(): string {
   }
   return configured;
 }
+
+/**
+ * Endereço de resposta (Reply-To) dos e-mails transacionais. Não precisa ser do
+ * domínio verificado — é só para onde vão as respostas. Deixar de ser "no-reply
+ * puro" ajuda a reputação/entregabilidade. Retorna null se EMAIL_REPLY_TO não estiver
+ * definido (aí o e-mail sai sem Reply-To).
+ */
+export function replyToAddress(): string | null {
+  const v = process.env.EMAIL_REPLY_TO?.trim();
+  return v && v.includes("@") ? v : null;
+}
