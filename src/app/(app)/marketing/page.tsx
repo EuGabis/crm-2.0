@@ -15,6 +15,9 @@ import {
 import { toast } from "sonner";
 import { SubNav } from "@/components/layout/subnav";
 import { CampaignsTab } from "@/components/marketing/campaigns-tab";
+import { TrechosTab } from "@/components/marketing/trechos-tab";
+import { CountdownsTab } from "@/components/marketing/countdowns-tab";
+import { BrandBoardsTab } from "@/components/marketing/brand-boards-tab";
 import { KpiCard } from "@/components/shared/kpi-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -122,19 +125,6 @@ const TIKTOK_SONGS = [
   { title: "Pagode do Escritório — Grupo Sintonia", uses: "512 mil vídeos" },
 ];
 
-const SNIPPETS = [
-  { name: "Assinatura padrão", content: "Equipe Lito — Seu negócio inteiro em um lugar. Responda este e-mail para falar com a gente.", uses: 132 },
-  { name: "CTA teste grátis", content: "Comece seu teste grátis de 14 dias — sem cartão de crédito: litocrm.com.br/teste", uses: 87 },
-  { name: "Prova social", content: "Mais de 1.200 empresas brasileiras já automatizam o follow-up com a gente.", uses: 54 },
-  { name: "Aviso de reunião", content: "Sua reunião está confirmada. Chegando perto do horário, enviaremos o link por WhatsApp.", uses: 41 },
-];
-
-const COUNTDOWNS = [
-  { name: "Oferta 70% OFF", ends: "12 ago 2026 23:59", status: "Ativo", preview: "05d 14h 22m" },
-  { name: "Black Friday antecipada", ends: "20 nov 2026 23:59", status: "Ativo", preview: "105d 09h 10m" },
-  { name: "Turma de julho — Mentoria", ends: "30 jun 2026 20:00", status: "Expirado", preview: "00d 00h 00m" },
-];
-
 const TRIGGER_LINKS = [
   { name: "Teste grátis — bio Instagram", url: "lito.link/teste-gratis", clicks: 1842, automation: "Onboarding de trial" },
   { name: "Agendar demonstração", url: "lito.link/demo", clicks: 976, automation: "Agenda + lembrete WhatsApp" },
@@ -147,11 +137,6 @@ const AFFILIATES = [
   { name: "Canal Vende Mais", sales: 21, commission: 2730, status: "Ativo" },
   { name: "João Bertolini", sales: 12, commission: 1560, status: "Pendente" },
   { name: "Agência Norte Digital", sales: 7, commission: 910, status: "Ativo" },
-];
-
-const BRAND_BOARDS = [
-  { name: "Lito — Principal", palette: ["#4f46e5", "#0f172a", "#10b981", "#f8fafc"], font: "Inter" },
-  { name: "Campanha 70% OFF", palette: ["#dc2626", "#f59e0b", "#111827", "#fef2f2"], font: "Poppins" },
 ];
 
 const AD_CAMPAIGNS = [
@@ -439,44 +424,8 @@ export default function MarketingPage() {
           </>
         )}
         {tab === "E-mails" && <CampaignsTab />}
-        {tab === "Trechos" && (
-          <>
-            <div className="mb-4">
-              <h1 className="text-lg font-bold text-slate-900">Trechos</h1>
-              <p className="text-xs text-slate-500">Blocos de texto reutilizáveis em e-mails, SMS e redes sociais</p>
-            </div>
-            <MiniTable
-              headers={["Nome", "Conteúdo", "Usos"]}
-              rows={SNIPPETS.map((s) => [
-                s.name,
-                <span key="c" className="block max-w-96 truncate">{s.content}</span>,
-                s.uses,
-              ])}
-            />
-          </>
-        )}
-        {tab === "Contadores regressivos" && (
-          <>
-            <div className="mb-4">
-              <h1 className="text-lg font-bold text-slate-900">Contadores regressivos</h1>
-              <p className="text-xs text-slate-500">Crie urgência em páginas e e-mails com timers dinâmicos</p>
-            </div>
-            <div className="grid gap-3 md:grid-cols-3">
-              {COUNTDOWNS.map((c) => (
-                <div key={c.name} className="rounded-xl border bg-white p-4">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-slate-800">{c.name}</p>
-                    <StatusBadge value={c.status} />
-                  </div>
-                  <p className="mt-3 font-mono text-2xl font-bold tracking-tight text-indigo-600">
-                    {c.preview}
-                  </p>
-                  <p className="mt-2 text-[11px] text-slate-500">Termina em {c.ends}</p>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
+        {tab === "Trechos" && <TrechosTab />}
+        {tab === "Contadores regressivos" && <CountdownsTab />}
         {tab === "Links de acionamento" && (
           <>
             <div className="mb-4">
@@ -513,41 +462,7 @@ export default function MarketingPage() {
             />
           </>
         )}
-        {tab === "Brand Boards" && (
-          <>
-            <div className="mb-4 flex items-center justify-between">
-              <h1 className="text-lg font-bold text-slate-900">Brand Boards</h1>
-              <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => toast.info("Criação de marca chega com o backend")}>
-                <Plus className="size-3.5" /> Nova marca
-              </Button>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              {BRAND_BOARDS.map((b) => (
-                <div key={b.name} className="rounded-xl border bg-white p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex size-10 items-center justify-center rounded-lg bg-indigo-100 text-sm font-bold text-indigo-600">
-                      {b.name.charAt(0)}
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-slate-800">{b.name}</p>
-                      <p className="text-[11px] text-slate-500">Fonte: {b.font}</p>
-                    </div>
-                  </div>
-                  <div className="mt-3 flex gap-1.5">
-                    {b.palette.map((color) => (
-                      <div
-                        key={color}
-                        className="size-7 rounded-md border"
-                        style={{ backgroundColor: color }}
-                        title={color}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
+        {tab === "Brand Boards" && <BrandBoardsTab />}
         {tab === "Gerenciador de anúncios" && (
           <>
             <div className="mb-4 flex items-center justify-between">
