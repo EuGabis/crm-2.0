@@ -90,8 +90,12 @@ export function useDbCampaign(id: string): Campaign | undefined {
   return useMemo(() => campaigns.find((c) => c.id === id), [campaigns, id]);
 }
 
-/** Carrega os destinatários de uma campanha sob demanda (RLS garante o escopo). */
-export function useCampaignRecipients(campaignId: string | null): {
+/** Carrega os destinatários de uma campanha sob demanda (RLS garante o escopo).
+ *  `refreshKey`: mude o valor para forçar um recarregamento (usado no auto-refresh). */
+export function useCampaignRecipients(
+  campaignId: string | null,
+  refreshKey = 0,
+): {
   recipients: Recipient[];
   loading: boolean;
 } {
@@ -119,7 +123,7 @@ export function useCampaignRecipients(campaignId: string | null): {
     return () => {
       active = false;
     };
-  }, [campaignId]);
+  }, [campaignId, refreshKey]);
 
   return { recipients, loading };
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { ArrowLeft, Pause, Play } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -42,7 +43,17 @@ export function CampaignDetail({
   onBack: () => void;
 }) {
   const campaign = useDbCampaign(campaignId);
-  const { recipients, loading } = useCampaignRecipients(campaignId);
+  // Auto-refresh: a cada 8s recarrega contadores + destinatários enquanto a tela está
+  // aberta, para as métricas de abertura/clique (que chegam pelo webhook) subirem sozinhas.
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => {
+      void campaignActions.refresh(campaignId);
+      setTick((t) => t + 1);
+    }, 8000);
+    return () => clearInterval(iv);
+  }, [campaignId]);
+  const { recipients, loading } = useCampaignRecipients(campaignId, tick);
 
   if (!campaign) {
     return (
