@@ -67,6 +67,7 @@ export function CampaignComposer({
   const [previewOpen, setPreviewOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleAt, setScheduleAt] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const editorRef = useRef<Editor | null>(null);
   const insert = (text: string) => editorRef.current?.chain().focus().insertContent(text).run();
@@ -191,9 +192,7 @@ export function CampaignComposer({
             size="sm"
             className="h-8 gap-1.5 text-xs"
             disabled={saving}
-            onClick={() => {
-              if (window.confirm(`Enviar agora para ${audienceContacts.length} contato(s)?`)) void publish("now");
-            }}
+            onClick={() => setConfirmOpen(true)}
           >
             <Send className="size-3.5" /> Enviar agora
           </Button>
@@ -385,6 +384,35 @@ export function CampaignComposer({
               }}
             >
               Agendar para {audienceContacts.length} contato(s)
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirmação de envio */}
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Enviar campanha agora?</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs leading-relaxed text-slate-500">
+            A campanha vai ser enviada para{" "}
+            <strong className="text-slate-800">{audienceContacts.length} contato(s)</strong> elegível(is).
+            Essa ação não pode ser desfeita.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setConfirmOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              onClick={async () => {
+                setConfirmOpen(false);
+                await publish("now");
+              }}
+            >
+              <Send className="size-3.5" /> Enviar agora
             </Button>
           </DialogFooter>
         </DialogContent>

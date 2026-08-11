@@ -1,11 +1,21 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
 import Image from "@tiptap/extension-image";
 import { Bold, Heading2, Image as ImageIcon, Italic, Link2, List } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 const CONTENT_CLASS =
@@ -17,8 +27,8 @@ const CONTENT_CLASS =
 
 /**
  * Editor rico (Tiptap) → HTML. `onEditorReady` entrega a instância para o composer
- * inserir variáveis/trechos no cursor. `immediatelyRender:false` evita hydration
- * mismatch no App Router.
+ * inserir variáveis/trechos no cursor. Link e imagem usam modais próprios (não os
+ * prompts nativos do navegador). `immediatelyRender:false` evita hydration mismatch.
  */
 export function RichTextEditor({
   value,
@@ -44,6 +54,11 @@ export function RichTextEditor({
     editorProps: { attributes: { class: CONTENT_CLASS } },
   });
 
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [imgOpen, setImgOpen] = useState(false);
+  const [imgUrl, setImgUrl] = useState("");
+
   useEffect(() => {
     if (editor && onEditorReady) onEditorReady(editor);
   }, [editor, onEditorReady]);
@@ -52,47 +67,113 @@ export function RichTextEditor({
     return <div className="min-h-[300px] rounded-lg border bg-white" />;
   }
 
+  const applyLink = () => {
+    const url = linkUrl.trim();
+    if (url === "") editor.chain().focus().extendMarkRange("link").unsetLink().run();
+    else editor.chain().focus().extendMarkRange("link").setLink({ href: url }).run();
+    setLinkOpen(false);
+  };
+  const applyImage = () => {
+    const url = imgUrl.trim();
+    if (url) editor.chain().focus().setImage({ src: url }).run();
+    setImgOpen(false);
+  };
+
   return (
-    <div className="rounded-lg border bg-white">
-      <div className="flex flex-wrap items-center gap-1 border-b p-1.5">
-        <Tb active={editor.isActive("bold")} onClick={() => editor.chain().focus().toggleBold().run()}>
-          <Bold className="size-3.5" />
-        </Tb>
-        <Tb active={editor.isActive("italic")} onClick={() => editor.chain().focus().toggleItalic().run()}>
-          <Italic className="size-3.5" />
-        </Tb>
-        <Tb
-          active={editor.isActive("heading", { level: 2 })}
-          onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-        >
-          <Heading2 className="size-3.5" />
-        </Tb>
-        <Tb active={editor.isActive("bulletList")} onClick={() => editor.chain().focus().toggleBulletList().run()}>
-          <List className="size-3.5" />
-        </Tb>
-        <Tb
-          active={editor.isActive("link")}
-          onClick={() => {
-            const prev = editor.getAttributes("link").href as string | undefined;
-            const url = window.prompt("URL do link", prev ?? "https://");
-            if (url === null) return;
-            if (url === "") editor.chain().focus().extendMarkRange("link").unsetLink().run();
-            else editor.chain().focus().extendMarkRange("link").setLink({ href: url }).run();
-          }}
-        >
-          <Link2 className="size-3.5" />
-        </Tb>
-        <Tb
-          onClick={() => {
-            const url = window.prompt("URL da imagem", "https://");
-            if (url) editor.chain().focus().setImage({ src: url }).run();
-          }}
-        >
-          <ImageIcon className="size-3.5" />
-        </Tb>
+    <>
+      <div className="rounded-lg border bg-white">
+        <div className="flex flex-wrap items-center gap-1 border-b p-1.5">
+          <Tb active={editor.isActive("bold")} onClick={() => editor.chain().focus().toggleBold().run()}>
+            <Bold className="size-3.5" />
+          </Tb>
+          <Tb active={editor.isActive("italic")} onClick={() => editor.chain().focus().toggleItalic().run()}>
+            <Italic className="size-3.5" />
+          </Tb>
+          <Tb
+            active={editor.isActive("heading", { level: 2 })}
+            onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+          >
+            <Heading2 className="size-3.5" />
+          </Tb>
+          <Tb active={editor.isActive("bulletList")} onClick={() => editor.chain().focus().toggleBulletList().run()}>
+            <List className="size-3.5" />
+          </Tb>
+          <Tb
+            active={editor.isActive("link")}
+            onClick={() => {
+              setLinkUrl((editor.getAttributes("link").href as string) ?? "https://");
+              setLinkOpen(true);
+            }}
+          >
+            <Link2 className="size-3.5" />
+          </Tb>
+          <Tb
+            onClick={() => {
+              setImgUrl("https://");
+              setImgOpen(true);
+            }}
+          >
+            <ImageIcon className="size-3.5" />
+          </Tb>
+        </div>
+        <EditorContent editor={editor} />
       </div>
-      <EditorContent editor={editor} />
-    </div>
+
+      <Dialog open={linkOpen} onOpenChange={setLinkOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Inserir link</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label className="text-xs">URL</Label>
+            <Input
+              value={linkUrl}
+              onChange={(e) => setLinkUrl(e.target.value)}
+              className="h-8 text-xs"
+              placeholder="https://…"
+              autoFocus
+              onKeyDown={(e) => e.key === "Enter" && applyLink()}
+            />
+            <p className="text-[11px] text-slate-400">Deixe vazio e clique Aplicar para remover o link.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setLinkOpen(false)}>
+              Cancelar
+            </Button>
+            <Button size="sm" className="h-8 text-xs" onClick={applyLink}>
+              Aplicar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={imgOpen} onOpenChange={setImgOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Inserir imagem</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label className="text-xs">URL da imagem</Label>
+            <Input
+              value={imgUrl}
+              onChange={(e) => setImgUrl(e.target.value)}
+              className="h-8 text-xs"
+              placeholder="https://…"
+              autoFocus
+              onKeyDown={(e) => e.key === "Enter" && applyImage()}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setImgOpen(false)}>
+              Cancelar
+            </Button>
+            <Button size="sm" className="h-8 text-xs" onClick={applyImage}>
+              Inserir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
