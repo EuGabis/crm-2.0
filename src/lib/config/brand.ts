@@ -13,5 +13,5 @@ export const brand = {
 export const emailBrand = {
   name: "Lito Aviation Academy",
   shortName: "Lito",
-  address: "Lito Aviation Academy · <rua, número, cidade/UF> · Brasil",
+  address: "Lito Aviation Academy · Rua Brás Cubas, 231 · Vila Lanzara, Guarulhos/SP · CEP 07115-080",
 } as const;
