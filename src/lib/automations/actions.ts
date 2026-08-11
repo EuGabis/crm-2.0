@@ -1,6 +1,7 @@
 import { Resend } from "resend";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { brand } from "@/lib/config/brand";
+import { senderAddress } from "@/lib/email/sender";
 import type { ActionResult, RunContext, Step } from "./types";
 
 type Db = ReturnType<typeof createAdminClient>;
@@ -309,7 +310,7 @@ export async function runAction(step: Step, ctx: RunContext): Promise<ActionResu
       try {
         const resend = new Resend(apiKey);
         const { error } = await resend.emails.send({
-          from: process.env.EMAIL_FROM ?? `${brand.name} <nao-responder@news.litoaviation.com>`,
+          from: senderAddress(),
           to: contact.email,
           subject,
           html: body.includes("<") ? body : `<p>${body.replace(/\n/g, "<br />")}</p>`,

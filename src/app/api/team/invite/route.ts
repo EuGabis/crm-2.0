@@ -1,7 +1,7 @@
 import { Resend } from "resend";
 import { createClient } from "@/lib/supabase/server";
 import { renderInviteEmail } from "@/lib/email/invite-template";
-import { brand } from "@/lib/config/brand";
+import { senderAddress } from "@/lib/email/sender";
 
 interface InviteBody {
   email?: string;
@@ -109,7 +109,7 @@ export async function POST(request: Request) {
   try {
     const resend = new Resend(apiKey);
     const { error: sendError } = await resend.emails.send({
-      from: process.env.EMAIL_FROM ?? `${brand.name} <nao-responder@news.litoaviation.com>`,
+      from: senderAddress(),
       to: email,
       subject,
       html,
