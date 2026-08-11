@@ -395,6 +395,13 @@ os módulos ainda não migrados continuam importando dos repos mock em
   conversa por contato+canal, trechos reais usados no composer, estatísticas
   calculadas, badge "Ao vivo". Repo: `db/conversations.ts`. Ações manuais e links
   de acionamento = empty states (dependem de Automações real).
+  Composer 100% funcional: emoji, tag no contato, respostas rápidas/trechos,
+  excluir conversa (modal) e busca na lista. **Anexos e áudio reais** (migração
+  0019): bucket privado `conversation-media` (path `{location_id}/{conversation_id}/
+  {uuid}.{ext}`, policies no padrão membership), envio de imagem/PDF/DOCX (15 MB) e
+  gravação por `MediaRecorder`; exibição via URL assinada (`conversationActions.
+  sendMedia`/`mediaUrl`). **Migração livre a partir de agora: 0020** (Pagamentos foi
+  até 0018, Conversas usou 0019).
 - ✅ Backend F2e: **Dashboard** com widgets calculando sobre dados reais
   (adapters `useDbPipelines/useDbOpportunities/useDbPipeline` em `db/pipeline.ts`).
 - ✅ Backend F2f: módulo **Calendários** real — compromissos do banco (repo
