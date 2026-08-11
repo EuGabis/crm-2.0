@@ -1,4 +1,4 @@
-import { brand } from "@/lib/config/brand";
+import { brand, emailBrand } from "@/lib/config/brand";
 
 export interface InviteEmailData {
   /** Nome de quem convidou (ex.: "Gabriel Pereira") */
@@ -118,7 +118,7 @@ export function renderInviteEmail(data: InviteEmailData): { subject: string; htm
                   Se não esperava por isso, pode ignorar esta mensagem.
                 </p>
                 <p style="margin:6px 0 0;color:#cbd5e1;font-size:11px;line-height:1.6;">
-                  ${brand.address}
+                  ${emailBrand.address}
                 </p>
               </td>
             </tr>

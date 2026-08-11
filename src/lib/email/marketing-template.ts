@@ -1,4 +1,4 @@
-import { brand } from "@/lib/config/brand";
+import { emailBrand } from "@/lib/config/brand";
 
 /**
  * Envolve o corpo HTML de uma campanha (saída do editor rico) no shell da marca,
@@ -39,10 +39,10 @@ export function renderCampaignEmail(opts: {
                   <tr>
                     <td style="padding-right:10px;">
                       <div style="width:32px;height:32px;background-color:${accentColor};border-radius:9px;color:#ffffff;font-size:16px;font-weight:800;line-height:32px;text-align:center;">
-                        ${brand.shortName[0]}
+                        ${emailBrand.shortName[0]}
                       </div>
                     </td>
-                    <td style="color:#ffffff;font-size:16px;font-weight:700;">${brand.name}</td>
+                    <td style="color:#ffffff;font-size:16px;font-weight:700;">${emailBrand.name}</td>
                   </tr>
                 </table>
               </td>
@@ -55,23 +55,23 @@ export function renderCampaignEmail(opts: {
             <tr>
               <td style="background-color:#f8fafc;padding:18px 32px;border-top:1px solid #e2e8f0;">
                 <p style="margin:0;color:#94a3b8;font-size:11px;line-height:1.6;">
-                  Você recebeu este e-mail do ${brand.name}. Se não quiser mais receber nossas
+                  Você recebeu este e-mail do ${emailBrand.name}. Se não quiser mais receber nossas
                   campanhas, <a href="${unsubscribeUrl}" style="color:#64748b;text-decoration:underline;">descadastre-se aqui</a>.
                 </p>
                 <p style="margin:6px 0 0;color:#cbd5e1;font-size:11px;line-height:1.6;">
-                  ${brand.address}
+                  ${emailBrand.address}
                 </p>
               </td>
             </tr>
           </table>
-          <p style="margin:16px 0 0;color:#94a3b8;font-size:11px;">${brand.name} · ${brand.tagline}</p>
+          <p style="margin:16px 0 0;color:#94a3b8;font-size:11px;">${emailBrand.name}</p>
         </td>
       </tr>
     </table>
   </body>
 </html>`;
 
-  const text = `${stripHtml(bodyHtml)}\n\n—\nPara descadastrar: ${unsubscribeUrl}\n${brand.address}`;
+  const text = `${stripHtml(bodyHtml)}\n\n—\nPara descadastrar: ${unsubscribeUrl}\n${emailBrand.address}`;
 
   return { html, text };
 }
