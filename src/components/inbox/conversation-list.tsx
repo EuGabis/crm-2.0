@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowUpDown, Plus, Star } from "lucide-react";
+import { ArrowUpDown, Plus, Search, Star } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,6 +49,7 @@ export function ConversationList({
 }) {
   const [filter, setFilter] = useState<ConversationFilter>("all");
   const [sort, setSort] = useState(SORT_OPTIONS[0]);
+  const [query, setQuery] = useState("");
   const conversations = useConversations(filter);
   const { contacts } = useDbContacts();
   const realtime = useRealtimeStatus();
@@ -59,6 +61,15 @@ export function ConversationList({
       : sort === "Mais antigas · Todas as mensagens" || sort === "Mais antigas · Mensagens manuais"
         ? [...conversations].reverse()
         : conversations;
+
+  const q = query.trim().toLowerCase();
+  const visible = q
+    ? sorted.filter((conv) => {
+        const c = contacts.find((x) => x.id === conv.contactId);
+        const name = c ? `${c.firstName} ${c.lastName}`.toLowerCase() : "";
+        return name.includes(q) || (conv.lastMessagePreview ?? "").toLowerCase().includes(q);
+      })
+    : sorted;
 
   return (
     <div className="flex h-full w-[300px] shrink-0 flex-col border-r bg-white">
@@ -125,8 +136,19 @@ export function ConversationList({
           </button>
         ))}
       </div>
+      <div className="border-b px-2 py-1.5">
+        <div className="flex items-center gap-1.5 rounded-md border px-2">
+          <Search className="size-3.5 text-slate-400" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Buscar por nome ou mensagem"
+            className="h-7 border-0 p-0 text-xs shadow-none focus-visible:ring-0"
+          />
+        </div>
+      </div>
       <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-width:thin]">
-        {sorted.map((conv) => {
+        {visible.map((conv) => {
           const contact = contacts.find((c) => c.id === conv.contactId);
           if (!contact) return null;
           return (

@@ -90,7 +90,7 @@ export default function ConversasPage() {
           />
           {selectedId ? (
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <Thread conversationId={selectedId} />
+              <Thread conversationId={selectedId} onDeleted={() => setSelectedId(null)} />
               <Composer conversationId={selectedId} />
             </div>
           ) : (

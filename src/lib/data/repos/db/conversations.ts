@@ -241,6 +241,21 @@ export const conversationActions = {
     });
   },
 
+  /** Exclui a conversa e todas as mensagens dela. */
+  async remove(conversationId: string): Promise<boolean> {
+    const supabase = createClient();
+    // remove mensagens primeiro (cobre o caso sem ON DELETE CASCADE)
+    await supabase.from("messages").delete().eq("conversation_id", conversationId);
+    const { error } = await supabase.from("conversations").delete().eq("id", conversationId);
+    if (error) return false;
+    const s = useConvStore.getState();
+    s.patch({
+      conversations: s.conversations.filter((c) => c.id !== conversationId),
+      messages: s.messages.filter((m) => m.conversationId !== conversationId),
+    });
+    return true;
+  },
+
   /** Cria (ou reaproveita) a conversa de um contato num canal. Retorna o id. */
   async open(contactId: string, channel: Channel): Promise<string | null> {
     const s = useConvStore.getState();

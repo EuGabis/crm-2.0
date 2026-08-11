@@ -14,6 +14,14 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { SlaBadge } from "@/components/shared/sla-badge";
 import { contactName } from "@/lib/data/repos/contacts";
 import { useDbContact } from "@/lib/data/repos/db/contacts";
@@ -127,11 +135,18 @@ function MessageBubble({ message }: { message: Message }) {
   );
 }
 
-export function Thread({ conversationId }: { conversationId: string }) {
+export function Thread({
+  conversationId,
+  onDeleted,
+}: {
+  conversationId: string;
+  onDeleted?: () => void;
+}) {
   const conversation = useConversation(conversationId);
   const { contact } = useDbContact(conversation?.contactId ?? null);
   const messages = useMessages(conversationId);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -176,11 +191,45 @@ export function Thread({ conversationId }: { conversationId: string }) {
             />
           </button>
           <button
-            onClick={() => toast.info("Exclusão de conversas em breve")}
-            className="flex size-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"
+            onClick={() => setConfirmOpen(true)}
+            title="Excluir conversa"
+            className="flex size-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-rose-600"
           >
             <Trash2 className="size-4" />
           </button>
+          <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+            <DialogContent className="sm:max-w-sm">
+              <DialogHeader>
+                <DialogTitle>Excluir conversa?</DialogTitle>
+              </DialogHeader>
+              <p className="text-xs leading-relaxed text-slate-500">
+                A conversa com <strong className="text-slate-800">{contactName(contact)}</strong> e todas as
+                mensagens dela serão removidas. Essa ação não pode ser desfeita.
+              </p>
+              <DialogFooter>
+                <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setConfirmOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={async () => {
+                    const ok = await conversationActions.remove(conversation.id);
+                    setConfirmOpen(false);
+                    if (ok) {
+                      toast.success("Conversa excluída");
+                      onDeleted?.();
+                    } else {
+                      toast.error("Não foi possível excluir");
+                    }
+                  }}
+                >
+                  Excluir
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-slate-50 p-4 [scrollbar-width:thin]">
