@@ -224,6 +224,21 @@ export const campaignActions = {
     return true;
   },
 
+  /** Cancela o agendamento: volta a campanha para rascunho e limpa a data.
+   *  O motor só processa status 'sending', então uma agendada cancelada não dispara. */
+  async cancelSchedule(id: string): Promise<boolean> {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("email_campaigns")
+      .update({ status: "draft", scheduled_at: null, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select()
+      .single();
+    if (error || !data) return false;
+    useCampaignStore.getState().upsert(mapCampaign(data));
+    return true;
+  },
+
   /** Recarrega uma campanha do banco (após publicar/enviar via rota). */
   async refresh(id: string): Promise<void> {
     const supabase = createClient();

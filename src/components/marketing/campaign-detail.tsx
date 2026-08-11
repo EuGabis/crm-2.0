@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowLeft, Pause, Play } from "lucide-react";
+import { ArrowLeft, Ban, Pause, Play } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -101,6 +101,24 @@ export function CampaignDetail({
             }}
           >
             <Play className="size-3.5" /> Retomar
+          </Button>
+        )}
+        {campaign.status === "scheduled" && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={async () => {
+              const ok = await campaignActions.cancelSchedule(campaign.id);
+              if (ok) {
+                toast.success("Agendamento cancelado (voltou para rascunho)");
+                onBack();
+              } else {
+                toast.error("Não foi possível cancelar");
+              }
+            }}
+          >
+            <Ban className="size-3.5" /> Cancelar agendamento
           </Button>
         )}
       </div>

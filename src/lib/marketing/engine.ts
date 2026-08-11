@@ -49,29 +49,36 @@ export async function processDueCampaigns(): Promise<{
   let errorTotal = 0;
 
   for (const camp of campaigns as any[]) {
-    const { data: recips } = await db
-      .from("email_campaign_recipients")
-      .select("id, contact_id, email, contacts(first_name, last_name, custom_fields)")
-      .eq("campaign_id", camp.id)
-      .eq("status", "pending")
-      .order("created_at", { ascending: true })
-      .limit(BATCH);
+    // Claim atômico do lote (FOR UPDATE SKIP LOCKED): dois ticks nunca pegam o mesmo
+    // destinatário → sem envio duplicado. Só claima se a campanha ainda estiver 'sending'.
+    const { data: recips } = await db.rpc("claim_recipients", {
+      p_campaign_id: camp.id,
+      p_limit: BATCH,
+    });
 
     if (!recips?.length) {
-      await db
-        .from("email_campaigns")
-        .update({ status: "sent", updated_at: new Date().toISOString() })
-        .eq("id", camp.id);
+      // Nada a claimar agora. Só finaliza se NÃO sobrou nenhum pendente (evita marcar
+      // 'sent' enquanto outro tick ainda está processando um lote reivindicado).
+      const { count } = await db
+        .from("email_campaign_recipients")
+        .select("id", { count: "exact", head: true })
+        .eq("campaign_id", camp.id)
+        .eq("status", "pending");
+      if ((count ?? 0) === 0) {
+        await db
+          .from("email_campaigns")
+          .update({ status: "sent", updated_at: new Date().toISOString() })
+          .eq("id", camp.id);
+      }
       continue;
     }
     processed++;
 
     const payloads = (recips as any[]).map((r) => {
-      const contact = r.contacts ?? {};
       const vars: Record<string, string> = {
-        nome: [contact.first_name, contact.last_name].filter(Boolean).join(" "),
+        nome: [r.first_name, r.last_name].filter(Boolean).join(" "),
         email: r.email ?? "",
-        ...flattenCustom(contact.custom_fields),
+        ...flattenCustom(r.custom_fields),
       };
       const unsub = unsubscribeUrl(r.contact_id, camp.id);
       const bodyHtml = renderTemplate(camp.body_html ?? "", vars);
