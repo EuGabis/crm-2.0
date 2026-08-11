@@ -122,17 +122,11 @@ function mapPaymentSubscription(row: any): PaymentSubscription {
 const MAX_EVENTS = 100;
 
 /**
- * Insere mantendo a ordem (mais recente primeiro pela chave de data) — um
- * INSERT/UPDATE em tempo real chega fora de ordem em relação ao que já está
- * na tela (ex.: o sync ainda preenchendo o backfill grava vendas antigas
- * depois de vendas novas). Um prepend simples quebrava a ordenação.
+ * Timer do refetch com debounce (ver comentário na assinatura do canal,
+ * dentro de `load()`). Módulo tem só uma store/canal, então uma variável
+ * aqui fora já basta — não precisa entrar no estado do Zustand.
  */
-function insertSorted<T>(list: T[], item: T, key: (x: T) => string | null): T[] {
-  const time = (v: string | null) => (v ? new Date(v).getTime() : -Infinity);
-  const t = time(key(item));
-  const idx = list.findIndex((x) => time(key(x)) < t);
-  return idx === -1 ? [...list, item] : [...list.slice(0, idx), item, ...list.slice(idx)];
-}
+let refetchTimer: ReturnType<typeof setTimeout> | null = null;
 
 interface PaymentsState {
   loaded: boolean;
@@ -195,56 +189,47 @@ export const usePaymentsStore = create<PaymentsState>((set, get) => ({
       subscriptions: (subscriptions ?? []).map(mapPaymentSubscription),
     });
 
+    // Reconsulta as duas tabelas com o mesmo ORDER BY do carregamento inicial
+    // — em vez de tentar remendar o array em memória a cada evento. O
+    // backfill histórico insere/atualiza muitas vendas antigas em rajada
+    // (ver /api/integrations/guru/sync); remendar posição por posição a cada
+    // uma dessas linhas deixava a ordem visível instável enquanto ele rodava.
+    // Reconsultar sempre é simples, sempre correto (é a mesma query, a mesma
+    // ordenação) e o debounce evita bater no banco a cada linha da rajada.
+    const refetch = () => {
+      if (refetchTimer) clearTimeout(refetchTimer);
+      refetchTimer = setTimeout(async () => {
+        const [{ data: freshEvents }, { data: freshSubs }] = await Promise.all([
+          supabase
+            .from("payment_events")
+            .select("*")
+            .eq("location_id", locationId)
+            .order("guru_created_at", { ascending: false, nullsFirst: false })
+            .limit(MAX_EVENTS),
+          supabase
+            .from("payment_subscriptions")
+            .select("*")
+            .eq("location_id", locationId)
+            .order("guru_updated_at", { ascending: false, nullsFirst: false }),
+        ]);
+        set({
+          events: (freshEvents ?? []).map(mapPaymentEvent),
+          subscriptions: (freshSubs ?? []).map(mapPaymentSubscription),
+        });
+      }, 800);
+    };
+
     supabase
       .channel("lito-pagamentos")
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "payment_events" },
-        (payload) => {
-          const event = mapPaymentEvent(payload.new);
-          const s = get();
-          if (s.events.some((e) => e.id === event.id)) return;
-          set({
-            events: insertSorted(s.events, event, (e) => e.guruCreatedAt).slice(0, MAX_EVENTS),
-          });
-        }
+        { event: "*", schema: "public", table: "payment_events" },
+        refetch
       )
       .on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "payment_events" },
-        (payload) => {
-          const event = mapPaymentEvent(payload.new);
-          const s = get();
-          set({
-            events: s.events.some((e) => e.id === event.id)
-              ? s.events.map((e) => (e.id === event.id ? event : e))
-              : [event, ...s.events].slice(0, MAX_EVENTS),
-          });
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "payment_subscriptions" },
-        (payload) => {
-          const sub = mapPaymentSubscription(payload.new);
-          const s = get();
-          if (s.subscriptions.some((x) => x.id === sub.id)) return;
-          set({
-            subscriptions: insertSorted(s.subscriptions, sub, (x) => x.guruUpdatedAt),
-          });
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "payment_subscriptions" },
-        (payload) => {
-          const sub = mapPaymentSubscription(payload.new);
-          const s = get();
-          const withoutOld = s.subscriptions.filter((x) => x.id !== sub.id);
-          set({
-            subscriptions: insertSorted(withoutOld, sub, (x) => x.guruUpdatedAt),
-          });
-        }
+        { event: "*", schema: "public", table: "payment_subscriptions" },
+        refetch
       )
       .subscribe((status) => {
         if (status === "SUBSCRIBED") set({ realtime: "on" });
