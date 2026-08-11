@@ -52,6 +52,7 @@ export async function POST(
     subject: (camp as any).subject ?? "",
     bodyHtml: renderTemplate((camp as any).body_html ?? "", vars),
     unsubscribeUrl: unsub,
+    accent: (camp as any).accent_color ?? undefined,
   });
 
   const resend = new Resend(apiKey);

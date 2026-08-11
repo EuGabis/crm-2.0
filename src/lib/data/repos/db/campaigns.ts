@@ -17,6 +17,7 @@ const mapCampaign = (r: any): Campaign => ({
   bodyHtml: r.body_html ?? "",
   bodyText: r.body_text ?? "",
   audience: (r.audience ?? { type: "all", value: null }) as Audience,
+  accentColor: r.accent_color ?? null,
   status: r.status,
   scheduledAt: r.scheduled_at,
   total: r.total ?? 0,
@@ -136,6 +137,7 @@ export interface CampaignInput {
   bodyHtml: string;
   bodyText: string;
   audience: Audience;
+  accentColor?: string | null;
 }
 
 export const campaignActions = {
@@ -154,6 +156,7 @@ export const campaignActions = {
         body_html: input.bodyHtml,
         body_text: input.bodyText,
         audience: input.audience,
+        accent_color: input.accentColor ?? null,
       })
       .select()
       .single();
@@ -172,6 +175,7 @@ export const campaignActions = {
     if (patch.bodyHtml !== undefined) row.body_html = patch.bodyHtml;
     if (patch.bodyText !== undefined) row.body_text = patch.bodyText;
     if (patch.audience !== undefined) row.audience = patch.audience;
+    if (patch.accentColor !== undefined) row.accent_color = patch.accentColor;
     const { data, error } = await supabase
       .from("email_campaigns")
       .update(row)

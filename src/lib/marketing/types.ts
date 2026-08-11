@@ -23,6 +23,7 @@ export interface Campaign {
   bodyHtml: string;
   bodyText: string;
   audience: Audience;
+  accentColor: string | null;
   status: CampaignStatus;
   scheduledAt: string | null;
   total: number;

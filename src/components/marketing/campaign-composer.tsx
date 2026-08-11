@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { useDbContacts } from "@/lib/data/repos/db/contacts";
 import { useContactsModule } from "@/lib/data/repos/db/contacts-module";
+import { useBrandBoards } from "@/lib/data/repos/db/brand-boards";
 import { campaignActions, useDbCampaign } from "@/lib/data/repos/db/campaigns";
 import { renderCampaignEmail } from "@/lib/email/marketing-template";
 import { matchesConditions } from "@/components/contacts/module-tabs";
@@ -52,6 +53,7 @@ export function CampaignComposer({
   const existing = useDbCampaign(campaignId ?? "");
   const { contacts } = useDbContacts();
   const { smartLists, fields } = useContactsModule();
+  const { boards } = useBrandBoards();
 
   const [id, setId] = useState<string | null>(campaignId);
   const [name, setName] = useState(existing?.name ?? "Nova campanha");
@@ -59,6 +61,8 @@ export function CampaignComposer({
   const [replyTo, setReplyTo] = useState(existing?.replyTo ?? "");
   const [bodyHtml, setBodyHtml] = useState(existing?.bodyHtml ?? "<p>Escreva aqui…</p>");
   const [audience, setAudience] = useState<Audience>(existing?.audience ?? { type: "all", value: null });
+  const [brandId, setBrandId] = useState("");
+  const [accentColor, setAccentColor] = useState<string | null>(existing?.accentColor ?? null);
   const [saving, setSaving] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -97,8 +101,9 @@ export function CampaignComposer({
       subject: fillTemplate(subject, vars),
       bodyHtml: fillTemplate(bodyHtml, vars),
       unsubscribeUrl: "#",
+      accent: accentColor ?? undefined,
     });
-  }, [subject, bodyHtml, audienceContacts, contacts]);
+  }, [subject, bodyHtml, audienceContacts, contacts, accentColor]);
 
   async function ensureSaved(): Promise<string | null> {
     setSaving(true);
@@ -110,6 +115,7 @@ export function CampaignComposer({
         bodyHtml,
         bodyText: "",
         audience,
+        accentColor,
       };
       if (id) {
         const ok = await campaignActions.update(id, payload);
@@ -250,6 +256,39 @@ export function CampaignComposer({
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="rounded-xl border bg-white p-4">
+            <p className="mb-2 text-xs font-semibold text-slate-800">Marca (cores)</p>
+            <Select
+              value={brandId || "__default__"}
+              onValueChange={(v) => {
+                if (!v || v === "__default__") {
+                  setBrandId("");
+                  setAccentColor(null);
+                  return;
+                }
+                setBrandId(v);
+                setAccentColor(boards.find((b) => b.id === v)?.palette[0] ?? null);
+              }}
+            >
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue>{boards.find((b) => b.id === brandId)?.name ?? "Padrão (Lito)"}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__default__" className="text-xs">Padrão (Lito)</SelectItem>
+                {boards.map((b) => (
+                  <SelectItem key={b.id} value={b.id} className="text-xs">{b.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="mt-2 flex items-center gap-2">
+              <span className="inline-block size-5 rounded border" style={{ backgroundColor: accentColor ?? "#6366f1" }} />
+              <span className="text-[11px] text-slate-500">{accentColor ?? "#6366f1 (padrão)"}</span>
+            </div>
+            {boards.length === 0 && (
+              <p className="mt-1 text-[11px] text-slate-400">Crie marcas em Marketing → Brand Boards.</p>
+            )}
           </div>
 
           <div className="rounded-xl border bg-white p-4">

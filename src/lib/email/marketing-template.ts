@@ -14,8 +14,12 @@ export function renderCampaignEmail(opts: {
   subject: string;
   bodyHtml: string;
   unsubscribeUrl: string;
+  accent?: string;
 }): { html: string; text: string } {
   const { subject, bodyHtml, unsubscribeUrl } = opts;
+  const accentColor = opts.accent || INDIGO;
+  // Cor da marca nos links do corpo (o editor gera <a> sem cor inline).
+  const body = bodyHtml.replace(/<a\b/gi, `<a style="color:${accentColor};text-decoration:underline"`);
 
   const html = `<!doctype html>
 <html lang="pt-BR">
@@ -28,13 +32,13 @@ export function renderCampaignEmail(opts: {
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f5f9;padding:32px 16px;">
       <tr>
         <td align="center">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background-color:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(15,23,42,0.08);">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background-color:#ffffff;border-radius:16px;overflow:hidden;border-top:4px solid ${accentColor};box-shadow:0 1px 3px rgba(15,23,42,0.08);">
             <tr>
               <td style="background-color:${GRAPHITE};padding:22px 32px;">
                 <table role="presentation" cellpadding="0" cellspacing="0">
                   <tr>
                     <td style="padding-right:10px;">
-                      <div style="width:32px;height:32px;background-color:${INDIGO};border-radius:9px;color:#ffffff;font-size:16px;font-weight:800;line-height:32px;text-align:center;">
+                      <div style="width:32px;height:32px;background-color:${accentColor};border-radius:9px;color:#ffffff;font-size:16px;font-weight:800;line-height:32px;text-align:center;">
                         ${brand.shortName[0]}
                       </div>
                     </td>
@@ -45,7 +49,7 @@ export function renderCampaignEmail(opts: {
             </tr>
             <tr>
               <td style="padding:32px;color:#334155;font-size:15px;line-height:1.6;">
-                ${bodyHtml}
+                ${body}
               </td>
             </tr>
             <tr>

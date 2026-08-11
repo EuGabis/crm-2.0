@@ -79,6 +79,7 @@ export async function processDueCampaigns(): Promise<{
         subject: camp.subject ?? "",
         bodyHtml,
         unsubscribeUrl: unsub,
+        accent: camp.accent_color ?? undefined,
       });
       return {
         from: camp.from_email,
