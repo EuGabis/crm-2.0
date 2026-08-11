@@ -35,7 +35,14 @@ const mapMessage = (r: any): Message => ({
   at: r.created_at,
   internal: r.internal || undefined,
   scheduledFor: r.scheduled_for ?? undefined,
+  mediaPath: r.media_path ?? undefined,
+  mediaName: r.media_name ?? undefined,
+  mediaMime: r.media_mime ?? undefined,
+  mediaSize: r.media_size ?? undefined,
 });
+
+export const MEDIA_BUCKET = "conversation-media";
+export const MAX_MEDIA_BYTES = 15 * 1024 * 1024; // 15 MB
 
 interface ConvState {
   loaded: boolean;
@@ -212,6 +219,80 @@ export const conversationActions = {
       ),
     });
     return true;
+  },
+
+  /**
+   * Envia uma mídia (imagem, arquivo ou áudio): sobe o binário para o bucket
+   * privado e cria a mensagem com os metadados. `duration` só para áudio.
+   */
+  async sendMedia(
+    conversationId: string,
+    opts: { file: File; kind: "image" | "file" | "audio"; channel: Channel; duration?: string }
+  ): Promise<{ ok: boolean; error?: string }> {
+    const location = loc();
+    if (!location) return { ok: false, error: "Empresa não encontrada" };
+    const { file, kind, channel, duration } = opts;
+    if (file.size > MAX_MEDIA_BYTES) return { ok: false, error: "Arquivo maior que 15 MB" };
+
+    const supabase = createClient();
+    const ext =
+      (file.name.includes(".") ? file.name.split(".").pop() : file.type.split("/")[1]) || "bin";
+    const path = `${location}/${conversationId}/${crypto.randomUUID()}.${ext.toLowerCase()}`;
+
+    const { error: upErr } = await supabase.storage
+      .from(MEDIA_BUCKET)
+      .upload(path, file, { contentType: file.type || undefined, upsert: false });
+    if (upErr) return { ok: false, error: `Falha no upload: ${upErr.message}` };
+
+    const body = kind === "audio" ? duration ?? "" : kind === "file" ? file.name : "";
+    const { data, error } = await supabase
+      .from("messages")
+      .insert({
+        location_id: location,
+        conversation_id: conversationId,
+        direction: "out",
+        type: kind,
+        channel,
+        body,
+        media_path: path,
+        media_name: file.name,
+        media_mime: file.type || null,
+        media_size: file.size,
+      })
+      .select()
+      .single();
+
+    if (error || !data) {
+      await supabase.storage.from(MEDIA_BUCKET).remove([path]); // não deixa binário órfão
+      return { ok: false, error: error?.message ?? "Não foi possível enviar a mídia" };
+    }
+
+    const preview =
+      kind === "image" ? "📷 Imagem" : kind === "audio" ? "🎤 Áudio" : `📎 ${file.name}`;
+    await supabase
+      .from("conversations")
+      .update({ last_message_at: data.created_at, last_message_preview: preview, sla_days: 0 })
+      .eq("id", conversationId);
+
+    const s = useConvStore.getState();
+    if (!s.messages.some((m) => m.id === data.id)) {
+      s.patch({ messages: [...s.messages, mapMessage(data)] });
+    }
+    s.patch({
+      conversations: s.conversations.map((c) =>
+        c.id === conversationId
+          ? { ...c, lastMessageAt: data.created_at, lastMessagePreview: preview, slaDays: 0 }
+          : c
+      ),
+    });
+    return { ok: true };
+  },
+
+  /** URL assinada temporária (bucket é privado) para exibir/baixar a mídia. */
+  async mediaUrl(path: string, expiresIn = 3600): Promise<string | null> {
+    const supabase = createClient();
+    const { data } = await supabase.storage.from(MEDIA_BUCKET).createSignedUrl(path, expiresIn);
+    return data?.signedUrl ?? null;
   },
 
   async markRead(conversationId: string): Promise<void> {

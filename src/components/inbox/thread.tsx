@@ -6,6 +6,7 @@ import { ptBR } from "date-fns/locale";
 import {
   CalendarDays,
   Download,
+  FileText,
   Pause,
   Phone,
   Play,
@@ -33,29 +34,64 @@ import {
 import type { Message } from "@/lib/data/types";
 import { cn } from "@/lib/utils";
 
-function AudioPlayer({ duration }: { duration: string }) {
-  const [playing, setPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
+function fmtBytes(n?: number) {
+  if (!n) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
 
+/** Busca a URL assinada da mídia (bucket privado) uma vez por mensagem. */
+function useMediaUrl(path?: string) {
+  const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (!playing) return;
-    const t = setInterval(() => {
-      setProgress((p) => {
-        if (p >= 100) {
-          setPlaying(false);
-          return 0;
-        }
-        return p + 4;
+    let active = true;
+    if (path) {
+      void conversationActions.mediaUrl(path).then((u) => {
+        if (active) setUrl(u);
       });
-    }, 300);
-    return () => clearInterval(t);
-  }, [playing]);
+    }
+    return () => {
+      active = false;
+    };
+  }, [path]);
+  return url;
+}
 
+/** Player de áudio real (elemento <audio>) com a mesma UI de onda. */
+function AudioPlayer({ url, duration, out }: { url: string | null; duration?: string; out: boolean }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [pct, setPct] = useState(0);
   return (
     <div className="flex items-center gap-2">
+      <audio
+        ref={audioRef}
+        src={url ?? undefined}
+        preload="none"
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => {
+          setPlaying(false);
+          setPct(0);
+        }}
+        onTimeUpdate={(e) => {
+          const a = e.currentTarget;
+          if (a.duration) setPct((a.currentTime / a.duration) * 100);
+        }}
+      />
       <button
-        onClick={() => setPlaying((p) => !p)}
-        className="flex size-7 shrink-0 items-center justify-center rounded-full bg-indigo-500 text-white"
+        onClick={() => {
+          const a = audioRef.current;
+          if (!a) return;
+          if (a.paused) void a.play();
+          else a.pause();
+        }}
+        disabled={!url}
+        className={cn(
+          "flex size-7 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-50",
+          out ? "bg-white/25" : "bg-indigo-500"
+        )}
       >
         {playing ? <Pause className="size-3.5" /> : <Play className="ml-0.5 size-3.5" />}
       </button>
@@ -65,17 +101,69 @@ function AudioPlayer({ duration }: { duration: string }) {
             key={i}
             className={cn(
               "w-1 rounded-full",
-              (i / 24) * 100 <= progress ? "bg-indigo-500" : "bg-slate-300"
+              (i / 24) * 100 <= pct ? (out ? "bg-white" : "bg-indigo-500") : out ? "bg-white/40" : "bg-slate-300"
             )}
             style={{ height: 4 + ((i * 7) % 16) }}
           />
         ))}
       </div>
-      <span className="text-[10px] text-slate-500">{duration}</span>
-      <button className="text-slate-400 hover:text-slate-600">
-        <Download className="size-3.5" />
-      </button>
+      {duration && <span className={cn("text-[10px]", out ? "text-indigo-100" : "text-slate-500")}>{duration}</span>}
     </div>
+  );
+}
+
+/** Conteúdo de mensagens de mídia: imagem, áudio ou arquivo. */
+function MediaContent({ message, out }: { message: Message; out: boolean }) {
+  const url = useMediaUrl(message.mediaPath);
+
+  if (message.type === "image") {
+    return url ? (
+      <a href={url} target="_blank" rel="noreferrer" className="block">
+        <img
+          src={url}
+          alt={message.mediaName ?? "imagem"}
+          className="max-h-64 max-w-full rounded-lg object-cover"
+        />
+      </a>
+    ) : (
+      <div className="h-40 w-52 animate-pulse rounded-lg bg-black/10" />
+    );
+  }
+
+  if (message.type === "audio") {
+    return <AudioPlayer url={url} duration={message.body || undefined} out={out} />;
+  }
+
+  // file
+  return (
+    <a
+      href={url ?? undefined}
+      target="_blank"
+      rel="noreferrer"
+      download={message.mediaName}
+      className={cn(
+        "flex items-center gap-2.5 rounded-lg px-1 py-0.5",
+        out ? "text-white" : "text-slate-700"
+      )}
+    >
+      <span
+        className={cn(
+          "flex size-9 shrink-0 items-center justify-center rounded-lg",
+          out ? "bg-white/20" : "bg-slate-200"
+        )}
+      >
+        <FileText className="size-4" />
+      </span>
+      <span className="min-w-0">
+        <span className="block max-w-[180px] truncate text-xs font-semibold">
+          {message.mediaName ?? "Arquivo"}
+        </span>
+        <span className={cn("text-[10px]", out ? "text-indigo-100" : "text-slate-400")}>
+          {fmtBytes(message.mediaSize)}
+        </span>
+      </span>
+      <Download className={cn("size-4 shrink-0", out ? "text-indigo-100" : "text-slate-400")} />
+    </a>
   );
 }
 
@@ -121,7 +209,11 @@ function MessageBubble({ message }: { message: Message }) {
             Agendada
           </p>
         )}
-        {message.type === "audio" ? <AudioPlayer duration={message.body} /> : message.body}
+        {message.type === "audio" || message.type === "image" || message.type === "file" ? (
+          <MediaContent message={message} out={isOut && !message.internal} />
+        ) : (
+          message.body
+        )}
         <p
           className={cn(
             "mt-1 text-right text-[9px]",

@@ -1,15 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Clock,
   DollarSign,
   Eye,
+  Loader2,
   Mic,
   Paperclip,
   Send,
   Smile,
+  Square,
   Tag,
+  Trash2,
   Zap,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -64,9 +67,91 @@ export function Composer({ conversationId }: { conversationId: string }) {
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [tagInput, setTagInput] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [recSecs, setRecSecs] = useState(0);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const startedRef = useRef(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const cancelRef = useRef(false);
   const snippets = useSnippets();
   const conversation = useConversation(conversationId);
   const contactId = conversation?.contactId ?? null;
+
+  const fmtSecs = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+  const uploadFile = async (file: File) => {
+    const isImg = file.type.startsWith("image/");
+    const name = file.name.toLowerCase();
+    const isDoc =
+      file.type === "application/pdf" ||
+      name.endsWith(".pdf") ||
+      file.type.includes("wordprocessingml") ||
+      name.endsWith(".docx");
+    if (!isImg && !isDoc) {
+      toast.error("Aceito imagens, PDF ou DOCX");
+      return;
+    }
+    setUploading(true);
+    const res = await conversationActions.sendMedia(conversationId, {
+      file,
+      kind: isImg ? "image" : "file",
+      channel,
+    });
+    setUploading(false);
+    if (res.ok) toast.success(isImg ? "Imagem enviada" : "Arquivo enviado");
+    else toast.error(res.error ?? "Não foi possível enviar");
+  };
+
+  const startRec = async () => {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      toast.error("Gravação de áudio não é suportada neste navegador");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      chunksRef.current = [];
+      cancelRef.current = false;
+      mr.ondataavailable = (e) => {
+        if (e.data.size) chunksRef.current.push(e.data);
+      };
+      mr.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        if (timerRef.current) clearInterval(timerRef.current);
+        setRecording(false);
+        if (cancelRef.current) return;
+        const secs = Math.max(1, Math.round((Date.now() - startedRef.current) / 1000));
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        const file = new File([blob], `audio-${secs}s.webm`, { type: "audio/webm" });
+        setUploading(true);
+        const res = await conversationActions.sendMedia(conversationId, {
+          file,
+          kind: "audio",
+          channel,
+          duration: fmtSecs(secs),
+        });
+        setUploading(false);
+        if (res.ok) toast.success("Áudio enviado");
+        else toast.error(res.error ?? "Não foi possível enviar o áudio");
+      };
+      startedRef.current = Date.now();
+      mr.start();
+      recorderRef.current = mr;
+      setRecSecs(0);
+      setRecording(true);
+      timerRef.current = setInterval(() => setRecSecs((s) => s + 1), 1000);
+    } catch {
+      toast.error("Não foi possível acessar o microfone — verifique a permissão");
+    }
+  };
+
+  const stopRec = (cancel: boolean) => {
+    cancelRef.current = cancel;
+    recorderRef.current?.stop();
+  };
 
   const addTag = async () => {
     const t = tagInput.trim();
@@ -162,6 +247,27 @@ export function Composer({ conversationId }: { conversationId: string }) {
         }
         className="min-h-16 resize-none text-sm"
       />
+      {recording && (
+        <div className="mt-2 flex items-center gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
+          <span className="size-2.5 animate-pulse rounded-full bg-rose-500" />
+          <span className="text-xs font-semibold text-rose-700">
+            Gravando áudio… {fmtSecs(recSecs)}
+          </span>
+          <div className="ml-auto flex items-center gap-1.5">
+            <button
+              onClick={() => stopRec(true)}
+              title="Descartar gravação"
+              className="flex size-7 items-center justify-center rounded-md text-slate-500 hover:bg-white"
+            >
+              <Trash2 className="size-4" />
+            </button>
+            <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => stopRec(false)}>
+              <Square className="size-3 fill-current" /> Enviar áudio
+            </Button>
+          </div>
+        </div>
+      )}
+      {!recording && (
       <div className="mt-2 flex items-center justify-between">
         <div className="flex items-center gap-0.5">
           {/* Emoji */}
@@ -187,20 +293,33 @@ export function Composer({ conversationId }: { conversationId: string }) {
             </PopoverContent>
           </Popover>
 
-          {/* Anexo (depende de storage) */}
+          {/* Anexo (imagem, PDF ou DOCX) */}
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void uploadFile(f);
+              e.target.value = "";
+            }}
+          />
           <button
-            onClick={() => toast.info("Anexos de arquivo chegam com o storage (módulo Mídia)")}
-            title="Anexar arquivo"
-            className="flex size-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading}
+            title="Anexar imagem, PDF ou DOCX"
+            className="flex size-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50"
           >
-            <Paperclip className="size-4" />
+            {uploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
           </button>
 
-          {/* Áudio (depende de storage) */}
+          {/* Áudio (gravação pelo microfone) */}
           <button
-            onClick={() => toast.info("Gravação de áudio chega com o storage (módulo Mídia)")}
+            onClick={startRec}
+            disabled={uploading}
             title="Gravar áudio"
-            className="flex size-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            className="flex size-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50"
           >
             <Mic className="size-4" />
           </button>
@@ -307,10 +426,16 @@ export function Composer({ conversationId }: { conversationId: string }) {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => send()} disabled={sending}>
+        <Button
+          size="sm"
+          className="h-8 gap-1.5 text-xs"
+          onClick={() => send()}
+          disabled={sending || uploading}
+        >
           <Send className="size-3.5" /> {sending ? "Enviando..." : "Enviar"}
         </Button>
       </div>
+      )}
       <ScheduleDialog
         open={scheduleOpen}
         onOpenChange={setScheduleOpen}

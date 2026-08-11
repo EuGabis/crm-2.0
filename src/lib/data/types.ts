@@ -50,7 +50,7 @@ export interface Opportunity {
   createdAt: string;
 }
 
-export type MessageType = "text" | "audio" | "event";
+export type MessageType = "text" | "audio" | "image" | "file" | "event";
 
 export interface Message {
   id: string;
@@ -62,6 +62,11 @@ export interface Message {
   at: string;
   internal?: boolean;
   scheduledFor?: string;
+  /** Mídia (image/file/audio): caminho no bucket privado conversation-media. */
+  mediaPath?: string;
+  mediaName?: string;
+  mediaMime?: string;
+  mediaSize?: number;
 }
 
 export interface Conversation {
