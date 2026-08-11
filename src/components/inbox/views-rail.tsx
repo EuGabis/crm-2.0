@@ -44,11 +44,12 @@ function RailButton({
   );
 }
 
-export function ViewsRail() {
+export function ViewsRail({ onNew }: { onNew?: () => void }) {
   return (
     <div className="flex h-full w-12 shrink-0 flex-col items-center gap-1 border-r bg-white py-2">
       <button
-        onClick={() => toast.info("Nova conversa chega com o backend")}
+        onClick={onNew}
+        title="Nova conversa"
         className="mb-1 flex size-8 items-center justify-center rounded-md bg-indigo-500 text-white hover:bg-indigo-600"
       >
         <Plus className="size-4" />

@@ -82,7 +82,7 @@ export default function ConversasPage() {
         </div>
       ) : (
         <div className="flex min-h-0 flex-1">
-          <ViewsRail />
+          <ViewsRail onNew={() => setNewOpen(true)} />
           <ConversationList
             selectedId={selectedId}
             onSelect={setSelectedId}
