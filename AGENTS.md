@@ -12,6 +12,39 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 # Lito CRM — Guia do projeto (leia antes de mexer)
 
+## Trabalho em paralelo (dois Claudes) — LEIA PRIMEIRO
+
+Há **DOIS assistentes Claude** neste mesmo repo (EuGabis/crm-2.0) e no mesmo banco
+Supabase, em máquinas/contas diferentes. Eles **não conversam** — a única coordenação
+é via git e Supabase. Siga SEM EXCEÇÃO para não sobrescrever nem quebrar o trabalho do outro:
+
+1. **Fonte única = `main` no GitHub.** Todo código vive no git (nada "só no disco" ou
+   "só na Vercel"). Ao começar: `git fetch && git checkout main && git pull --ff-only`.
+   Ao terminar: `git status` limpo e tudo **commitado e pushado** (deixar mudança sem
+   commit já causou perda de trabalho).
+2. **Produção = `main` via integração GitHub↔Vercel. NUNCA `vercel deploy` local** —
+   sobrescreve a produção com código atrasado e apaga os fixes do outro. Subir à
+   produção = **merge na `main`**. Produção errada = Promote to Production do commit
+   certo na Vercel (nunca deploy local).
+3. **Uma branch por tarefa** a partir da `main` atualizada; PR + **squash merge rápido**;
+   depois delete a branch. Nada de branch gigante.
+4. **Divisão de áreas** (não editem os mesmos arquivos):
+   - Claude A — pagamentos: `pagamentos`, `assinaturas`, Guru (`api/webhooks/guru`,
+     `api/integrations/guru`, `lib/integrations/*`, `db/payments.ts`).
+   - Claude B — marketing/automações/UI: `marketing`, `automacoes`, `components/ui/*`,
+     shell (`layout`, `sidebar`, `topbar`).
+   - **Alta colisão (edição só ADITIVA + `git pull --rebase` antes do push):**
+     `AGENTS.md`, `src/proxy.ts`, `package.json`, `package-lock.json`, `.env.example`.
+5. **Migrações** (um banco só): antes de criar `supabase/migrations/00NN_*.sql`, `git pull`
+   e use o **próximo número livre** (nunca reutilize). Toda migração **idempotente**
+   (`... if not exists`, `drop policy if exists`). Diga no commit o que aplicar no SQL Editor.
+6. **Sincronize sempre:** `git pull --rebase origin main` antes de push e antes de tocar
+   arquivo compartilhado. Conflito = mantenha AS DUAS contribuições, nunca descarte a do outro.
+7. **Segredos** nunca no git → `.env.example` (placeholder) + Vercel + nota aqui.
+
+**Checklist ao encerrar:** `git status` limpo e pushado · `npm run build` passou ·
+produção só via merge na `main` · branch mesclada deletada.
+
 ## O que é
 
 CRM all-in-one ("Lito CRM") inspirado no GoHighLevel (engenharia reversa de um vídeo
@@ -40,7 +73,11 @@ npm run build    # build + type check — deve passar sem erros
 
 - **App no ar:** https://lito-crm.vercel.app (projeto Vercel `lito-crm`, escopo
   `gabriels-projects-fa9c86e6`).
-- Deploy: `vercel deploy --prod` (CLI já linkado; `.vercel/` fora do git).
+- **Deploy = merge na `main`** — a integração GitHub↔Vercel builda e publica sozinha.
+  **NÃO rode `vercel deploy` / `vercel --prod` local**: isso sobe seu código local
+  (talvez atrasado) por cima da produção e apaga fixes do outro. Produção errada?
+  Promova o deploy do commit certo da `main` na Vercel (Promote to Production).
+  Ver "## Trabalho em paralelo (dois Claudes)" no topo deste arquivo.
 - Env vars configuradas na Vercel (production+preview+development):
   `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`,
   `RESEND_API_KEY`, `EMAIL_FROM`, `NEXT_PUBLIC_APP_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
