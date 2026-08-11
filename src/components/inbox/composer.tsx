@@ -30,7 +30,10 @@ import {
 } from "@/components/ui/tooltip";
 import { ScheduleDialog } from "./schedule-dialog";
 import { channelLabel } from "@/components/shared/channel-icon";
-import { conversationActions, useSnippets } from "@/lib/data/repos/db/conversations";
+import { conversationActions, useConversation, useSnippets } from "@/lib/data/repos/db/conversations";
+import { dbContactActions } from "@/lib/data/repos/db/contacts";
+import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -43,13 +46,14 @@ import { cn } from "@/lib/utils";
 
 const CHANNELS: Channel[] = ["whatsapp", "sms", "email"];
 
-const TOOLBAR = [
-  { icon: Smile, label: "Emoji" },
-  { icon: Paperclip, label: "Anexar arquivo" },
-  { icon: Mic, label: "Gravar áudio" },
-  { icon: Tag, label: "Adicionar tag" },
-  { icon: Zap, label: "Ação rápida" },
-  { icon: DollarSign, label: "Link de cobrança" },
+const EMOJIS = "😀 😁 😂 🤣 😊 😍 😘 😎 🤩 🥳 👍 👏 🙏 💪 🔥 🎉 ✅ ❤️ 💜 💙 ⭐ ✨ 📌 📎 📅 ⏰ 💰 📞 💬 👋".split(" ");
+
+const QUICK_REPLIES = [
+  "Olá! Tudo bem? 👋",
+  "Obrigado pelo contato! Em que posso ajudar?",
+  "Só um momento, já verifico isso pra você.",
+  "Perfeito! Vou dar andamento.",
+  "Qualquer dúvida, estou à disposição. 😊",
 ];
 
 export function Composer({ conversationId }: { conversationId: string }) {
@@ -59,7 +63,22 @@ export function Composer({ conversationId }: { conversationId: string }) {
   const [subject, setSubject] = useState("");
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  const [tagInput, setTagInput] = useState("");
   const snippets = useSnippets();
+  const conversation = useConversation(conversationId);
+  const contactId = conversation?.contactId ?? null;
+
+  const addTag = async () => {
+    const t = tagInput.trim();
+    if (!t || !contactId) return;
+    const ok = await dbContactActions.addTag([contactId], t);
+    if (ok) {
+      toast.success(`Tag "${t}" adicionada ao contato`);
+      setTagInput("");
+    } else {
+      toast.error("Não foi possível adicionar a tag");
+    }
+  };
 
   const send = async (scheduledFor?: string) => {
     const text = channel === "email" && subject ? `[${subject}] ${body}` : body;
@@ -145,21 +164,106 @@ export function Composer({ conversationId }: { conversationId: string }) {
       />
       <div className="mt-2 flex items-center justify-between">
         <div className="flex items-center gap-0.5">
-          {TOOLBAR.map(({ icon: Icon, label }) => (
-            <Tooltip key={label}>
-              <TooltipTrigger
-                render={
-                  <button
-                    onClick={() => toast.info(`${label} — em breve`)}
-                    className="flex size-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                  />
-                }
-              >
-                <Icon className="size-4" />
-              </TooltipTrigger>
-              <TooltipContent className="text-[10px]">{label}</TooltipContent>
-            </Tooltip>
-          ))}
+          {/* Emoji */}
+          <Popover>
+            <PopoverTrigger
+              render={
+                <button
+                  title="Emoji"
+                  className="flex size-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                />
+              }
+            >
+              <Smile className="size-4" />
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-56 p-2">
+              <div className="grid grid-cols-8 gap-1">
+                {EMOJIS.map((e) => (
+                  <button key={e} onClick={() => setBody((b) => b + e)} className="rounded p-1 text-lg hover:bg-slate-100">
+                    {e}
+                  </button>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {/* Anexo (depende de storage) */}
+          <button
+            onClick={() => toast.info("Anexos de arquivo chegam com o storage (módulo Mídia)")}
+            title="Anexar arquivo"
+            className="flex size-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          >
+            <Paperclip className="size-4" />
+          </button>
+
+          {/* Áudio (depende de storage) */}
+          <button
+            onClick={() => toast.info("Gravação de áudio chega com o storage (módulo Mídia)")}
+            title="Gravar áudio"
+            className="flex size-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          >
+            <Mic className="size-4" />
+          </button>
+
+          {/* Tag no contato */}
+          <Popover>
+            <PopoverTrigger
+              render={
+                <button
+                  title="Adicionar tag ao contato"
+                  className="flex size-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                />
+              }
+            >
+              <Tag className="size-4" />
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-60 p-3">
+              <Label className="text-xs">Adicionar tag ao contato</Label>
+              <div className="mt-1.5 flex gap-1.5">
+                <Input
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addTag()}
+                  placeholder="Ex.: quente"
+                  className="h-8 text-xs"
+                />
+                <Button size="sm" className="h-8 text-xs" onClick={addTag} disabled={!tagInput.trim() || !contactId}>
+                  Add
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {/* Respostas rápidas */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <button
+                  title="Respostas rápidas"
+                  className="flex size-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                />
+              }
+            >
+              <Zap className="size-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-64">
+              <DropdownMenuLabel className="text-[10px] text-slate-400">Respostas rápidas</DropdownMenuLabel>
+              {QUICK_REPLIES.map((q) => (
+                <DropdownMenuItem key={q} className="text-xs" onClick={() => setBody((b) => (b ? `${b} ${q}` : q))}>
+                  {q}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Link de cobrança (área Pagamentos) */}
+          <button
+            onClick={() => toast.info("Link de cobrança chega com o módulo Pagamentos")}
+            title="Link de cobrança"
+            className="flex size-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          >
+            <DollarSign className="size-4" />
+          </button>
           <Tooltip>
             <TooltipTrigger
               render={
