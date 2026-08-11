@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Pause } from "lucide-react";
+import { ArrowLeft, Pause, Play } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -78,6 +78,18 @@ export function CampaignDetail({
             }}
           >
             <Pause className="size-3.5" /> Pausar
+          </Button>
+        )}
+        {campaign.status === "paused" && (
+          <Button
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={async () => {
+              const ok = await campaignActions.resume(campaign.id);
+              toast[ok ? "success" : "error"](ok ? "Campanha retomada" : "Não foi possível retomar");
+            }}
+          >
+            <Play className="size-3.5" /> Retomar
           </Button>
         )}
       </div>

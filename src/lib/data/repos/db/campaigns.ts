@@ -201,6 +201,21 @@ export const campaignActions = {
     return true;
   },
 
+  /** Retoma uma campanha pausada: volta para 'sending' e o cron continua o envio
+   *  (se não sobrar pendente, o próprio tick marca como 'sent'). */
+  async resume(id: string): Promise<boolean> {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("email_campaigns")
+      .update({ status: "sending", updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select()
+      .single();
+    if (error || !data) return false;
+    useCampaignStore.getState().upsert(mapCampaign(data));
+    return true;
+  },
+
   /** Recarrega uma campanha do banco (após publicar/enviar via rota). */
   async refresh(id: string): Promise<void> {
     const supabase = createClient();
