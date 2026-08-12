@@ -6,6 +6,7 @@ import { ArrowRight, Globe, MessageCircle, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { SubNav } from "@/components/layout/subnav";
 import { EmptyState } from "@/components/shared/empty-state";
+import { FormsTab } from "@/components/sites/forms/forms-tab";
 import { KpiCard } from "@/components/shared/kpi-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,13 +31,6 @@ const TABS = [
   { label: "Testes" },
   { label: "Widget de chat" },
   { label: "Códigos QR" },
-];
-
-const FORMS = [
-  { name: "Captação — Consultoria gratuita", updated: "28 jul 2026", by: "Gustavo Ribeiro" },
-  { name: "Quiz Lito — Teste grátis", updated: "22 jul 2026", by: "Lucas Gomes" },
-  { name: "Pesquisa de satisfação NPS", updated: "15 jul 2026", by: "Camila Braga" },
-  { name: "Formulário de onboarding", updated: "8 jul 2026", by: "Gustavo Ribeiro" },
 ];
 
 const SITES = [
@@ -323,20 +317,7 @@ export default function SitesPage() {
             </Link>
           </>
         )}
-        {tab === "Formulários" && (
-          <>
-            <div className="mb-4 flex items-center justify-between">
-              <h1 className="text-lg font-bold text-slate-900">Formulários</h1>
-              <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => toast.info("Construtor de formulários chega em breve")}>
-                <Plus className="size-3.5" /> Criar formulário
-              </Button>
-            </div>
-            <MiniTable
-              headers={["Nome", "Atualizado em", "Atualizado por"]}
-              rows={FORMS.map((f) => [f.name, f.updated, f.by])}
-            />
-          </>
-        )}
+        {tab === "Formulários" && <FormsTab />}
         {tab === "Pesquisas" && (
           <>
             <h1 className="mb-4 text-lg font-bold text-slate-900">Pesquisas</h1>
