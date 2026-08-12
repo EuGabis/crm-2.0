@@ -127,7 +127,7 @@ export const formActions = {
 
   async update(
     id: string,
-    patch: Partial<Pick<LeadForm, "name" | "description" | "fields" | "successAction" | "successValue" | "active">>,
+    patch: Partial<Pick<LeadForm, "name" | "description" | "fields" | "successAction" | "successValue" | "active" | "tag">>,
   ): Promise<boolean> {
     const supabase = createClient();
     const row: any = {};
@@ -137,8 +137,16 @@ export const formActions = {
     if (patch.successAction !== undefined) row.success_action = patch.successAction;
     if (patch.successValue !== undefined) row.success_value = patch.successValue;
     if (patch.active !== undefined) row.active = patch.active;
+    if (patch.tag !== undefined) row.tag = patch.tag.trim();
     const { data, error } = await supabase.from("forms").update(row).eq("id", id).select().single();
     if (error || !data) return false;
+    // Se a tag mudou, atualiza o filtro da Lista Inteligente pra continuar casando os leads.
+    if (patch.tag !== undefined && (data as any).smart_list_id) {
+      await supabase
+        .from("smart_lists")
+        .update({ conditions: [{ field: "Tag", operator: "contém", value: (data as any).tag }] })
+        .eq("id", (data as any).smart_list_id);
+    }
     const s = useFormsStore.getState();
     s.set(s.forms.map((f) => (f.id === id ? mapForm(data) : f)));
     return true;

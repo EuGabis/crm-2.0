@@ -47,6 +47,7 @@ export function FormEditor({
   const [successAction, setSuccessAction] = useState(form.successAction);
   const [successValue, setSuccessValue] = useState(form.successValue);
   const [active, setActive] = useState(form.active);
+  const [tag, setTag] = useState(form.tag);
   const [saving, setSaving] = useState(false);
 
   const setField = (i: number, patch: Partial<FormField>) =>
@@ -63,6 +64,10 @@ export function FormEditor({
       toast.error("Dê um nome ao formulário");
       return;
     }
+    if (!tag.trim()) {
+      toast.error("A tag não pode ficar vazia");
+      return;
+    }
     setSaving(true);
     const ok = await formActions.update(form.id, {
       name: name.trim(),
@@ -71,6 +76,7 @@ export function FormEditor({
       successAction,
       successValue,
       active,
+      tag: tag.trim(),
     });
     setSaving(false);
     if (ok) {
@@ -138,6 +144,13 @@ export function FormEditor({
                 onChange={(e) => setDescription(e.target.value)}
                 className="min-h-14 text-xs"
               />
+            </div>
+            <div className="grid gap-1">
+              <Label className="text-xs">Tag / Lista Inteligente</Label>
+              <Input value={tag} onChange={(e) => setTag(e.target.value)} className="h-8 text-xs" />
+              <p className="text-[10px] text-slate-400">
+                Aplicada ao contato no envio e usada pela Lista Inteligente deste formulário.
+              </p>
             </div>
             <div className="grid gap-1">
               <Label className="text-xs">Ação de sucesso</Label>
