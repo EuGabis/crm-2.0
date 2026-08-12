@@ -384,8 +384,8 @@ Cloud API → celular.
   do inbox (envia de verdade, mostra tique de status, pede template fora da janela).
 - Migração `0022_whatsapp.sql` — tabela `whatsapp_channels` (RLS padrão membership;
   `phone_number_id` único), colunas `messages.wa_message_id|status|channel_id` e
-  `conversations.channel_id`. **Migração livre a partir de agora: 0023**
-  (0020/0021 = Pagamentos, 0022 = WhatsApp).
+  `conversations.channel_id`. Migração 0023 = Google Ads (ver seção própria abaixo);
+  **migração livre a partir de agora: 0024** (0020/0021 = Pagamentos, 0022 = WhatsApp).
 - Env (privadas, nunca `NEXT_PUBLIC_`): `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`,
   `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_GRAPH_VERSION` (default `v21.0`).
 
@@ -399,6 +399,42 @@ Cloud API → celular.
 3. Criar o canal em `/whatsapp` com `phone_number_id`/`waba_id` (painel da Meta →
    WhatsApp → API Setup) e testar ponta a ponta (mensagem do celular → inbox;
    resposta pelo inbox → celular; template fora da janela de 24h).
+
+## Google Ads — leitura (KPIs/gráfico/campanhas em Relatórios)
+
+Integração somente leitura com a API oficial do Google Ads. Fica na guia **Google Ads**
+do módulo **Relatórios** (`src/components/reports/google-ads-report.tsx`) — espelha
+a Visão geral: KPIs (Cliques, Conversões, Custo/conv., Custo) + gráfico Cliques×Conversões
++ tabela de campanhas. A aba "Gerenciador de anúncios" saiu do Marketing.
+
+**Peças:**
+- OAuth por empresa: `GET /api/google-ads/oauth/start` (gera state assinado + cookie
+  httpOnly anti-CSRF, redireciona pro consentimento Google) e
+  `GET /api/google-ads/oauth/callback` (valida state+cookie, troca o code por tokens,
+  grava a conexão e redireciona de volta pra `/relatorios`).
+- `GET /api/google-ads/overview` — consulta GAQL via `searchStream` (somente leitura),
+  devolve `kpis/series/campaigns` já convertido de micros pra moeda.
+- Token guardado por `location_id` em `google_ads_connections` (migração
+  `0023_google_ads.sql`); coluna `refresh_token` **revogada do cliente** (só
+  service-role lê — mesmo padrão de proteção do resto do backend).
+- Cliente `src/lib/google-ads/client.ts`; repo `src/lib/data/repos/db/google-ads.ts`
+  (`googleAdsActions.overview/disconnect/startConnectPath`).
+- Envs (privadas, nunca `NEXT_PUBLIC_`): `GOOGLE_ADS_DEVELOPER_TOKEN`,
+  `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_ADS_API_VERSION`
+  (default `v18`).
+
+**Passos manuais que FALTAM para ligar em produção (Gabriel):**
+1. Google Cloud: criar projeto → ativar **Google Ads API** → tela de consentimento
+   OAuth (External; escopo `.../auth/adwords`; adicionar seu e-mail como test user
+   enquanto não verificado) → OAuth client (Web) com redirects
+   `http://localhost:3000/api/google-ads/oauth/callback` e
+   `https://lito-crm.vercel.app/api/google-ads/oauth/callback` → copiar Client ID/Secret.
+2. Developer token: conta administradora (MCC) → API Center → gerar token (acesso a
+   conta de teste imediato; solicitar **Basic access** para produção).
+3. Envs acima na Vercel (production+preview+development) + `.env.local`.
+4. Conectar em `/relatorios` → guia Google Ads → **Conectar Google Ads**; validar
+   KPIs/gráfico/campanhas com a conta de teste. Quando o Basic access sair,
+   reconectar apontando pra conta real (sem mudança de código).
 
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
