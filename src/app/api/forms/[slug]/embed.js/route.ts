@@ -31,7 +31,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
     return js(`console.error("[Lito Forms] servidor sem credenciais");`, 503);
   }
   if (!form || !form.active) {
-    return js(`console.warn("[Lito Forms] formulário indisponível: ${slug}");`);
+    return js(`console.warn("[Lito Forms] formulário indisponível:", ${JSON.stringify(slug)});`);
   }
 
   const config = JSON.stringify({
