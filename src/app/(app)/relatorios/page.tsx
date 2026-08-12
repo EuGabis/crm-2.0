@@ -5,6 +5,7 @@ import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import { SubNav } from "@/components/layout/subnav";
+import { GoogleAdsReport } from "@/components/reports/google-ads-report";
 import { KpiCard } from "@/components/shared/kpi-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,14 +32,6 @@ const SERIES = Array.from({ length: 14 }, (_, i) => ({
   meta_cli: 700 + ((i * 271) % 600),
   meta_leads: 90 + ((i * 53) % 120),
 }));
-
-const GOOGLE_CAMPAIGNS = [
-  { name: "Lito — Consultoria gratuita", status: "Ativa", clicks: 8412, cost: "R$ 812,00", revenue: "R$ 9.410,00", roi: "1.058%", ctr: "4,2%", leads: 214, cpl: "R$ 3,79" },
-  { name: "Lito — Teste grátis 7 dias", status: "Ativa", clicks: 6120, cost: "R$ 640,00", revenue: "R$ 6.230,00", roi: "873%", ctr: "3,8%", leads: 187, cpl: "R$ 3,42" },
-  { name: "Remarketing — Demonstração", status: "Ativa", clicks: 3355, cost: "R$ 298,00", revenue: "R$ 3.120,00", roi: "947%", ctr: "5,1%", leads: 96, cpl: "R$ 3,10" },
-  { name: "Institucional — Marca", status: "Pausada", clicks: 2101, cost: "R$ 195,00", revenue: "R$ 890,00", roi: "356%", ctr: "2,2%", leads: 31, cpl: "R$ 6,29" },
-  { name: "Lookalike — Assinantes", status: "Ativa", clicks: 1150, cost: "R$ 140,00", revenue: "R$ 1.470,00", roi: "950%", ctr: "3,1%", leads: 42, cpl: "R$ 3,33" },
-];
 
 const META_CAMPAIGNS = [
   { name: "[Frio] Vídeo — Dor do follow-up", status: "Ativa", clicks: 5214, cost: "R$ 1.180,00", leads: 684, cpl: "R$ 1,73" },
@@ -149,48 +142,7 @@ export default function RelatoriosPage() {
     <div>
       <SubNav tabs={TABS} active={tab} onChange={setTab} />
       <div className="p-6">
-        {tab === "Google Ads" && (
-          <>
-            <SampleBanner platform="Google Ads" />
-            <div className="mb-4 grid gap-3 md:grid-cols-3">
-              <MetricArea title="Impressões" dataKey="impressoes" total="175.235" />
-              <MetricArea title="Cliques" dataKey="cliques" total="21.138" />
-              <MetricArea title="Conversões" dataKey="conversoes" total="7.125" />
-            </div>
-            <div className="mb-4 grid gap-3 md:grid-cols-4">
-              <KpiCard label="Investimento" value="R$ 2.085,00" />
-              <KpiCard label="CPC médio" value="R$ 0,10" />
-              <KpiCard label="Custo por conversão" value="R$ 0,29" />
-              <KpiCard label="Taxa de conversão" value="6,90%" />
-            </div>
-            <div className="overflow-x-auto rounded-xl border bg-white">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b text-[11px] text-slate-400">
-                    {["Campanha", "Status", "Cliques", "Custo", "Receita", "ROI", "CTR", "Leads", "CPL"].map((h) => (
-                      <th key={h} className="whitespace-nowrap px-4 py-2.5 font-medium">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {GOOGLE_CAMPAIGNS.map((c) => (
-                    <tr key={c.name} className="border-b last:border-0">
-                      <td className="px-4 py-2.5 font-medium text-slate-800">{c.name}</td>
-                      <td className="px-4 py-2.5"><StatusBadge value={c.status} /></td>
-                      <td className="px-4 py-2.5">{c.clicks.toLocaleString("pt-BR")}</td>
-                      <td className="px-4 py-2.5">{c.cost}</td>
-                      <td className="px-4 py-2.5">{c.revenue}</td>
-                      <td className="px-4 py-2.5 font-semibold text-emerald-600">{c.roi}</td>
-                      <td className="px-4 py-2.5">{c.ctr}</td>
-                      <td className="px-4 py-2.5">{c.leads}</td>
-                      <td className="px-4 py-2.5">{c.cpl}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
+        {tab === "Google Ads" && <GoogleAdsReport />}
 
         {tab === "Anúncios Meta" && (
           <>
