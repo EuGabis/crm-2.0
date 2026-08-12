@@ -22,7 +22,6 @@ export async function GET() {
     scope: "https://www.googleapis.com/auth/adwords",
     access_type: "offline",
     prompt: "consent",
-    include_granted_scopes: "true",
     state,
   });
 
