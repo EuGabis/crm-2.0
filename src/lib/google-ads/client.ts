@@ -5,7 +5,9 @@
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-const API_VERSION = process.env.GOOGLE_ADS_API_VERSION || "v18";
+// A Google Ads API aposenta versões ~1x/ano. Manter num release ativo (ver
+// https://developers.google.com/google-ads/api/docs/release-notes). v18 saiu do ar.
+const API_VERSION = process.env.GOOGLE_ADS_API_VERSION || "v21";
 const ADS_BASE = `https://googleads.googleapis.com/${API_VERSION}`;
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 
