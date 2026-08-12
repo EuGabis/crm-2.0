@@ -123,3 +123,26 @@ export interface Appointment {
   calendar: string;
   source: "google" | "crm";
 }
+
+export interface FormField {
+  key: string;
+  label: string;
+  type: "text" | "email" | "tel" | "textarea";
+  required: boolean;
+  /** name | email | phone | company | custom:<nome do campo> */
+  mapsTo: string;
+}
+
+export interface LeadForm {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  fields: FormField[];
+  successAction: "redirect" | "message";
+  successValue: string;
+  tag: string;
+  smartListId: string | null;
+  active: boolean;
+  createdAt: string;
+}
