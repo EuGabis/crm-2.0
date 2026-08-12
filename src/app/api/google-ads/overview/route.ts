@@ -30,16 +30,17 @@ export async function GET(request: Request) {
   // status (colunas não-secretas) via RLS
   const { data: conn } = await supabase
     .from("google_ads_connections")
-    .select("customer_id, login_customer_id, currency_code, active")
+    .select("location_id, customer_id, login_customer_id, currency_code, active")
     .maybeSingle();
   if (!conn || !conn.active) return Response.json({ connected: false });
 
-  // refresh_token só via service-role (coluna revogada para o cliente)
+  // refresh_token só via service-role (coluna revogada para o cliente), chaveado
+  // por location_id (única — customer_id não tem unicidade garantida)
   const admin = createAdminClient();
   const { data: secretRow } = await admin
     .from("google_ads_connections")
-    .select("refresh_token, location_id")
-    .eq("customer_id", conn.customer_id)
+    .select("refresh_token")
+    .eq("location_id", conn.location_id)
     .maybeSingle();
   if (!secretRow?.refresh_token) return Response.json({ connected: false });
 
