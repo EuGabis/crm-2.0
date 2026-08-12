@@ -4,6 +4,15 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { FileText, Plus, Copy, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { EmptyState } from "@/components/shared/empty-state";
 import { useForms, formActions, embedSnippet } from "@/lib/data/repos/db/forms";
 import { FormEditor } from "./form-editor";
@@ -13,13 +22,25 @@ export function FormsTab() {
   const { forms, ready } = useForms();
   const [editing, setEditing] = useState<LeadForm | null>(null);
   const [creating, setCreating] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newName, setNewName] = useState("");
 
-  const create = async () => {
+  const openCreate = () => {
+    setNewName("");
+    setCreateOpen(true);
+  };
+  const doCreate = async () => {
+    if (!newName.trim()) {
+      toast.error("Dê um nome ao formulário");
+      return;
+    }
     setCreating(true);
-    const res = await formActions.create({ name: "Novo formulário" });
+    const res = await formActions.create({ name: newName.trim() });
     setCreating(false);
-    if (res.ok) toast.success("Formulário criado — edite os campos");
-    else toast.error(res.error ?? "Falha ao criar");
+    if (res.ok) {
+      setCreateOpen(false);
+      toast.success("Formulário criado — edite os campos");
+    } else toast.error(res.error ?? "Falha ao criar");
   };
 
   const copyEmbed = (slug: string) => {
@@ -35,10 +56,18 @@ export function FormsTab() {
           title="Nenhum formulário ainda"
           description="Crie um formulário de captação, cole o embed no seu site e os leads caem no CRM."
           cta={
-            <Button size="sm" className="h-8 text-xs" onClick={create} disabled={creating}>
+            <Button size="sm" className="h-8 text-xs" onClick={openCreate}>
               <Plus className="size-3.5" /> Novo formulário
             </Button>
           }
+        />
+        <CreateDialog
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          value={newName}
+          onChange={setNewName}
+          onCreate={doCreate}
+          creating={creating}
         />
       </div>
     );
@@ -48,7 +77,7 @@ export function FormsTab() {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-bold text-slate-900">Formulários</h1>
-        <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={create} disabled={creating}>
+        <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={openCreate}>
           <Plus className="size-3.5" /> Novo formulário
         </Button>
       </div>
@@ -88,6 +117,62 @@ export function FormsTab() {
         </table>
       </div>
       {editing && <FormEditor form={editing} open={!!editing} onOpenChange={(v) => !v && setEditing(null)} />}
+      <CreateDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        value={newName}
+        onChange={setNewName}
+        onCreate={doCreate}
+        creating={creating}
+      />
     </div>
+  );
+}
+
+function CreateDialog({
+  open,
+  onOpenChange,
+  value,
+  onChange,
+  onCreate,
+  creating,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  value: string;
+  onChange: (v: string) => void;
+  onCreate: () => void;
+  creating: boolean;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Novo formulário</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-1.5">
+          <Label className="text-xs">Nome do formulário</Label>
+          <Input
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && onCreate()}
+            placeholder="Ex.: Captação — Mecânico"
+            className="h-8 text-xs"
+            autoFocus
+          />
+          <p className="text-[10px] text-slate-400">
+            Vira também o nome da Lista Inteligente e a tag do formulário (dá pra ajustar depois).
+          </p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => onOpenChange(false)}>
+            Cancelar
+          </Button>
+          <Button size="sm" className="h-8 text-xs" onClick={onCreate} disabled={creating}>
+            {creating ? "Criando..." : "Criar"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

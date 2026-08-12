@@ -140,12 +140,13 @@ export const formActions = {
     if (patch.tag !== undefined) row.tag = patch.tag.trim();
     const { data, error } = await supabase.from("forms").update(row).eq("id", id).select().single();
     if (error || !data) return false;
-    // Se a tag mudou, atualiza o filtro da Lista Inteligente pra continuar casando os leads.
-    if (patch.tag !== undefined && (data as any).smart_list_id) {
-      await supabase
-        .from("smart_lists")
-        .update({ conditions: [{ field: "Tag", operator: "contém", value: (data as any).tag }] })
-        .eq("id", (data as any).smart_list_id);
+    // Mantém a Lista Inteligente em sincronia: nome (se mudou) e filtro da tag (se mudou).
+    if ((patch.name !== undefined || patch.tag !== undefined) && (data as any).smart_list_id) {
+      const slPatch: any = {};
+      if (patch.name !== undefined) slPatch.name = (data as any).name;
+      if (patch.tag !== undefined)
+        slPatch.conditions = [{ field: "Tag", operator: "contém", value: (data as any).tag }];
+      await supabase.from("smart_lists").update(slPatch).eq("id", (data as any).smart_list_id);
     }
     const s = useFormsStore.getState();
     s.set(s.forms.map((f) => (f.id === id ? mapForm(data) : f)));
