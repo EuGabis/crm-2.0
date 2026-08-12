@@ -384,8 +384,9 @@ Cloud API → celular.
   do inbox (envia de verdade, mostra tique de status, pede template fora da janela).
 - Migração `0022_whatsapp.sql` — tabela `whatsapp_channels` (RLS padrão membership;
   `phone_number_id` único), colunas `messages.wa_message_id|status|channel_id` e
-  `conversations.channel_id`. Migração 0023 = Google Ads (ver seção própria abaixo);
-  **migração livre a partir de agora: 0024** (0020/0021 = Pagamentos, 0022 = WhatsApp).
+  `conversations.channel_id`. Migração 0023 = Google Ads, 0024 = Formulários (ver
+  seções próprias abaixo); **próxima migração livre: 0025** (0020/0021 = Pagamentos,
+  0022 = WhatsApp).
 - Env (privadas, nunca `NEXT_PUBLIC_`): `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`,
   `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_GRAPH_VERSION` (default `v21.0`).
 
@@ -435,6 +436,34 @@ a Visão geral: KPIs (Cliques, Conversões, Custo/conv., Custo) + gráfico Cliqu
 4. Conectar em `/relatorios` → guia Google Ads → **Conectar Google Ads**; validar
    KPIs/gráfico/campanhas com a conta de teste. Quando o Basic access sair,
    reconectar apontando pra conta real (sem mudança de código).
+
+## Formulários (Sites → Formulários)
+
+Construtor de formulários embutíveis em qualquer site (do módulo Sites ou externo),
+capturando lead como Contato real + tag, pronto pra e-mail marketing.
+
+**Peças:**
+- Builder em `/sites` → aba **Formulários**: lista + editor de campos
+  (`src/components/sites/forms/forms-tab.tsx`, `form-editor.tsx`) e botão
+  **Copiar embed**.
+- Repo `src/lib/data/repos/db/forms.ts` — CRUD (`formActions.create/update/remove/
+  toggleActive`), `useForms`, `embedSnippet(slug)` (gera o `<script>` de embed).
+- Migração `0024_forms.sql` — tabelas `forms` (campos, slug, tag, mensagem de
+  sucesso) e `form_submissions` (histórico de envios), RLS padrão membership.
+- Rotas **públicas** (fora do matcher do `proxy.ts` — chamada do site do cliente,
+  sem sessão — service role + CORS liberado):
+  - `GET /api/forms/[slug]/embed.js` — devolve o JS que renderiza o formulário
+    **sem estilo próprio** (herda o CSS do site onde é colado).
+  - `POST /api/forms/[slug]/submit` — cria/atualiza o Contato e aplica a tag do
+    form; honeypot anti-spam (campo oculto que, se preenchido, descarta o envio
+    silenciosamente).
+- Ao criar um form, nasce junto uma **Lista Inteligente** com a condição
+  `{ field: "Tag", operator: "contém", value: tag }` — os leads capturados já
+  caem prontos numa lista pra campanha de e-mail marketing mirar por `tag` ou
+  `smart_list`.
+- Sem env nova, sem serviço externo. Embed = colar
+  `<script src="https://lito-crm.vercel.app/api/forms/{slug}/embed.js"></script>`
+  no HTML da página.
 
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
