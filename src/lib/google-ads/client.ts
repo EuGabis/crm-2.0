@@ -77,13 +77,22 @@ function adsHeaders(accessToken: string, loginCustomerId: string | null): Record
   return h;
 }
 
+/** Extrai a mensagem ESPECÍFICA do erro do Google Ads (errorCode + detalhe), não só o topo genérico. */
+function gaError(json: any, status: number): string {
+  const err = Array.isArray(json) ? json[0]?.error : json?.error;
+  const detail = err?.details?.find((d: any) => Array.isArray(d?.errors))?.errors?.[0];
+  const code = detail?.errorCode ? Object.values(detail.errorCode)[0] : undefined;
+  const msg = detail?.message || err?.message || `Google Ads ${status}`;
+  return code ? `${msg} [${code}]` : msg;
+}
+
 export async function listAccessibleCustomers(accessToken: string): Promise<string[]> {
   const res = await fetch(`${ADS_BASE}/customers:listAccessibleCustomers`, {
     method: "GET",
     headers: adsHeaders(accessToken, null),
   });
   const json: any = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json?.error?.message || `Google Ads ${res.status}`);
+  if (!res.ok) throw new Error(gaError(json, res.status));
   // resourceNames: ["customers/1234567890", ...] → ["1234567890", ...]
   return (json.resourceNames ?? []).map((r: string) => r.split("/")[1]).filter(Boolean);
 }
@@ -101,8 +110,7 @@ export async function search(
   });
   const json: any = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const msg = Array.isArray(json) ? json[0]?.error?.message : json?.error?.message;
-    throw new Error(msg || `Google Ads ${res.status}`);
+    throw new Error(gaError(json, res.status));
   }
   // searchStream devolve um array de batches, cada um com { results: [...] }
   const batches: any[] = Array.isArray(json) ? json : [json];
