@@ -307,7 +307,7 @@ Conecta a conta: `start` manda pro consentimento; `callback` troca o code, pega 
 
 **Interfaces:**
 - Consumes: `exchangeCode`, `listAccessibleCustomers`, `getCustomerInfo` (Task 2); `createClient` de `@/lib/supabase/server`; `createAdminClient` de `@/lib/supabase/admin`.
-- Produces: efeito no banco (upsert em `google_ads_connections`); redireciona para `/marketing?tab=ads&connected=1` (ou `&error=`).
+- Produces: efeito no banco (upsert em `google_ads_connections`); redireciona para `/relatorios?connected=1` (ou `?error=`). Vincula o `state` ao navegador por cookie httpOnly (anti-CSRF).
 
 - [ ] **Step 1: Helper de state (HMAC)**
 
@@ -400,7 +400,7 @@ import { redirectUri, verifyState } from "@/lib/google-ads/state";
 export const dynamic = "force-dynamic";
 
 function back(base: string, params: string) {
-  return Response.redirect(`${base.replace(/\/$/, "")}/marketing?tab=ads&${params}`, 302);
+  return Response.redirect(`${base.replace(/\/$/, "")}/relatorios?${params}`, 302);
 }
 
 /** Recebe o code do Google, troca por tokens, pega a 1ª conta e salva a conexão. */
@@ -1069,7 +1069,7 @@ git commit -m "docs(google-ads): envs, seção do módulo e próxima migração 
 2. **Developer token:** conta administradora (MCC) → API Center → gerar token (acesso a **conta de teste** imediato; solicitar **Basic access** p/ produção).
 3. **Conta de teste** (para validar agora): test manager + test client account.
 4. **Envs** nas 3 (`.env.local` + Vercel) e **deploy**.
-5. Conectar via `/marketing` → Gerenciador de anúncios → **Conectar Google Ads**; validar KPIs/gráfico/campanhas com a conta de teste. Quando o Basic access sair, reconectar apontando pra conta real (sem mudança de código).
+5. Conectar via `/relatorios` → Google Ads → **Conectar Google Ads**; validar KPIs/gráfico/campanhas com a conta de teste. Quando o Basic access sair, reconectar apontando pra conta real (sem mudança de código).
 
 ## Self-Review (autor do plano)
 

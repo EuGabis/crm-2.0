@@ -44,7 +44,7 @@ Empresa clica "Conectar Google Ads"
   → GET /api/google-ads/oauth/start  (sessão do usuário; state assinado)
   → consentimento Google (escopo adwords, access_type=offline)
   → GET /api/google-ads/oauth/callback  (troca code→tokens; pega 1ª conta;
-       salva refresh_token + customer_id por location) → volta pra /marketing
+       salva refresh_token + customer_id por location) → volta pra /relatorios
 
 Aba "Gerenciador de anúncios" (conectada)
   → GET /api/google-ads/overview?from&to  (service-role lê refresh_token;
@@ -129,8 +129,9 @@ Ambas autenticadas (`getUser()` + membership; a `location` vem da sessão, não 
 - **callback (GET):** valida `state` (assinatura + frescor); `getUser()` → location;
   `exchangeCode` → refresh/access token; `listAccessibleCustomers` → **primeira** conta;
   `getCustomerInfo` (nome/moeda); **upsert** em `google_ads_connections` (service-role,
-  por `location_id`); redireciona para `/marketing?tab=ads&connected=1`. Em erro,
-  `/marketing?tab=ads&error=<msg curta>`.
+  por `location_id`); redireciona para `/relatorios?connected=1`. Em erro,
+  `/relatorios?error=<msg curta>`. O `state` é vinculado ao navegador via cookie
+  httpOnly (anti-CSRF) além da assinatura.
 
 Se `listAccessibleCustomers` vier vazio → erro claro ("nenhuma conta Google Ads
 acessível com esse login").
