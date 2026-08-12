@@ -87,17 +87,6 @@ const TABS = [
   { label: "Relatórios" },
 ];
 
-const PROVIDERS = [
-  { name: "Stripe", desc: "Cartões, wallets (Apple/Google Pay), débitos bancários e multi-moeda.", connected: true },
-  { name: "Mercado Pago", desc: "Pix, boleto, cartões e assinaturas para o mercado brasileiro.", connected: false },
-  { name: "PayPal", desc: "Saldo PayPal, cartões e contas bancárias vinculadas.", connected: false },
-  { name: "Square", desc: "POS e pagamentos online (EUA, Canadá, Reino Unido, Austrália).", connected: false },
-  { name: "Adyen", desc: "Europa, Oriente Médio e mercados globais.", connected: false },
-  { name: "Authorize.net", desc: "Cartões e e-check/ACH (EUA e Canadá).", connected: false },
-  { name: "NMI", desc: "Conexões flexíveis a processadores, cartões e ACH.", connected: false },
-  { name: "Métodos manuais", desc: "Pagamento offline/custom (dinheiro na entrega etc.).", connected: false },
-];
-
 /* ------------------------------- Guru (real) ----------------------------- */
 
 function GuruProviderCard() {
@@ -1682,36 +1671,13 @@ export default function PagamentosPage() {
       <div className="p-6">
         {tab === "Integrações" ? (
           <>
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <h1 className="text-lg font-bold text-slate-900">Integrações de pagamento</h1>
-                <p className="text-xs text-slate-500">Gerencie provedores de pagamento aqui</p>
-              </div>
-              <Button size="sm" className="h-8 text-xs" onClick={() => toast.info("Configuração de provedores chega com o backend")}>
-                Configurar provedores
-              </Button>
+            <div className="mb-4">
+              <h1 className="text-lg font-bold text-slate-900">Integrações de pagamento</h1>
+              <p className="text-xs text-slate-500">
+                A Guru é a central de pagamentos do CRM — vendas e assinaturas vêm daqui.
+              </p>
             </div>
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {PROVIDERS.map((p) => (
-                <div key={p.name} className="flex flex-col rounded-xl border bg-white p-4">
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="flex size-9 items-center justify-center rounded-lg bg-slate-100 text-sm font-black text-slate-600">
-                      {p.name[0]}
-                    </span>
-                    {p.connected && <Badge className="bg-emerald-100 text-emerald-700">Conectado</Badge>}
-                  </div>
-                  <p className="text-sm font-semibold text-slate-800">{p.name}</p>
-                  <p className="mt-1 flex-1 text-[11px] text-slate-500">{p.desc}</p>
-                  <Button
-                    variant={p.connected ? "outline" : "default"}
-                    size="sm"
-                    className="mt-3 h-7 text-xs"
-                    onClick={() => toast.info(`Conexão com ${p.name} chega com o backend`)}
-                  >
-                    {p.connected ? "Gerenciar" : "Conectar"}
-                  </Button>
-                </div>
-              ))}
               <GuruProviderCard />
             </div>
           </>
