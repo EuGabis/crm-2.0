@@ -36,10 +36,11 @@
 - `src/app/api/google-ads/oauth/callback/route.ts` — troca code→tokens, salva a conexão.
 - `src/app/api/google-ads/overview/route.ts` — GAQL → `{ kpis, series, campaigns }`.
 - `src/lib/data/repos/db/google-ads.ts` — repo (status da conexão + overview + disconnect).
-- `src/components/marketing/ads-manager-tab.tsx` — UI (conectar / dashboard).
+- `src/components/reports/google-ads-report.tsx` — UI (conectar / dashboard) da guia Google Ads em Relatórios.
 
 **Modificar:**
-- `src/app/(app)/marketing/page.tsx` — trocar o bloco mock de "Gerenciador de anúncios" por `<AdsManagerTab />` (remover `AD_CAMPAIGNS`, `MiniTable`/`StatusBadge` se ficarem sem uso após a troca — conferir; `MiniTable`/`StatusBadge` são locais desse arquivo).
+- `src/app/(app)/relatorios/page.tsx` — trocar o bloco mock da guia "Google Ads" por `<GoogleAdsReport />` (remover a constante `GOOGLE_CAMPAIGNS`; **manter** `SERIES`, usada pela guia "Anúncios Meta").
+- `src/app/(app)/marketing/page.tsx` — REMOVER a guia "Gerenciador de anúncios": tirar `{ label: "Gerenciador de anúncios" }` do `TABS`, remover o bloco `{tab === "Gerenciador de anúncios" && ( ... )}` e as constantes/helpers que ficarem sem uso (`AD_CAMPAIGNS`, `GOOD_STATUSES`, `StatusBadge`, `MiniTable`) + imports órfãos.
 - `.env.example` — documentar as 4 envs.
 - `AGENTS.md` — seção do módulo + próxima migração livre.
 
@@ -773,20 +774,21 @@ git commit -m "feat(google-ads): repo db (status da conexão + overview + discon
 
 ---
 
-## Task 6: UI — aba Gerenciador de anúncios (Google Ads)
+## Task 6: UI — guia Google Ads em Relatórios (+ remover do Marketing)
 
-Troca o mock pela tela real: conectar / dashboard (KPIs + gráfico + tabela). Deliverable: build limpo; renderiza o estado "conectar" e, mockando a resposta, o dashboard.
+Torna real a guia "Google Ads" de Relatórios (conectar / dashboard: KPIs + gráfico + tabela) e remove a aba "Gerenciador de anúncios" do Marketing. Deliverable: build limpo; a guia renderiza o estado "conectar"; Marketing não tem mais a aba.
 
 **Files:**
-- Create: `src/components/marketing/ads-manager-tab.tsx`
+- Create: `src/components/reports/google-ads-report.tsx`
+- Modify: `src/app/(app)/relatorios/page.tsx`
 - Modify: `src/app/(app)/marketing/page.tsx`
 
 **Interfaces:**
 - Consumes: `useGoogleAdsConnection`, `googleAdsActions`, `OverviewData` de `@/lib/data/repos/db/google-ads`; `KpiCard` de `@/components/shared/kpi-card` (props `{ label, value: string, hint? }`); Recharts (seguir o padrão de `src/components/dashboard/opportunity-widgets.tsx`); `formatBRL` de `@/lib/data/repos/opportunities`.
 
-- [ ] **Step 1: Componente da aba**
+- [ ] **Step 1: Componente do relatório**
 
-Create `src/components/marketing/ads-manager-tab.tsx`:
+Create `src/components/reports/google-ads-report.tsx`:
 
 ```tsx
 "use client";
@@ -834,7 +836,7 @@ function fmtNum(v: number) {
   return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 }).format(v);
 }
 
-export function AdsManagerTab() {
+export function GoogleAdsReport() {
   const { connection, ready } = useGoogleAdsConnection();
   const [days, setDays] = useState(30);
   const [data, setData] = useState<OverviewData | null>(null);
@@ -888,12 +890,9 @@ export function AdsManagerTab() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="text-lg font-bold text-slate-900">Gerenciador de anúncios</h1>
-          <p className="text-xs text-slate-500">
-            Google Ads · {connection.connectedEmail || connection.customerId}
-          </p>
-        </div>
+        <p className="text-xs text-slate-500">
+          Conta: {connection.connectedEmail || connection.customerId}
+        </p>
         <div className="flex items-center gap-1.5">
           {PERIODS.map((p) => (
             <button
@@ -991,28 +990,33 @@ export function AdsManagerTab() {
 }
 ```
 
-- [ ] **Step 2: Ligar na página do Marketing**
+- [ ] **Step 2: Ligar na guia Google Ads dos Relatórios + remover do Marketing**
+
+In `src/app/(app)/relatorios/page.tsx`:
+- Add import: `import { GoogleAdsReport } from "@/components/reports/google-ads-report";`
+- Replace the whole `{tab === "Google Ads" && ( ... )}` block (o `<>...</>` com `SampleBanner`/`MetricArea`/`KpiCard` + a tabela de `GOOGLE_CAMPAIGNS`) with:
+  ```tsx
+  {tab === "Google Ads" && <GoogleAdsReport />}
+  ```
+- Remove the now-unused `GOOGLE_CAMPAIGNS` constant. **Keep** `SERIES` (a guia "Anúncios Meta" ainda usa via `MetricArea` chaves `meta_*`). Remove imports órfãos; se um símbolo ainda é usado por outra guia, deixe. Meta: sem erros de símbolo não usado.
 
 In `src/app/(app)/marketing/page.tsx`:
-- Add import: `import { AdsManagerTab } from "@/components/marketing/ads-manager-tab";`
-- Replace the whole `{tab === "Gerenciador de anúncios" && ( ... )}` block (the `<>...</>` with the mock `<div>` header + KpiCards + `MiniTable`) with:
-  ```tsx
-  {tab === "Gerenciador de anúncios" && <AdsManagerTab />}
-  ```
-- Remove the now-unused mock constants/helpers in this file **only if they became unused**: `AD_CAMPAIGNS`, `GOOD_STATUSES`, `StatusBadge`, `MiniTable`, and the `Plus`/`toast`/`KpiCard`/`Badge`/`formatBRL` imports **iff** no other tab uses them. Verify by search before deleting; if any is still referenced, leave it. (The goal is no unused-symbol lint/type errors.)
+- Remove `{ label: "Gerenciador de anúncios" }` do array `TABS`.
+- Remove o bloco inteiro `{tab === "Gerenciador de anúncios" && ( ... )}`.
+- Remove as constantes/helpers que ficarem sem uso **após** a remoção: `AD_CAMPAIGNS`, `GOOD_STATUSES`, `StatusBadge`, `MiniTable`, e imports órfãos (`Plus`, `toast`, `KpiCard`, `Badge`, `formatBRL`). Confira por busca antes de apagar; deixe o que outra guia ainda usa. Meta: sem erros de símbolo não usado.
 
 - [ ] **Step 3: Verificar build + browser**
 
 Run: `npx tsc --noEmit && npm run build`
 Expected: sem erros; sem símbolos não usados.
 
-Browser (workflow do preview): abrir `/marketing` → aba "Gerenciador de anúncios" → sem conexão deve mostrar o empty state "Conectar Google Ads". (O fluxo OAuth real depende das envs/conta de teste — Task 7/handoff.) Conferir `read_console_messages` sem erros.
+Browser (workflow do preview): abrir `/relatorios` → guia "Google Ads" → sem conexão deve mostrar o empty state "Conectar Google Ads". Conferir também que `/marketing` não tem mais a aba "Gerenciador de anúncios". (O fluxo OAuth real depende das envs/conta de teste — Task 7/handoff.) Conferir `read_console_messages` sem erros.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src/components/marketing/ads-manager-tab.tsx "src/app/(app)/marketing/page.tsx"
-git commit -m "feat(google-ads): aba Gerenciador de anúncios real (conectar + KPIs + gráfico + campanhas)"
+git add src/components/reports/google-ads-report.tsx "src/app/(app)/relatorios/page.tsx" "src/app/(app)/marketing/page.tsx"
+git commit -m "feat(google-ads): guia Google Ads real em Relatórios + remove Gerenciador de anúncios do Marketing"
 ```
 
 ---
@@ -1041,7 +1045,7 @@ GOOGLE_ADS_API_VERSION=v18
 In `AGENTS.md`, adicionar uma seção concisa (pt-BR, no tom do arquivo) do módulo Google Ads e atualizar a nota de "próxima migração livre" para **0024**. Conteúdo a refletir (bater com o código):
 - Arquitetura: OAuth por empresa (`/api/google-ads/oauth/start|callback`), overview em `/api/google-ads/overview` (GAQL `searchStream`, somente leitura); token guardado por `location_id`, **inacessível ao cliente** (coluna `refresh_token` revogada; só service-role lê).
 - Dados: migração `0023_google_ads.sql` (`google_ads_connections`).
-- Cliente `src/lib/google-ads/client.ts`, repo `src/lib/data/repos/db/google-ads.ts`, UI `src/components/marketing/ads-manager-tab.tsx` (aba Gerenciador de anúncios).
+- Cliente `src/lib/google-ads/client.ts`, repo `src/lib/data/repos/db/google-ads.ts`, UI `src/components/reports/google-ads-report.tsx` (guia Google Ads em Relatórios).
 - Envs (nunca `NEXT_PUBLIC_`): `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_ADS_API_VERSION`.
 - Passos manuais (Gabriel): GCP (ativar Google Ads API + tela de consentimento + OAuth client Web com os redirects); developer token na MCC (test account imediato, Basic access p/ produção); envs na Vercel.
 

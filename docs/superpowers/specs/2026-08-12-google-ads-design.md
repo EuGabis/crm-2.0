@@ -1,13 +1,13 @@
 # Google Ads (Visão geral, somente leitura) — Design Spec
 
-> Módulo **Marketing → Gerenciador de anúncios** do Lito CRM: espelhar a tela
+> Módulo **Relatórios → Google Ads** do Lito CRM: espelhar a tela
 > "Visão geral" do Google Ads (KPIs + gráfico + campanhas) com dados reais da
 > conta conectada, via **API oficial do Google Ads**, **somente leitura**.
 > Data: 2026-08-12. Convenções: `AGENTS.md`.
 
 ## Objetivo
 
-Substituir o mock da aba "Gerenciador de anúncios" por um espelho real da Visão
+Substituir o mock da guia "Google Ads" (em Relatórios) por um espelho real da Visão
 geral do Google Ads da empresa conectada: cartões de **Cliques, Conversões,
 Custo/conv., Custo**, um **gráfico** de série temporal (Cliques × Conversões) no
 período, e uma **tabela de campanhas** (nome, status, métricas). Cada empresa
@@ -34,7 +34,8 @@ conecta a própria conta Google via OAuth; o CRM lê os dados por GAQL.
 4. **Construir e validar já contra uma conta de TESTE do Google Ads** (o developer
    token tem acesso a conta de teste imediatamente). Quando o **Basic access** for
    aprovado, a mesma conexão aponta pra conta real — **sem mudança de código**.
-5. UI dentro de **Marketing → Gerenciador de anúncios** (área do Claude B / UI).
+5. UI dentro de **Relatórios → guia Google Ads** (área do Claude B / UI); a aba
+   "Gerenciador de anúncios" sai do Marketing.
 
 ## Arquitetura
 
@@ -167,10 +168,11 @@ Datas default (se ausentes): últimos 30 dias (fuso do servidor; aceitável na v
 - `startConnectUrl()` — retorna `/api/google-ads/oauth/start` (a UI faz
   `window.location.href = ...` para sair pro consentimento).
 
-## UI (`src/components/marketing/ads-manager-tab.tsx`)
+## UI (`src/components/reports/google-ads-report.tsx`)
 
-Substitui o bloco mock de "Gerenciador de anúncios" em
-`src/app/(app)/marketing/page.tsx` por `<AdsManagerTab />`.
+Substitui o bloco mock da guia "Google Ads" em
+`src/app/(app)/relatorios/page.tsx` por `<GoogleAdsReport />`, e remove a aba
+"Gerenciador de anúncios" do Marketing (`src/app/(app)/marketing/page.tsx`).
 
 - **Sem conexão:** empty state "Conecte sua conta do Google Ads" + botão
   **"Conectar Google Ads"** (vai pro `/oauth/start`). Trata `?error=` (toast).
@@ -198,7 +200,7 @@ badge de status). Texto pt-BR; moeda via `formatBRL` quando `currency_code = BRL
    client account (ou usar as de teste do Google) para validar OAuth + dados ponta a ponta.
 4. **Envs:** `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_OAUTH_CLIENT_ID`,
    `GOOGLE_OAUTH_CLIENT_SECRET` no `.env.local` e na Vercel; redeploy.
-5. Conectar via a UI (`/marketing` → Gerenciador de anúncios → Conectar Google Ads).
+5. Conectar via a UI (`/relatorios` → Google Ads → Conectar Google Ads).
 
 ## Segurança
 
