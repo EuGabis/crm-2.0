@@ -14,6 +14,7 @@ export async function GET() {
   const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
   if (!clientId) return Response.json({ error: "OAuth do Google não configurado" }, { status: 503 });
 
+  const state = signState();
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri(),
@@ -22,7 +23,27 @@ export async function GET() {
     access_type: "offline",
     prompt: "consent",
     include_granted_scopes: "true",
-    state: signState(),
+    state,
   });
-  return Response.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`, 302);
+
+  // Vincula o state ao navegador que iniciou o fluxo (defesa extra além da assinatura HMAC).
+  const isHttps = (process.env.NEXT_PUBLIC_APP_URL || "").startsWith("https");
+  const cookie = [
+    `ga_oauth_state=${state}`,
+    "HttpOnly",
+    "SameSite=Lax",
+    "Path=/api/google-ads/oauth",
+    "Max-Age=600",
+    isHttps ? "Secure" : "",
+  ]
+    .filter(Boolean)
+    .join("; ");
+
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: `https://accounts.google.com/o/oauth2/v2/auth?${params}`,
+      "Set-Cookie": cookie,
+    },
+  });
 }

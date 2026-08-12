@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { exchangeCode, getCustomerInfo, listAccessibleCustomers } from "@/lib/google-ads/client";
@@ -7,7 +8,13 @@ import { redirectUri, verifyState } from "@/lib/google-ads/state";
 export const dynamic = "force-dynamic";
 
 function back(base: string, params: string) {
-  return Response.redirect(`${base.replace(/\/$/, "")}/marketing?tab=ads&${params}`, 302);
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: `${base.replace(/\/$/, "")}/relatorios?${params}`,
+      "Set-Cookie": "ga_oauth_state=; Path=/api/google-ads/oauth; Max-Age=0",
+    },
+  });
 }
 
 /** Recebe o code do Google, troca por tokens, pega a 1ª conta e salva a conexão. */
@@ -19,7 +26,11 @@ export async function GET(request: Request) {
   const oauthError = url.searchParams.get("error");
 
   if (oauthError) return back(appUrl, `error=${encodeURIComponent(oauthError)}`);
-  if (!verifyState(state)) return back(appUrl, "error=state_invalido");
+
+  const cookieState = (await cookies()).get("ga_oauth_state")?.value ?? null;
+  if (!verifyState(state) || !cookieState || cookieState !== state) {
+    return back(appUrl, "error=state_invalido");
+  }
   if (!code) return back(appUrl, "error=sem_code");
 
   const supabase = await createClient();
