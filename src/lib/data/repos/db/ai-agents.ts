@@ -122,14 +122,14 @@ export const aiAgentActions = {
     const locationId = useDbStore.getState().locationId;
     if (!locationId) return false;
     const supabase = createClient();
+    const { error: setError } = await supabase.from("ai_agents").update({ is_primary: true }).eq("id", id);
+    if (setError) return false;
     const { error: clearError } = await supabase
       .from("ai_agents")
       .update({ is_primary: false })
       .eq("location_id", locationId)
       .neq("id", id);
     if (clearError) return false;
-    const { error } = await supabase.from("ai_agents").update({ is_primary: true }).eq("id", id);
-    if (error) return false;
     const s = useAgentsStore.getState();
     s.set(s.agents.map((a) => ({ ...a, isPrimary: a.id === id })));
     return true;

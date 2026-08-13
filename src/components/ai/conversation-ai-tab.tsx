@@ -182,7 +182,11 @@ export function ConversationAiTab() {
                           >Tornar principal</button>
                         )}
                         <button
-                          onClick={(e) => { e.stopPropagation(); void aiAgentActions.remove(a.id).then((ok) => ok && toast.success("Agente excluído")); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!window.confirm(`Excluir o agente "${a.name}"? Essa ação não pode ser desfeita.`)) return;
+                            void aiAgentActions.remove(a.id).then((ok) => ok && toast.success("Agente excluído"));
+                          }}
                           className="text-rose-600 hover:underline"
                         >Excluir</button>
                       </div>
