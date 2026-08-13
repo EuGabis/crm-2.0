@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - **Spec:** `docs/superpowers/specs/2026-08-12-conversation-ai-design.md`. Convenções: `AGENTS.md`. Depende da Fundação de IA (`src/lib/ai/openai.ts`, `ai_logs`, `OPENAI_API_KEY`).
-- **Migração livre = `0027`** → `supabase/migrations/0027_ai_agents.sql`. Idempotente. ⚠️ O outro Claude pode pegar `0027` — reconciliar no merge (renumerar como foi feito: 0020→0022).
+- **Migração livre = `0028`** (0027 já é `0027_conversas_rail.sql` do outro Claude) → `supabase/migrations/0028_ai_agents.sql`. Idempotente. ⚠️ O outro Claude pode pegar `0028` — reconciliar no merge (renumerar como foi feito: 0020→0022).
 - **Migrações aplicadas pelo Gabriel** no SQL Editor (o worker NÃO aplica).
 - **Sem runner de testes:** verificação = `npx tsc --noEmit` **e** `npm run build` limpos + checagens. Não invente pytest/jest.
 - **`OPENAI_API_KEY` server-only** (já existe da fundação); `/api/ai/chat` é AUTENTICADA (fica no matcher normal do `proxy.ts` — NÃO alterar). Nenhuma env nova.
@@ -24,7 +24,7 @@
 ## File Structure
 
 **Criar:**
-- `supabase/migrations/0027_ai_agents.sql` — tabela `ai_agents` (RLS).
+- `supabase/migrations/0028_ai_agents.sql` — tabela `ai_agents` (RLS).
 - `src/app/api/ai/chat/route.ts` — POST autenticado: carrega agente, chat com histórico, log.
 - `src/lib/data/repos/db/ai-agents.ts` — repo (CRUD + setPrimary + chat; tipo `AiAgent`).
 - `src/components/ai/conversation-ai-tab.tsx` — a aba Conversation AI real (lista + form + teste).
@@ -35,19 +35,19 @@
 
 ---
 
-## Task 1: Migração 0027 (ai_agents)
+## Task 1: Migração 0028 (ai_agents)
 
 Cria a tabela dos agentes. Deliverable: SQL pronto pro Gabriel; `tsc`/`build` limpos.
 
 **Files:**
-- Create: `supabase/migrations/0027_ai_agents.sql`
+- Create: `supabase/migrations/0028_ai_agents.sql`
 
 **Interfaces:**
 - Produces (SQL): `public.ai_agents(id, location_id, name, personality, goal, extra_info, model, status, is_primary, channels text[], actions jsonb, created_at, updated_at)`.
 
 - [ ] **Step 1: Escrever a migração**
 
-Create `supabase/migrations/0027_ai_agents.sql`:
+Create `supabase/migrations/0028_ai_agents.sql`:
 
 ```sql
 -- ============================================================
@@ -102,7 +102,7 @@ create trigger ai_agents_updated_at before update on public.ai_agents
 
 - [ ] **Step 2: Aplicação (Gabriel)**
 
-Pedir ao Gabriel para rodar `supabase/migrations/0027_ai_agents.sql` no SQL Editor. (O worker não aplica.)
+Pedir ao Gabriel para rodar `supabase/migrations/0028_ai_agents.sql` no SQL Editor. (O worker não aplica.)
 
 - [ ] **Step 3: Verificar build**
 
@@ -112,8 +112,8 @@ Expected: sem erros.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add supabase/migrations/0027_ai_agents.sql
-git commit -m "feat(ia): migração 0027 (ai_agents)"
+git add supabase/migrations/0028_ai_agents.sql
+git commit -m "feat(ia): migração 0028 (ai_agents)"
 ```
 
 ---
@@ -744,7 +744,7 @@ In `src/app/(app)/agentes-ia/page.tsx`:
 Run: `npx tsc --noEmit && npm run build`
 Expected: sem erros; sem símbolos não usados.
 
-Browser (se `OPENAI_API_KEY` + migração `0027` estiverem prontos): `/agentes-ia` → Conversation AI → "+ Criar bot" (nome) → preencher Personalidade/Meta → Salvar → no "Testar seu bot", mandar uma mensagem → resposta real coerente. Sem a chave, a resposta dá toast de 503 — esperado. `read_console_messages` sem erros.
+Browser (se `OPENAI_API_KEY` + migração `0028` estiverem prontos): `/agentes-ia` → Conversation AI → "+ Criar bot" (nome) → preencher Personalidade/Meta → Salvar → no "Testar seu bot", mandar uma mensagem → resposta real coerente. Sem a chave, a resposta dá toast de 503 — esperado. `read_console_messages` sem erros.
 
 - [ ] **Step 4: Commit**
 
@@ -764,8 +764,8 @@ Documenta o módulo. Deliverable: build limpo; `AGENTS.md` atualizado.
 
 - [ ] **Step 1: Doc no AGENTS.md**
 
-In `AGENTS.md`, na seção da Fundação de IA (ou logo abaixo), adicionar um parágrafo do Conversation AI e atualizar a nota de "próxima migração livre" para **0028**. Rodar `ls supabase/migrations/` antes; nossa migração é `0027_ai_agents.sql` → se nada maior existir, próxima livre = **0028**. Conteúdo (bater com o código):
-- Conversation AI (aba de `/agentes-ia`): agentes reais em `ai_agents` (migração `0027`), componente `src/components/ai/conversation-ai-tab.tsx`, repo `src/lib/data/repos/db/ai-agents.ts`. O "Testar seu bot" usa `POST /api/ai/chat` (monta o system prompt do agente + histórico → OpenAI; grava `ai_logs` feature "agent-test").
+In `AGENTS.md`, na seção da Fundação de IA (ou logo abaixo), adicionar um parágrafo do Conversation AI e atualizar a nota de "próxima migração livre" para **0028**. Rodar `ls supabase/migrations/` antes; nossa migração é `0028_ai_agents.sql` → se nada maior existir, próxima livre = **0029**. Conteúdo (bater com o código):
+- Conversation AI (aba de `/agentes-ia`): agentes reais em `ai_agents` (migração `0028`), componente `src/components/ai/conversation-ai-tab.tsx`, repo `src/lib/data/repos/db/ai-agents.ts`. O "Testar seu bot" usa `POST /api/ai/chat` (monta o system prompt do agente + histórico → OpenAI; grava `ai_logs` feature "agent-test").
 - Ainda MOCK nessa aba: KPIs, Logs, IA de voz, Base de Conhecimento, execução das ações, e auto-responder em conversas reais (fase seguinte, depende da Meta/WhatsApp). Sem env nova.
 
 - [ ] **Step 2: Verificar build**
@@ -777,14 +777,14 @@ Expected: sem erros.
 
 ```bash
 git add AGENTS.md
-git commit -m "docs(ia): seção Conversation AI e próxima migração livre 0028"
+git commit -m "docs(ia): seção Conversation AI e próxima migração livre 0029"
 ```
 
 ---
 
 ## Handoff (Gabriel — fora do código)
 
-1. Rodar `supabase/migrations/0027_ai_agents.sql` no SQL Editor.
+1. Rodar `supabase/migrations/0028_ai_agents.sql` no SQL Editor.
 2. Garantir `OPENAI_API_KEY` na Vercel (da Fundação de IA) — sem env nova.
 3. Merge → deploy. Em `/agentes-ia → Conversation AI`: criar agente, preencher, salvar, e conversar no "Testar seu bot".
 
