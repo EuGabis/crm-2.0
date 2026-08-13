@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - **Spec:** `docs/superpowers/specs/2026-08-12-ia-fundacao-design.md`. Convenções: `AGENTS.md`.
-- **Migração livre = `0025`** → `supabase/migrations/0025_ai_logs.sql`. Idempotente. ⚠️ O outro Claude pode pegar `0025` — reconciliar no merge (renumerar como foi feito: 0020→0022).
+- **Migração livre = `0026`** → `supabase/migrations/0026_ai_logs.sql` (0025 já é `0025_conversas_atribuicao.sql` do trabalho paralelo). Idempotente. ⚠️ O outro Claude pode pegar `0026` também — reconciliar no merge (renumerar como foi feito: 0020→0022).
 - **Migrações aplicadas pelo Gabriel** no SQL Editor (o worker NÃO aplica nem acessa o banco).
 - **Sem runner de testes:** verificação = `npx tsc --noEmit` **e** `npm run build` limpos + checagens (curl/estático). Não invente pytest/jest.
 - **Segredo nunca `NEXT_PUBLIC_`.** Envs novas: `OPENAI_API_KEY` (secreta) e `OPENAI_MODEL` (default `gpt-4o-mini`). Em `.env.local`, `.env.example`, Vercel (valor real colado pelo Gabriel — o worker só referencia `process.env.*`).
@@ -26,7 +26,7 @@
 ## File Structure
 
 **Criar:**
-- `supabase/migrations/0025_ai_logs.sql` — tabela `ai_logs` (RLS).
+- `supabase/migrations/0026_ai_logs.sql` — tabela `ai_logs` (RLS).
 - `src/lib/ai/openai.ts` — cliente server da OpenAI (`chat`, `defaultModel`). Server-only.
 - `src/app/api/ai/generate/route.ts` — POST autenticado: chama a OpenAI + grava log.
 - `src/lib/data/repos/db/ai.ts` — repo (`aiActions.generate`, `useAiLogs`, `useAiUsage`, tipo `AiLog`).
@@ -42,14 +42,14 @@
 Cria a tabela de logs de geração. Deliverable: SQL pronto pro Gabriel; `tsc`/`build` limpos.
 
 **Files:**
-- Create: `supabase/migrations/0025_ai_logs.sql`
+- Create: `supabase/migrations/0026_ai_logs.sql`
 
 **Interfaces:**
 - Produces (SQL): `public.ai_logs(id, location_id, feature, model, prompt, response, prompt_tokens, completion_tokens, created_by, created_at)`.
 
 - [ ] **Step 1: Escrever a migração**
 
-Create `supabase/migrations/0025_ai_logs.sql`:
+Create `supabase/migrations/0026_ai_logs.sql`:
 
 ```sql
 -- ============================================================
@@ -89,7 +89,7 @@ create policy "membros criam ai_logs" on public.ai_logs
 
 - [ ] **Step 2: Aplicação (Gabriel)**
 
-Pedir ao Gabriel para rodar `supabase/migrations/0025_ai_logs.sql` no SQL Editor. (O worker não aplica.)
+Pedir ao Gabriel para rodar `supabase/migrations/0026_ai_logs.sql` no SQL Editor. (O worker não aplica.)
 
 - [ ] **Step 3: Verificar build**
 
@@ -99,7 +99,7 @@ Expected: sem erros (nenhum código novo ainda).
 - [ ] **Step 4: Commit**
 
 ```bash
-git add supabase/migrations/0025_ai_logs.sql
+git add supabase/migrations/0026_ai_logs.sql
 git commit -m "feat(ia): migração 0025 (ai_logs)"
 ```
 
@@ -569,9 +569,9 @@ OPENAI_MODEL=gpt-4o-mini
 
 - [ ] **Step 2: Doc do módulo no AGENTS.md**
 
-In `AGENTS.md`, adicionar uma seção concisa (pt-BR, no tom do arquivo) da Fundação de IA e atualizar a nota de "próxima migração livre" para **0026**. Rodar `ls supabase/migrations/` antes e usar (maior número + 1) — nossa migração é `0025_ai_logs.sql`; se nada maior existir, próxima livre = **0026**. Conteúdo a refletir (bater com o código):
+In `AGENTS.md`, adicionar uma seção concisa (pt-BR, no tom do arquivo) da Fundação de IA e atualizar a nota de "próxima migração livre" para **0027**. Rodar `ls supabase/migrations/` antes e usar (maior número + 1) — nossa migração é `0026_ai_logs.sql`; se nada maior existir, próxima livre = **0027**. Conteúdo a refletir (bater com o código):
 - Fundação de IA (OpenAI): cliente server `src/lib/ai/openai.ts` (chave só no servidor, modelo por `OPENAI_MODEL`), rota autenticada `POST /api/ai/generate` (motor genérico; grava `ai_logs`), repo `src/lib/data/repos/db/ai.ts`.
-- Migração `0025_ai_logs.sql` (tabela `ai_logs`: modelo, prompt, resposta, tokens, quem chamou).
+- Migração `0026_ai_logs.sql` (tabela `ai_logs`: modelo, prompt, resposta, tokens, quem chamou).
 - AI Studio (`/ai-studio`) usa a fundação: playground gera de verdade + KPIs/lista de uso saem de `ai_logs`. Agentes de IA (`/agentes-ia`) ainda MOCK — features (Content AI, Conversation AI, base de conhecimento) virão em cima dessa base, cada uma como spec própria.
 - Envs (nunca `NEXT_PUBLIC_`): `OPENAI_API_KEY`, `OPENAI_MODEL` (default `gpt-4o-mini`).
 
@@ -584,14 +584,14 @@ Expected: sem erros.
 
 ```bash
 git add .env.example AGENTS.md
-git commit -m "docs(ia): envs, seção da Fundação de IA e próxima migração livre 0026"
+git commit -m "docs(ia): envs, seção da Fundação de IA e próxima migração livre 0027"
 ```
 
 ---
 
 ## Handoff (Gabriel — fora do código)
 
-1. Rodar `supabase/migrations/0025_ai_logs.sql` no SQL Editor.
+1. Rodar `supabase/migrations/0026_ai_logs.sql` no SQL Editor.
 2. Pôr `OPENAI_API_KEY` (e opcional `OPENAI_MODEL`) no `.env.local` e na **Vercel** (production+preview+development) → redeploy (ou deixar a env antes do merge).
 3. Merge → deploy. Testar em `/ai-studio` → playground → "Gerar".
 
