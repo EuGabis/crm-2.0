@@ -386,8 +386,8 @@ Cloud API → celular.
   `phone_number_id` único), colunas `messages.wa_message_id|status|channel_id` e
   `conversations.channel_id`. Migração 0023 = Google Ads, 0024 = Formulários,
   0025 = atribuição de conversas, 0026 = `ai_logs`, 0027 = rail das conversas,
-  0028 = mensagens agendadas, 0029 = finalizar/arquivar conversas (ver seções
-  próprias abaixo); **próxima migração livre: 0030**.
+  0028 = mensagens agendadas, 0029 = finalizar/arquivar conversas,
+  0030 = `ai_agents` (ver seções próprias abaixo); **próxima migração livre: 0031**.
 - Env (privadas, nunca `NEXT_PUBLIC_`): `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`,
   `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_GRAPH_VERSION` (default `v21.0`).
 
@@ -488,6 +488,15 @@ com spec própria.
   (`/agentes-ia`) continua **MOCK** — vem depois, em cima dessa base.
 - Env (privadas, nunca `NEXT_PUBLIC_`): `OPENAI_API_KEY`, `OPENAI_MODEL`
   (default `gpt-4o-mini`).
+
+## Conversation AI (aba de `/agentes-ia`)
+
+**Peças:**
+- Agentes reais em `ai_agents` (migração `0030_ai_agents.sql`), aba **Conversation AI** do módulo **Agentes de IA** (`src/components/ai/conversation-ai-tab.tsx`).
+- Repo `src/lib/data/repos/db/ai-agents.ts` — CRUD (`aiAgentActions.create/update/remove/setPrimary`), `useAiAgents`, chat (`aiAgentActions.chat`).
+- Botão **Testar seu bot** usa `POST /api/ai/chat` (monta o system prompt do agente + histórico de conversa → OpenAI; grava `ai_logs` feature "agent-test").
+- Ainda MOCK nessa aba: KPIs, aba Logs (histórico de testes), IA de voz, Base de Conhecimento, execução das ações do agente na conversa, e auto-responder em conversas reais de clientes (depende da Meta/WhatsApp estar conectado — fase seguinte).
+- Sem env nova; reusa `OPENAI_API_KEY` da fundação.
 
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
