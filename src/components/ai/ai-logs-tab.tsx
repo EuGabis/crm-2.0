@@ -24,7 +24,9 @@ export function AiLogsTab() {
       <p className="mb-4 text-xs text-slate-500">
         Últimas gerações e testes executados pela sua IA.
       </p>
-      {ready && logs.length === 0 ? (
+      {!ready ? (
+        <div className="rounded-xl border bg-white p-8 text-center text-xs text-slate-400">Carregando...</div>
+      ) : logs.length === 0 ? (
         <div className="rounded-xl border border-dashed bg-white p-8 text-center">
           <p className="text-sm font-semibold text-slate-700">Nenhuma atividade ainda</p>
           <p className="mt-1 text-xs text-slate-500">
