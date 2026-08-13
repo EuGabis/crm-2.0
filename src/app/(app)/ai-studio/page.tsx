@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Bot, Sparkles, Workflow, Zap } from "lucide-react";
 import { toast } from "sonner";
@@ -8,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { brand } from "@/lib/config/brand";
+import { aiActions, useAiLogs, useAiUsage } from "@/lib/data/repos/db/ai";
 
 const SHORTCUTS = [
   {
@@ -31,6 +33,25 @@ const SHORTCUTS = [
 ];
 
 export default function AiStudioPage() {
+  const [prompt, setPrompt] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [loading, setLoading] = useState(false);
+  const usage = useAiUsage();
+  const { logs } = useAiLogs(8);
+
+  const generate = async () => {
+    if (!prompt.trim()) {
+      toast.error("Escreva o que você quer gerar");
+      return;
+    }
+    setLoading(true);
+    setAnswer("");
+    const res = await aiActions.generate({ prompt: prompt.trim(), feature: "playground" });
+    setLoading(false);
+    if (res.ok) setAnswer(res.text ?? "");
+    else toast.error(res.error ?? "Não foi possível gerar");
+  };
+
   return (
     <div className="p-6">
       <h1 className="mb-1 text-lg font-bold text-slate-900">AI Studio</h1>
@@ -40,9 +61,15 @@ export default function AiStudioPage() {
       </p>
 
       <div className="mb-5 grid gap-3 md:grid-cols-3">
-        <KpiCard label="Agentes ativos" value="2" hint="IA Comercial e Recuperação de carrinho" />
-        <KpiCard label="Conversas com IA no mês" value="312" delta={22.4} />
-        <KpiCard label="Tempo economizado" value="9h 40min" delta={12.8} />
+        <KpiCard
+          label="Gerações no mês"
+          value={usage.ready ? usage.callsThisMonth.toLocaleString("pt-BR") : "—"}
+        />
+        <KpiCard
+          label="Tokens no mês"
+          value={usage.ready ? usage.tokensThisMonth.toLocaleString("pt-BR") : "—"}
+        />
+        <KpiCard label="Modelo" value="OpenAI" hint="Configurável em OPENAI_MODEL" />
       </div>
 
       <div className="mb-5 grid gap-3 md:grid-cols-3">
@@ -80,19 +107,38 @@ export default function AiStudioPage() {
           <div className="space-y-1">
             <Label className="text-xs">Descreva sua ideia</Label>
             <Textarea
-              placeholder="Ex.: quando um lead novo chegar pelo Instagram, responda em até 1 minuto e agende uma demonstração"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="Ex.: escreva um e-mail curto convidando leads para uma aula experimental de aviação"
               className="min-h-20 text-xs"
             />
           </div>
-          <Button
-            size="sm"
-            className="h-8 text-xs"
-            onClick={() => toast.info("Geração com IA chega com o backend")}
-          >
-            <Sparkles className="size-3.5" /> Gerar
+          <Button size="sm" className="h-8 text-xs" onClick={generate} disabled={loading}>
+            <Sparkles className="size-3.5" /> {loading ? "Gerando..." : "Gerar"}
           </Button>
+          {answer && (
+            <div className="mt-3 whitespace-pre-wrap rounded-lg border bg-slate-50 p-3 text-xs text-slate-700">
+              {answer}
+            </div>
+          )}
         </div>
       </div>
+
+      {logs.length > 0 && (
+        <div className="mt-5 max-w-2xl">
+          <h2 className="mb-2 text-sm font-semibold text-slate-700">Últimas gerações</h2>
+          <div className="divide-y rounded-xl border bg-white">
+            {logs.map((l) => (
+              <div key={l.id} className="px-4 py-2 text-xs">
+                <p className="truncate font-medium text-slate-700">{l.prompt}</p>
+                <p className="text-[10px] text-slate-400">
+                  {l.feature} · {l.model} · {l.promptTokens + l.completionTokens} tokens
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
