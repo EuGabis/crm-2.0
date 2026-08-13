@@ -384,9 +384,9 @@ Cloud API → celular.
   do inbox (envia de verdade, mostra tique de status, pede template fora da janela).
 - Migração `0022_whatsapp.sql` — tabela `whatsapp_channels` (RLS padrão membership;
   `phone_number_id` único), colunas `messages.wa_message_id|status|channel_id` e
-  `conversations.channel_id`. Migração 0023 = Google Ads, 0024 = Formulários (ver
-  seções próprias abaixo); **próxima migração livre: 0025** (0020/0021 = Pagamentos,
-  0022 = WhatsApp).
+  `conversations.channel_id`. Migração 0023 = Google Ads, 0024 = Formulários,
+  0025 = atribuição de conversas, 0026 = `ai_logs` (ver seções próprias abaixo);
+  **próxima migração livre: 0027**.
 - Env (privadas, nunca `NEXT_PUBLIC_`): `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`,
   `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_GRAPH_VERSION` (default `v21.0`).
 
@@ -464,6 +464,29 @@ capturando lead como Contato real + tag, pronto pra e-mail marketing.
 - Sem env nova, sem serviço externo. Embed = colar
   `<script src="https://lito-crm.vercel.app/api/forms/{slug}/embed.js"></script>`
   no HTML da página.
+
+## Fundação de IA (OpenAI)
+
+Base genérica de geração via IA, sem feature específica embutida — outras features
+(Content AI, Conversation AI, base de conhecimento) entram por cima dela, cada uma
+com spec própria.
+
+**Peças:**
+- `src/lib/ai/openai.ts` — cliente OpenAI do lado servidor; chave nunca chega ao
+  client. Modelo por `OPENAI_MODEL` (default `gpt-4o-mini`) se a chamada não
+  especificar outro.
+- `POST /api/ai/generate` — rota autenticada (RLS via sessão do usuário), motor
+  genérico de geração; grava cada chamada em `ai_logs` (modelo, prompt, resposta,
+  tokens, `feature`).
+- Repo `src/lib/data/repos/db/ai.ts` — `aiActions.generate`, `useAiLogs`,
+  `useAiUsage` (KPIs de uso a partir de `ai_logs`).
+- Migração `0026_ai_logs.sql` — tabela `ai_logs` (modelo, prompt, resposta,
+  `prompt_tokens`/`completion_tokens`, `created_by`), RLS padrão membership.
+- **AI Studio** (`/ai-studio`) já usa a fundação: playground gera de verdade e a
+  aba de uso mostra KPIs/lista reais vindos de `ai_logs`. **Agentes de IA**
+  (`/agentes-ia`) continua **MOCK** — vem depois, em cima dessa base.
+- Env (privadas, nunca `NEXT_PUBLIC_`): `OPENAI_API_KEY`, `OPENAI_MODEL`
+  (default `gpt-4o-mini`).
 
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
