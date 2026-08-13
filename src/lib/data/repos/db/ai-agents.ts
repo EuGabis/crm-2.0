@@ -81,7 +81,11 @@ export const aiAgentActions = {
     const locationId = useDbStore.getState().locationId;
     if (!locationId) return { ok: false, error: "Empresa não encontrada" };
     const supabase = createClient();
-    const first = useAgentsStore.getState().agents.length === 0;
+    const { count } = await supabase
+      .from("ai_agents")
+      .select("id", { count: "exact", head: true })
+      .eq("location_id", locationId);
+    const first = (count ?? 0) === 0;
     const { data, error } = await supabase
       .from("ai_agents")
       .insert({ location_id: locationId, name: input.name.trim(), is_primary: first })
@@ -118,11 +122,12 @@ export const aiAgentActions = {
     const locationId = useDbStore.getState().locationId;
     if (!locationId) return false;
     const supabase = createClient();
-    await supabase
+    const { error: clearError } = await supabase
       .from("ai_agents")
       .update({ is_primary: false })
       .eq("location_id", locationId)
       .neq("id", id);
+    if (clearError) return false;
     const { error } = await supabase.from("ai_agents").update({ is_primary: true }).eq("id", id);
     if (error) return false;
     const s = useAgentsStore.getState();
