@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isAdvance } from "@/lib/whatsapp/status-rank";
+import { maybeAutoReply } from "@/lib/whatsapp/auto-reply";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -61,7 +62,7 @@ export async function POST(request: Request) {
 
       const { data: channel } = await db
         .from("whatsapp_channels")
-        .select("id, location_id")
+        .select("id, location_id, daily_limit")
         .eq("phone_number_id", phoneNumberId)
         .maybeSingle();
       if (!channel) continue; // número não cadastrado aqui — ignora
@@ -179,8 +180,24 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
     wa_message_id: waId,
     status: "delivered",
   });
-  // corrida: entrega duplicada da Meta — o índice único barra o 2º insert; ignore
-  if (insErr && (insErr as any).code !== "23505") throw insErr;
+  if (insErr) {
+    // corrida: entrega duplicada da Meta — o índice único barra o 2º insert.
+    // Nesse caso NÃO responde de novo (evita auto-reply duplicado).
+    if ((insErr as any).code !== "23505") throw insErr;
+    return;
+  }
+
+  // Auto-responder: só para mensagens de texto de verdade, best-effort.
+  if (m.text?.body) {
+    await maybeAutoReply(db, {
+      locationId: channel.location_id,
+      conversationId: conv.id,
+      channelId: channel.id,
+      phoneNumberId: value?.metadata?.phone_number_id,
+      toPhone: phone,
+      dailyLimit: channel.daily_limit ?? 1000,
+    });
+  }
 }
 
 async function applyStatus(db: any, st: any) {

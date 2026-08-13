@@ -132,7 +132,12 @@ export async function POST(request: Request) {
 
   await supabase
     .from("conversations")
-    .update({ last_message_at: msg.created_at, last_message_preview: bodyText, sla_days: 0 })
+    .update({
+      last_message_at: msg.created_at,
+      last_message_preview: bodyText,
+      sla_days: 0,
+      bot_paused: true,
+    })
     .eq("id", conversationId);
 
   return Response.json({ ok: true, id: msg.id, waMessageId });
