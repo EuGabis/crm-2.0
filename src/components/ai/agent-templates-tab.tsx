@@ -58,9 +58,10 @@ export function AgentTemplatesTab({ onUsed }: { onUsed: () => void }) {
       setBusy(null);
       return toast.error(created.error ?? "Não foi possível criar o agente");
     }
-    await aiAgentActions.update(created.id, { personality: t.personality, goal: t.goal });
+    const applied = await aiAgentActions.update(created.id, { personality: t.personality, goal: t.goal });
     setBusy(null);
-    toast.success("Agente criado a partir do modelo");
+    if (applied) toast.success("Agente criado a partir do modelo");
+    else toast.warning("Agente criado, mas não foi possível aplicar o modelo — ajuste no Conversation AI");
     onUsed();
   };
 
