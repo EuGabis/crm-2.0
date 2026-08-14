@@ -120,3 +120,58 @@ export function markRead(phoneNumberId: string, messageId: string) {
     }),
   });
 }
+
+/** Metadados da mídia recebida: a Meta entrega só o ID; isto devolve a URL temporária. */
+export async function getMediaInfo(
+  mediaId: string,
+): Promise<{ url: string; mime: string; size: number }> {
+  const json = await graph(`${mediaId}`, { method: "GET" });
+  return { url: json.url, mime: json.mime_type ?? "", size: json.file_size ?? 0 };
+}
+
+/** Baixa o binário da mídia (a URL da Meta exige o Bearer). */
+export async function downloadMedia(url: string): Promise<{ bytes: ArrayBuffer; mime: string }> {
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token()}` } });
+  if (!res.ok) throw new Error(`Falha ao baixar mídia (${res.status})`);
+  return {
+    bytes: await res.arrayBuffer(),
+    mime: res.headers.get("content-type") || "application/octet-stream",
+  };
+}
+
+/** Sobe um binário para a Cloud API e devolve o media id para enviar. */
+export async function uploadMedia(
+  phoneNumberId: string,
+  bytes: ArrayBuffer,
+  mime: string,
+  filename: string,
+): Promise<string> {
+  const form = new FormData();
+  form.append("messaging_product", "whatsapp");
+  form.append("type", mime);
+  form.append("file", new Blob([bytes], { type: mime }), filename);
+  const res = await fetch(`${BASE}/${phoneNumberId}/media`, {
+    method: "POST",
+    // NÃO setar Content-Type: o FormData define o boundary sozinho.
+    headers: { Authorization: `Bearer ${token()}` },
+    body: form,
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json?.error?.message || `Upload de mídia falhou (${res.status})`);
+  return json.id as string;
+}
+
+export function sendMediaMessage(
+  phoneNumberId: string,
+  to: string,
+  kind: "image" | "audio" | "video",
+  mediaId: string,
+  caption?: string,
+) {
+  const media: Record<string, unknown> = { id: mediaId };
+  if (caption && kind !== "audio") media.caption = caption; // áudio não leva caption
+  return graph(`${phoneNumberId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ messaging_product: "whatsapp", to, type: kind, [kind]: media }),
+  });
+}
