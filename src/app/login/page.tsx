@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Loader2, Mail, MessageCircle } from "lucide-react";
 import { toast } from "sonner";
@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { brand } from "@/lib/config/brand";
 import { createClient } from "@/lib/supabase/client";
+import { markBrowserSession } from "@/lib/auth/session-marker";
 
 type Mode = "login" | "signup";
 
@@ -77,6 +78,16 @@ export default function LoginPage() {
   const [confirmationSent, setConfirmationSent] = useState(false);
   const [form, setForm] = useState({ name: "", company: "", email: "", password: "" });
 
+  // Aviso quando a pessoa chega deslogada (inatividade / fechou o navegador).
+  useEffect(() => {
+    const reason = new URLSearchParams(window.location.search).get("reason");
+    if (reason === "idle") {
+      toast.info("Sessão encerrada por inatividade. Entre novamente.");
+    } else if (reason === "expired") {
+      toast.info("Faça login novamente para continuar.");
+    }
+  }, []);
+
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -102,6 +113,7 @@ export default function LoginPage() {
         );
         return;
       }
+      markBrowserSession();
       router.push("/dashboard");
       router.refresh();
     } else {
@@ -135,6 +147,7 @@ export default function LoginPage() {
       }
       if (data.session) {
         toast.success("Conta criada! Sua empresa e pipeline já estão prontos.");
+        markBrowserSession();
         router.push("/dashboard");
         router.refresh();
       } else {
