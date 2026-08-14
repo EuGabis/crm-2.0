@@ -50,7 +50,7 @@ export interface Opportunity {
   createdAt: string;
 }
 
-export type MessageType = "text" | "audio" | "image" | "file" | "event";
+export type MessageType = "text" | "audio" | "image" | "file" | "event" | "video";
 
 /** Ciclo de vida de uma mensagem agendada (migração 0028). */
 export type ScheduleStatus = "pendente" | "enviando" | "enviada" | "falhou" | "cancelada";

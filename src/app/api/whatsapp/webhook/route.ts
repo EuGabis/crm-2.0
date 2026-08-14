@@ -69,11 +69,19 @@ export async function POST(request: Request) {
       if (!channel) continue; // número não cadastrado aqui — ignora
 
       for (const m of value.messages ?? []) {
-        await handleIncoming(db, channel, value, m);
+        try {
+          await handleIncoming(db, channel, value, m);
+        } catch {
+          // best-effort: uma mensagem malformada/sem suporte nunca derruba o webhook.
+        }
       }
       for (const st of value.statuses ?? []) {
         if (st?.id && st?.status) {
-          await applyStatus(db, st);
+          try {
+            await applyStatus(db, st);
+          } catch {
+            // best-effort: idem para status.
+          }
         }
       }
     }
