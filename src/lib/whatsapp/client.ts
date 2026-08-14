@@ -168,10 +168,15 @@ export async function uploadMedia(
   form.append("messaging_product", "whatsapp");
   form.append("type", mime);
   form.append("file", new Blob([bytes], { type: mime }), filename);
-  const res = await fetch(`${BASE}/${phoneNumberId}/media`, {
+  // Token no query string (não no header). Numa requisição multipart (FormData) o
+  // header Authorization estava sendo descartado, e a Meta respondia #190/HTTP 401
+  // "Authentication Error" como se não houvesse token. O access_token na URL é o
+  // método documentado da Meta pro upload de mídia e é imune a esse detalhe do
+  // fetch+FormData. Chamada server->Meta (o token nunca vai pro cliente).
+  const url = `${BASE}/${phoneNumberId}/media?access_token=${encodeURIComponent(token())}`;
+  const res = await fetch(url, {
     method: "POST",
     // NÃO setar Content-Type: o FormData define o boundary sozinho.
-    headers: { Authorization: `Bearer ${token()}` },
     body: form,
   });
   const json = await res.json().catch(() => ({}));
