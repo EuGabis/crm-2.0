@@ -340,6 +340,15 @@ export const conversationActions = {
     return true;
   },
 
+  /** Insere otimisticamente uma mensagem já gravada no servidor (envio WhatsApp),
+   *  com dedup por id (o Realtime pode reentregar a mesma). */
+  pushSent(row: any): void {
+    if (!row) return;
+    const m = mapMessage(row);
+    const s = useConvStore.getState();
+    if (!s.messages.some((x) => x.id === m.id)) s.patch({ messages: [...s.messages, m] });
+  },
+
   /**
    * Envia uma mídia (imagem, arquivo ou áudio): sobe o binário para o bucket
    * privado e cria a mensagem com os metadados. `duration` só para áudio.

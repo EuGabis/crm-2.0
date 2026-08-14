@@ -140,5 +140,5 @@ export async function POST(request: Request) {
     })
     .eq("id", conversationId);
 
-  return Response.json({ ok: true, id: msg.id, waMessageId });
+  return Response.json({ ok: true, id: msg.id, waMessageId, message: msg });
 }

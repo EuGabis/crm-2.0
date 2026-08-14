@@ -247,6 +247,7 @@ export function Composer({ conversationId }: { conversationId: string }) {
       setSending(false);
       if (res.ok) {
         setBody("");
+        conversationActions.pushSent(res.message);
         toast.success("Mensagem enviada via WhatsApp");
       } else if (res.needsTemplate) {
         setTemplateForced(true);

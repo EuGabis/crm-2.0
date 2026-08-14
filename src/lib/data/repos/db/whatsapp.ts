@@ -143,7 +143,7 @@ export const whatsappActions = {
     channelId?: string;
     text?: string;
     template?: { name: string; language: string; components?: unknown[] };
-  }): Promise<{ ok: boolean; needsTemplate?: boolean; error?: string }> {
+  }): Promise<{ ok: boolean; needsTemplate?: boolean; error?: string; message?: any }> {
     const res = await fetch("/api/whatsapp/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -153,7 +153,7 @@ export const whatsappActions = {
     if (!res.ok) {
       return { ok: false, needsTemplate: json?.needsTemplate, error: json?.error };
     }
-    return { ok: true };
+    return { ok: true, message: json.message };
   },
 
   async sendMedia(args: {
