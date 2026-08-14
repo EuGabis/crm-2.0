@@ -195,6 +195,16 @@ Supabase). Peças:
   O `onboarding@resend.dev` só era necessário antes da verificação (entregava só ao
   dono da conta) e não deve mais ser usado.
 
+## Logo da empresa (Whitelabel)
+
+Logo customizável da empresa, exibido no topo da sidebar, perfil e e-mail de convite.
+
+**Peças:**
+- Bucket público `branding` + coluna `locations.logo_url` (migração `0034_company_logo.sql`).
+- Upload em `/configuracoes/perfil` via `accountActions.uploadCompanyLogo` (valida PNG/JPG/WEBP/SVG ≤2MB, caminho `{location_id}/logo-*`, admin-only pela RLS de locations).
+- Exibido no perfil, no topo da sidebar (no lugar do símbolo, mantendo `brand.name`) e no e-mail de convite (`InviteEmailData.logoUrl`).
+- Sem env nova.
+
 ## Automações — EM CONSTRUÇÃO (leia antes de continuar)
 
 Spec: `docs/superpowers/specs/2026-08-07-automacoes-design.md`
@@ -388,8 +398,8 @@ Cloud API → celular.
   0025 = atribuição de conversas, 0026 = `ai_logs`, 0027 = rail das conversas,
   0028 = mensagens agendadas, 0029 = finalizar/arquivar conversas,
   0030 = `ai_agents`, 0031 = template tracking, 0032 = autoreply,
-  0033 = departamentos (ver seções próprias abaixo);
-  **próxima migração livre: 0034**.
+  0033 = departamentos, 0034 = logo da empresa (ver seções próprias abaixo);
+  **próxima migração livre: 0035**.
 - Env (privadas, nunca `NEXT_PUBLIC_`): `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`,
   `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_GRAPH_VERSION` (default `v21.0`).
 
