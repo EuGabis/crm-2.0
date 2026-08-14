@@ -411,12 +411,20 @@ Cloud API → celular.
   0028 = mensagens agendadas, 0029 = finalizar/arquivar conversas,
   0030 = `ai_agents`, 0031 = template tracking, 0032 = autoreply,
   0033 = departamentos, 0034 = logo da empresa,
-  0035 = conversas por número (ver seções próprias abaixo),
-  0036 = view de estado da integração de pagamentos,
-  0037 = painéis do dashboard (por usuário e por departamento);
-  **próxima migração livre: 0038**.
+  0035 = conversas por número, 0036 = view de estado da integração de pagamentos,
+  0037 = painéis do dashboard (por usuário e por departamento),
+  0038 = `type='video'` em `messages` (ver mídia real abaixo);
+  **próxima migração livre: 0039**.
 - Env (privadas, nunca `NEXT_PUBLIC_`): `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`,
   `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_GRAPH_VERSION` (default `v21.0`).
+- **Mídia real (imagem/áudio/vídeo)** — helpers em `src/lib/whatsapp/client.ts`
+  (`getMediaInfo`/`downloadMedia`/`uploadMedia`/`sendMediaMessage`); o webhook baixa
+  a mídia recebida para o bucket privado `conversation-media` e grava `media_path`;
+  o envio acontece pela rota `POST /api/whatsapp/send-media`, acionada pelo composer
+  do inbox logo após o `sendMedia` local (otimista); o thread (`src/components/inbox/thread.tsx`,
+  `MediaContent`) renderiza imagem/áudio/vídeo por URL assinada (`useMediaUrl`) —
+  vídeo usa `<video controls>`. Áudio gravado no navegador prefere `ogg/opus`
+  (WhatsApp não aceita `webm`). Sem env nova.
 
 **Passos manuais que FALTAM para ligar em produção (Gabriel):**
 1. Envs acima na Vercel (production+preview+development) + confirmar que

@@ -218,6 +218,15 @@ function MediaContent({ message, out }: { message: Message; out: boolean }) {
     return <AudioPlayer url={url} duration={message.body || undefined} out={out} />;
   }
 
+  if (message.type === "video") {
+    return url ? (
+      // eslint-disable-next-line jsx-a11y/media-has-caption
+      <video src={url ?? undefined} controls className="max-h-72 w-full rounded-lg" />
+    ) : (
+      <div className="h-40 w-52 animate-pulse rounded-lg bg-black/10" />
+    );
+  }
+
   // file
   return (
     <a
@@ -330,7 +339,10 @@ function MessageBubble({ message }: { message: Message }) {
           </p>
         )}
         {message.scheduleStatus && <ScheduleTag message={message} />}
-        {message.type === "audio" || message.type === "image" || message.type === "file" ? (
+        {message.type === "audio" ||
+        message.type === "image" ||
+        message.type === "video" ||
+        message.type === "file" ? (
           <MediaContent message={message} out={isOut && !message.internal} />
         ) : (
           message.body
