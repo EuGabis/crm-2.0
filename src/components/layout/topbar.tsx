@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { createClient } from "@/lib/supabase/client";
+import { clearBrowserSession } from "@/lib/auth/session-marker";
 import { SupportPanel } from "./support-panel";
 import { WebphonePanel } from "./webphone-panel";
 import { useWebphone } from "./webphone-store";
@@ -38,6 +39,7 @@ export function Topbar() {
     } catch {
       // ignora — segue para o login de qualquer forma
     }
+    clearBrowserSession(); // some com o marcador de sessão do navegador também
     // Navegação dura: força o middleware a reavaliar já com o cookie limpo.
     window.location.href = "/login";
   };

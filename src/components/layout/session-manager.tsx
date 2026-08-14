@@ -26,7 +26,9 @@ export function SessionManager() {
     if (done.current) return;
     done.current = true;
     try {
-      await createClient().auth.signOut();
+      // scope "local": só esta sessão/dispositivo — não derruba o mesmo usuário
+      // logado no celular/outro navegador.
+      await createClient().auth.signOut({ scope: "local" });
     } catch {
       // best-effort — mesmo se falhar, limpamos o marcador e mandamos pro login
     }
@@ -43,6 +45,7 @@ export function SessionManager() {
   // Parte 1 — idle timeout (só papel "user")
   useEffect(() => {
     if (me?.role !== "user") return; // admin / desconhecido → não arma o timer
+    lastActivity.current = Date.now(); // zera o relógio quando o timer realmente arma
     const bump = () => {
       lastActivity.current = Date.now();
     };
