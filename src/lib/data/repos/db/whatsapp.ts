@@ -38,6 +38,7 @@ function mapRow(r: any): WhatsappChannel {
 interface ChannelsState {
   loaded: boolean;
   loading: boolean;
+  retries: number;
   channels: WhatsappChannel[];
   load: () => Promise<void>;
   set: (channels: WhatsappChannel[]) => void;
@@ -46,6 +47,7 @@ interface ChannelsState {
 const useChannelsStore = create<ChannelsState>((setState, get) => ({
   loaded: false,
   loading: false,
+  retries: 0,
   channels: [],
   set: (channels) => setState({ channels }),
   load: async () => {
@@ -66,8 +68,13 @@ const useChannelsStore = create<ChannelsState>((setState, get) => ({
       .eq("location_id", locationId)
       .order("created_at", { ascending: false });
     if (error) {
-      // Erro transitório — não cacheia vazio; permite nova tentativa.
+      // Erro transitório na query (locationId já ok) — não cacheia vazio. O hook não
+      // refaz sozinho aqui (locationId não muda), então agenda retry bounded.
       setState({ loading: false });
+      if (get().retries < 5) {
+        setState({ retries: get().retries + 1 });
+        setTimeout(() => void get().load(), 1000);
+      }
       return;
     }
     setState({ loaded: true, loading: false, channels: (data ?? []).map(mapRow) });
