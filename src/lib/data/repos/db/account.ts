@@ -11,6 +11,7 @@ export interface CompanyProfile {
   id: string;
   name: string;
   city: string;
+  logoUrl: string;
 }
 
 export interface MyProfile {
@@ -53,7 +54,7 @@ export const useAccountStore = create<AccountState>((set, get) => ({
       loaded: true,
       loading: false,
       company: location
-        ? { id: location.id, name: location.name, city: location.city ?? "" }
+        ? { id: location.id, name: location.name, city: location.city ?? "", logoUrl: location.logo_url ?? "" }
         : null,
       profile: profile
         ? {
@@ -93,8 +94,45 @@ export const accountActions = {
     if (error) return { ok: false, error: "Não foi possível salvar" };
     if (!data) return { ok: false, error: "Apenas administradores podem editar a empresa" };
     useAccountStore.getState().patch({
-      company: { id: data.id, name: data.name, city: data.city ?? "" },
+      company: { id: data.id, name: data.name, city: data.city ?? "", logoUrl: data.logo_url ?? "" },
     });
+    return { ok: true };
+  },
+
+  async uploadCompanyLogo(file: File): Promise<{ ok: boolean; error?: string }> {
+    const { company } = useAccountStore.getState();
+    if (!company) return { ok: false, error: "Empresa não encontrada" };
+    const okTypes = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
+    if (!okTypes.includes(file.type)) {
+      return { ok: false, error: "Use uma imagem PNG, JPG, WEBP ou SVG" };
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      return { ok: false, error: "A imagem deve ter no máximo 2 MB" };
+    }
+    const supabase = createClient();
+    const ext = file.name.split(".").pop()?.toLowerCase() || "png";
+    const path = `${company.id}/logo-${Date.now()}.${ext}`;
+    const { error: upErr } = await supabase.storage
+      .from("branding")
+      .upload(path, file, { upsert: true, contentType: file.type });
+    if (upErr) return { ok: false, error: "Falha ao enviar a imagem" };
+
+    const { data: pub } = supabase.storage.from("branding").getPublicUrl(path);
+    const logoUrl = pub.publicUrl;
+
+    const { data, error } = await supabase
+      .from("locations")
+      .update({ logo_url: logoUrl })
+      .eq("id", company.id)
+      .select()
+      .maybeSingle();
+    if (error || !data) {
+      // não-admin ou falha: não deixa binário órfão no bucket
+      await supabase.storage.from("branding").remove([path]);
+      return { ok: false, error: "Apenas administradores podem alterar o logo" };
+    }
+
+    useAccountStore.getState().patch({ company: { ...company, logoUrl } });
     return { ok: true };
   },
 
