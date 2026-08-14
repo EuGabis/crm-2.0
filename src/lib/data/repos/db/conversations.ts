@@ -346,8 +346,13 @@ export const conversationActions = {
    */
   async sendMedia(
     conversationId: string,
-    opts: { file: File; kind: "image" | "file" | "audio"; channel: Channel; duration?: string }
-  ): Promise<{ ok: boolean; error?: string }> {
+    opts: {
+      file: File;
+      kind: "image" | "file" | "audio" | "video";
+      channel: Channel;
+      duration?: string;
+    }
+  ): Promise<{ ok: boolean; error?: string; messageId?: string; mediaPath?: string; mime?: string }> {
     const location = loc();
     if (!location) return { ok: false, error: "Empresa não encontrada" };
     const { file, kind, channel, duration } = opts;
@@ -387,7 +392,13 @@ export const conversationActions = {
     }
 
     const preview =
-      kind === "image" ? "📷 Imagem" : kind === "audio" ? "🎤 Áudio" : `📎 ${file.name}`;
+      kind === "image"
+        ? "📷 Imagem"
+        : kind === "audio"
+          ? "🎤 Áudio"
+          : kind === "video"
+            ? "🎬 Vídeo"
+            : `📎 ${file.name}`;
     await supabase
       .from("conversations")
       .update({ last_message_at: data.created_at, last_message_preview: preview, sla_days: 0 })
@@ -404,7 +415,7 @@ export const conversationActions = {
           : c
       ),
     });
-    return { ok: true };
+    return { ok: true, messageId: data.id, mediaPath: path, mime: file.type || undefined };
   },
 
   /** URL assinada temporária (bucket é privado) para exibir/baixar a mídia. */

@@ -156,6 +156,25 @@ export const whatsappActions = {
     return { ok: true };
   },
 
+  async sendMedia(args: {
+    conversationId: string;
+    channelId?: string;
+    messageId: string;
+    mediaPath: string;
+    mime?: string;
+    kind: "image" | "audio" | "video";
+    caption?: string;
+  }): Promise<{ ok: boolean; needsTemplate?: boolean; error?: string }> {
+    const res = await fetch("/api/whatsapp/send-media", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(args),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, needsTemplate: json?.needsTemplate, error: json?.error };
+    return { ok: true };
+  },
+
   async templates(channelId: string): Promise<
     Array<{ name: string; language: string; category: string; components: unknown[] }>
   > {

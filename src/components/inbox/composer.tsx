@@ -92,25 +92,52 @@ export function Composer({ conversationId }: { conversationId: string }) {
 
   const uploadFile = async (file: File) => {
     const isImg = file.type.startsWith("image/");
+    const isVideo = file.type.startsWith("video/");
     const name = file.name.toLowerCase();
     const isDoc =
       file.type === "application/pdf" ||
       name.endsWith(".pdf") ||
       file.type.includes("wordprocessingml") ||
       name.endsWith(".docx");
-    if (!isImg && !isDoc) {
-      toast.error("Aceito imagens, PDF ou DOCX");
+    if (!isImg && !isVideo && !isDoc) {
+      toast.error("Aceito imagem, vídeo, PDF ou DOCX");
       return;
     }
+    const kind = isImg ? "image" : isVideo ? "video" : "file";
     setUploading(true);
     const res = await conversationActions.sendMedia(conversationId, {
       file,
-      kind: isImg ? "image" : "file",
+      kind,
       channel,
     });
     setUploading(false);
-    if (res.ok) toast.success(isImg ? "Imagem enviada" : "Arquivo enviado");
-    else toast.error(res.error ?? "Não foi possível enviar");
+    if (res.ok) {
+      toast.success(isImg ? "Imagem enviada" : isVideo ? "Vídeo enviado" : "Arquivo enviado");
+      if (
+        isWhatsapp &&
+        res.messageId &&
+        res.mediaPath &&
+        (kind === "image" || kind === "video")
+      ) {
+        const wa = await whatsappActions.sendMedia({
+          conversationId,
+          channelId: conversation?.channelId,
+          messageId: res.messageId,
+          mediaPath: res.mediaPath,
+          mime: res.mime,
+          kind,
+        });
+        if (!wa.ok) {
+          toast.error(
+            wa.needsTemplate
+              ? "Janela de 24h fechada — envie um template antes."
+              : wa.error ?? "A mídia ficou no inbox, mas falhou ao enviar no WhatsApp."
+          );
+        }
+      }
+    } else {
+      toast.error(res.error ?? "Não foi possível enviar");
+    }
   };
 
   const startRec = async () => {
@@ -120,7 +147,12 @@ export function Composer({ conversationId }: { conversationId: string }) {
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream);
+      const mimeType =
+        typeof MediaRecorder !== "undefined" &&
+        MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")
+          ? "audio/ogg;codecs=opus"
+          : "audio/webm";
+      const mr = new MediaRecorder(stream, { mimeType });
       chunksRef.current = [];
       cancelRef.current = false;
       mr.ondataavailable = (e) => {
@@ -132,8 +164,9 @@ export function Composer({ conversationId }: { conversationId: string }) {
         setRecording(false);
         if (cancelRef.current) return;
         const secs = Math.max(1, Math.round((Date.now() - startedRef.current) / 1000));
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        const file = new File([blob], `audio-${secs}s.webm`, { type: "audio/webm" });
+        const ext = mimeType.startsWith("audio/ogg") ? "ogg" : "webm";
+        const blob = new Blob(chunksRef.current, { type: mimeType });
+        const file = new File([blob], `audio-${secs}s.${ext}`, { type: mimeType });
         setUploading(true);
         const res = await conversationActions.sendMedia(conversationId, {
           file,
@@ -142,8 +175,28 @@ export function Composer({ conversationId }: { conversationId: string }) {
           duration: fmtSecs(secs),
         });
         setUploading(false);
-        if (res.ok) toast.success("Áudio enviado");
-        else toast.error(res.error ?? "Não foi possível enviar o áudio");
+        if (res.ok) {
+          toast.success("Áudio enviado");
+          if (isWhatsapp && res.messageId && res.mediaPath) {
+            const wa = await whatsappActions.sendMedia({
+              conversationId,
+              channelId: conversation?.channelId,
+              messageId: res.messageId,
+              mediaPath: res.mediaPath,
+              mime: res.mime,
+              kind: "audio",
+            });
+            if (!wa.ok) {
+              toast.error(
+                wa.needsTemplate
+                  ? "Janela de 24h fechada — envie um template antes."
+                  : wa.error ?? "A mídia ficou no inbox, mas falhou ao enviar no WhatsApp."
+              );
+            }
+          }
+        } else {
+          toast.error(res.error ?? "Não foi possível enviar o áudio");
+        }
       };
       startedRef.current = Date.now();
       mr.start();
@@ -339,11 +392,11 @@ export function Composer({ conversationId }: { conversationId: string }) {
             </PopoverContent>
           </Popover>
 
-          {/* Anexo (imagem, PDF ou DOCX) */}
+          {/* Anexo (imagem, vídeo, PDF ou DOCX) */}
           <input
             ref={fileRef}
             type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/3gpp,application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
@@ -354,7 +407,7 @@ export function Composer({ conversationId }: { conversationId: string }) {
           <button
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
-            title="Anexar imagem, PDF ou DOCX"
+            title="Anexar imagem, vídeo, PDF ou DOCX"
             className="flex size-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50"
           >
             {uploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
