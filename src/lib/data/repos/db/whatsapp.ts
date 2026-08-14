@@ -54,25 +54,35 @@ const useChannelsStore = create<ChannelsState>((setState, get) => ({
     await useDbStore.getState().load();
     const locationId = useDbStore.getState().locationId;
     if (!locationId) {
-      setState({ loading: false, loaded: true });
+      // Empresa ainda não disponível — NÃO marca loaded (senão prende "nenhum canal"
+      // vazio pra sempre). O hook refaz quando o locationId aparecer.
+      setState({ loading: false });
       return;
     }
     const supabase = createClient();
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("whatsapp_channels")
       .select("*")
       .eq("location_id", locationId)
       .order("created_at", { ascending: false });
+    if (error) {
+      // Erro transitório — não cacheia vazio; permite nova tentativa.
+      setState({ loading: false });
+      return;
+    }
     setState({ loaded: true, loading: false, channels: (data ?? []).map(mapRow) });
   },
 }));
 
 export function useWhatsappChannels() {
   const { channels, loaded, loading, load } = useChannelsStore();
+  // Refaz o load quando a empresa (locationId) ficar disponível — evita cachear
+  // "nenhum canal" quando a sessão ainda não estava pronta no primeiro render.
+  const locationId = useDbStore((s) => s.locationId);
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [locationId]);
   return { channels, ready: loaded && !loading };
 }
 

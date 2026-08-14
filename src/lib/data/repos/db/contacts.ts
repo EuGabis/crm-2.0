@@ -27,6 +27,7 @@ function mapContact(row: any): Contact {
 interface DbState {
   loaded: boolean;
   loading: boolean;
+  retries: number;
   locationId: string | null;
   userId: string | null;
   contacts: Contact[];
@@ -38,6 +39,7 @@ interface DbState {
 export const useDbStore = create<DbState>((set, get) => ({
   loaded: false,
   loading: false,
+  retries: 0,
   locationId: null,
   userId: null,
   contacts: [],
@@ -48,13 +50,26 @@ export const useDbStore = create<DbState>((set, get) => ({
     set({ loading: true });
     const supabase = createClient();
 
-    const [{ data: auth }, { data: memberships }] = await Promise.all([
+    const [{ data: auth, error: authErr }, { data: memberships, error: memErr }] = await Promise.all([
       supabase.auth.getUser(),
       supabase.from("location_members").select("location_id, user_id, role"),
     ]);
 
-    const membership = memberships?.find((m) => m.user_id === auth.user?.id) ?? memberships?.[0];
+    // Falha transitória (sessão ainda hidratando, rede, RLS momentânea): NÃO cacheia
+    // como carregado — senão o app inteiro trava vazio ("nenhum canal", listas sumindo)
+    // até um F5. Deixa loaded=false e tenta de novo em 1s (bounded) pra se auto-recuperar.
+    if (authErr || memErr || !auth?.user) {
+      set({ loading: false });
+      if (get().retries < 5) {
+        set({ retries: get().retries + 1 });
+        setTimeout(() => void get().load(), 1000);
+      }
+      return;
+    }
+
+    const membership = memberships?.find((m) => m.user_id === auth.user!.id) ?? memberships?.[0];
     if (!membership) {
+      // Usuário válido mas sem empresa (caso real e raro): marca carregado pra não spinnar.
       set({ loading: false, loaded: true });
       return;
     }
