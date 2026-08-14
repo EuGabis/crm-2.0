@@ -34,6 +34,10 @@ create policy "membros atualizam logo" on storage.objects
   using (
     bucket_id = 'branding'
     and nullif((storage.foldername(name))[1], '')::uuid in (select private.user_locations())
+  )
+  with check (
+    bucket_id = 'branding'
+    and nullif((storage.foldername(name))[1], '')::uuid in (select private.user_locations())
   );
 
 drop policy if exists "membros apagam logo" on storage.objects;
