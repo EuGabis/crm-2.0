@@ -17,6 +17,7 @@ import {
   Zap,
 } from "lucide-react";
 import { toast } from "sonner";
+import OpusMediaRecorder from "opus-media-recorder";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -78,7 +79,9 @@ export function Composer({ conversationId }: { conversationId: string }) {
   // texto do seletor muda.
   const [templateForced, setTemplateForced] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
+  // opus-media-recorder não tem types próprios (módulo declarado como `any`
+  // em src/types/opus-media-recorder.d.ts) — a API é compatível com MediaRecorder.
+  const recorderRef = useRef<InstanceType<typeof OpusMediaRecorder> | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const startedRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -147,15 +150,20 @@ export function Composer({ conversationId }: { conversationId: string }) {
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType =
-        typeof MediaRecorder !== "undefined" &&
-        MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")
-          ? "audio/ogg;codecs=opus"
-          : "audio/webm";
-      const mr = new MediaRecorder(stream, { mimeType });
+      // Grava direto em ogg/opus no navegador (polyfill via WebAssembly) — é o
+      // único formato de áudio que a Cloud API do WhatsApp aceita, e o
+      // MediaRecorder nativo do Chrome/Edge só produz webm. Isso elimina a
+      // conversão server-side com ffmpeg, que não funciona no serverless da
+      // Vercel (binário fora do bundle).
+      const mimeType = "audio/ogg";
+      const workerOptions = {
+        encoderWorkerFactory: () => new Worker("/opus-media-recorder/encoderWorker.umd.js"),
+        OggOpusEncoderWasmPath: "/opus-media-recorder/OggOpusEncoder.wasm",
+      };
+      const mr = new OpusMediaRecorder(stream, { mimeType }, workerOptions);
       chunksRef.current = [];
       cancelRef.current = false;
-      mr.ondataavailable = (e) => {
+      mr.ondataavailable = (e: BlobEvent) => {
         if (e.data.size) chunksRef.current.push(e.data);
       };
       mr.onstop = async () => {
@@ -164,9 +172,8 @@ export function Composer({ conversationId }: { conversationId: string }) {
         setRecording(false);
         if (cancelRef.current) return;
         const secs = Math.max(1, Math.round((Date.now() - startedRef.current) / 1000));
-        const ext = mimeType.startsWith("audio/ogg") ? "ogg" : "webm";
-        const blob = new Blob(chunksRef.current, { type: mimeType });
-        const file = new File([blob], `audio-${secs}s.${ext}`, { type: mimeType });
+        const blob = new Blob(chunksRef.current, { type: "audio/ogg" });
+        const file = new File([blob], `audio-${secs}s.ogg`, { type: "audio/ogg" });
         setUploading(true);
         const res = await conversationActions.sendMedia(conversationId, {
           file,

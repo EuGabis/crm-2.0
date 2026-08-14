@@ -1,80 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { uploadMedia, sendMediaMessage } from "@/lib/whatsapp/client";
-import ffmpegPath from "ffmpeg-static";
-import { spawn } from "node:child_process";
-import { writeFile, readFile, unlink, copyFile, chmod, access, rename } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { randomUUID } from "node:crypto";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export const dynamic = "force-dynamic";
-// spawn/fs precisam do runtime Node (não edge) — deixamos explícito.
-export const runtime = "nodejs";
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-let cachedFfmpeg: string | null = null;
-/** No Vercel o node_modules é read-only e o binário do ffmpeg-static perde a
- *  permissão de execução no bundle serverless — copiamos p/ /tmp e damos chmod. */
-async function ffmpegBin(): Promise<string> {
-  if (cachedFfmpeg) return cachedFfmpeg;
-  const src = ffmpegPath as unknown as string;
-  if (!src) throw new Error("ffmpeg-static não resolveu o caminho do binário");
-  const dst = join(tmpdir(), "ffmpeg-bin");
-  try {
-    await access(dst);
-  } catch {
-    // Cópia ATÔMICA: escreve num arquivo único e renomeia (rename é atômico), pra
-    // duas invocações concorrentes no mesmo container não gerarem um binário truncado.
-    const tmp = join(tmpdir(), `ffmpeg-${randomUUID()}`);
-    await copyFile(src, tmp); // node_modules é read-only no Vercel → copia p/ /tmp
-    await chmod(tmp, 0o755); // garante permissão de execução
-    await rename(tmp, dst).catch(async () => {
-      await unlink(tmp).catch(() => {});
-    });
-  }
-  cachedFfmpeg = dst;
-  return dst;
-}
-
-/** Converte áudio webm (gravado pelo navegador) para ogg/opus — o único
- *  formato de áudio que a Cloud API do WhatsApp aceita. */
-async function webmToOgg(bytes: ArrayBuffer): Promise<ArrayBuffer> {
-  const inPath = join(tmpdir(), `a-${randomUUID()}.webm`);
-  const outPath = join(tmpdir(), `a-${randomUUID()}.ogg`);
-  await writeFile(inPath, Buffer.from(bytes));
-  try {
-    const bin = await ffmpegBin();
-    await new Promise<void>((resolve, reject) => {
-      const p = spawn(bin, [
-        "-i",
-        inPath,
-        "-vn",
-        "-c:a",
-        "libopus",
-        "-f",
-        "ogg",
-        "-y",
-        outPath,
-      ]);
-      // Timeout defensivo: não deixa um ffmpeg travado pendurar a request.
-      const timer = setTimeout(() => p.kill("SIGKILL"), 20000);
-      p.on("error", (e) => {
-        clearTimeout(timer);
-        reject(e);
-      });
-      p.on("close", (code) => {
-        clearTimeout(timer);
-        code === 0 ? resolve() : reject(new Error(`ffmpeg saiu ${code}`));
-      });
-    });
-    const out = await readFile(outPath);
-    return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer;
-  } finally {
-    await unlink(inPath).catch(() => {});
-    await unlink(outPath).catch(() => {});
-  }
-}
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -155,21 +84,8 @@ export async function POST(request: Request) {
     .download(mediaPath);
   if (dlErr || !blob) return Response.json({ error: "Mídia não encontrada" }, { status: 400 });
   const bytes = await blob.arrayBuffer();
-
-  let sendBytes = bytes;
-  let sendMime = mime || blob.type || "application/octet-stream";
-  if (kind === "audio" && /webm/i.test(sendMime)) {
-    try {
-      sendBytes = await webmToOgg(bytes);
-      sendMime = "audio/ogg";
-    } catch (e) {
-      await supabase.from("messages").update({ status: "failed" }).eq("id", messageId);
-      return Response.json(
-        { error: "Falha ao converter o áudio: " + (e instanceof Error ? e.message : String(e)) },
-        { status: 502 },
-      );
-    }
-  }
+  const sendBytes = bytes;
+  const sendMime = mime || blob.type || "application/octet-stream";
 
   let waResp: any;
   try {
