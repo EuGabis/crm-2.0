@@ -387,7 +387,7 @@ Cloud API → celular.
   `conversations.channel_id`. Migração 0023 = Google Ads, 0024 = Formulários,
   0025 = atribuição de conversas, 0026 = `ai_logs`, 0027 = rail das conversas,
   0028 = mensagens agendadas, 0029 = finalizar/arquivar conversas,
-  0030 = `ai_agents` (ver seções próprias abaixo); **próxima migração livre: 0031**.
+  0030 = `ai_agents`, 0031 = template tracking, 0032 = autoreply (ver seções próprias abaixo); **próxima migração livre: 0033**.
 - Env (privadas, nunca `NEXT_PUBLIC_`): `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`,
   `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_GRAPH_VERSION` (default `v21.0`).
 
@@ -401,6 +401,28 @@ Cloud API → celular.
 3. Criar o canal em `/whatsapp` com `phone_number_id`/`waba_id` (painel da Meta →
    WhatsApp → API Setup) e testar ponta a ponta (mensagem do celular → inbox;
    resposta pelo inbox → celular; template fora da janela de 24h).
+
+## WhatsApp — Auto-Responder (Bot de IA)
+
+Motor de resposta automática de IA para mensagens de entrada do WhatsApp. Acionado
+pelo webhook após gravar uma mensagem de TEXTO (mídia é ignorada). Best-effort: 
+falhas nunca quebram o 200 do webhook.
+
+**Arquitetura:**
+- `src/lib/whatsapp/auto-reply.ts` (`maybeAutoReply`) — chamado pelo webhook (service role)
+  após gravar mensagem de entrada de texto. Regras: só responde o agente principal
+  (`ai_agents.is_primary=true`) com `status='ativo'`; não responde se a conversa tem
+  `bot_paused=true` (handoff manual via `/api/whatsapp/send`); respeita o `daily_limit`
+  do canal (conta saídas de hoje); usa as últimas ~10 mensagens como contexto (ordem
+  cronológica).
+- IA: chama OpenAI (`chat()`) com a personalidade, objetivo e info extra do agente;
+  gera resposta em tempo real; envia via Cloud API.
+- Registro: grava a mensagem de saída + `ai_logs` com feature `"whatsapp-auto"` e
+  `created_by=null` (máquina). Modelo e token counts capturam uso real.
+- Migração `0032_whatsapp_autoreply.sql` — coluna `conversations.bot_paused`
+  (boolean, default false) para controlar handoff manual.
+- Env: reusa `OPENAI_API_KEY` da fundação de IA. Sem nova variável.
+- **Fora do proxy:** a chamada é máquina-a-máquina (webhook), sem sessão.
 
 ## Google Ads — leitura (KPIs/gráfico/campanhas em Relatórios)
 
