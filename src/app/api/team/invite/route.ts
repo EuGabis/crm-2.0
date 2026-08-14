@@ -60,7 +60,7 @@ export async function POST(request: Request) {
   }
 
   const [{ data: location }, { data: profile }] = await Promise.all([
-    supabase.from("locations").select("name").eq("id", membership.location_id).maybeSingle(),
+    supabase.from("locations").select("name, logo_url").eq("id", membership.location_id).maybeSingle(),
     supabase.from("profiles").select("name").eq("id", user.id).maybeSingle(),
   ]);
 
@@ -107,6 +107,7 @@ export async function POST(request: Request) {
     role,
     signupUrl: `${origin}/login`,
     email,
+    logoUrl: location?.logo_url ?? undefined,
   });
 
   try {

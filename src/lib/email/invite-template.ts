@@ -11,6 +11,8 @@ export interface InviteEmailData {
   signupUrl: string;
   /** E-mail convidado — usado para reforçar qual endereço usar no cadastro */
   email: string;
+  /** URL pública do logo da empresa (opcional) */
+  logoUrl?: string;
 }
 
 const INDIGO = "#6366f1";
@@ -46,9 +48,9 @@ export function renderInviteEmail(data: InviteEmailData): { subject: string; htm
                 <table role="presentation" cellpadding="0" cellspacing="0">
                   <tr>
                     <td style="padding-right:10px;">
-                      <div style="width:34px;height:34px;background-color:${INDIGO};border-radius:9px;color:#ffffff;font-size:17px;font-weight:800;line-height:34px;text-align:center;">
-                        ${brand.shortName[0]}
-                      </div>
+                      ${data.logoUrl
+                        ? `<img src="${data.logoUrl}" alt="${escapeHtml(data.companyName)}" width="34" height="34" style="width:34px;height:34px;border-radius:9px;object-fit:cover;display:block;" />`
+                        : `<div style="width:34px;height:34px;background-color:${INDIGO};border-radius:9px;color:#ffffff;font-size:17px;font-weight:800;line-height:34px;text-align:center;">${brand.shortName[0]}</div>`}
                     </td>
                     <td style="color:#ffffff;font-size:17px;font-weight:700;">${brand.name}</td>
                   </tr>
