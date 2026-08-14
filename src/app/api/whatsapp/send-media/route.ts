@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { uploadMedia, sendMediaMessage } from "@/lib/whatsapp/client";
 import ffmpegPath from "ffmpeg-static";
 import { spawn } from "node:child_process";
-import { writeFile, readFile, unlink, copyFile, chmod, access } from "node:fs/promises";
+import { writeFile, readFile, unlink, copyFile, chmod, access, rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -24,8 +24,14 @@ async function ffmpegBin(): Promise<string> {
   try {
     await access(dst);
   } catch {
-    await copyFile(src, dst); // node_modules é read-only no Vercel → copia p/ /tmp
-    await chmod(dst, 0o755); // garante permissão de execução
+    // Cópia ATÔMICA: escreve num arquivo único e renomeia (rename é atômico), pra
+    // duas invocações concorrentes no mesmo container não gerarem um binário truncado.
+    const tmp = join(tmpdir(), `ffmpeg-${randomUUID()}`);
+    await copyFile(src, tmp); // node_modules é read-only no Vercel → copia p/ /tmp
+    await chmod(tmp, 0o755); // garante permissão de execução
+    await rename(tmp, dst).catch(async () => {
+      await unlink(tmp).catch(() => {});
+    });
   }
   cachedFfmpeg = dst;
   return dst;
