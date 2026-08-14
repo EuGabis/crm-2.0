@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { uploadMedia, sendMediaMessage } from "@/lib/whatsapp/client";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -78,11 +79,19 @@ export async function POST(request: Request) {
     );
   }
 
-  // lê o arquivo do nosso Storage (RLS: membro lê a pasta da própria empresa)
-  const { data: blob, error: dlErr } = await supabase.storage
+  // lê o arquivo do nosso Storage com a chave de serviço: já autorizamos o usuário
+  // e a conversa acima, então não faz sentido a leitura depender do token da sessão
+  // (era o suspeito nº 1 do "Authentication Error" na hora de baixar a mídia).
+  const admin = createAdminClient();
+  const { data: blob, error: dlErr } = await admin.storage
     .from("conversation-media")
     .download(mediaPath);
-  if (dlErr || !blob) return Response.json({ error: "Mídia não encontrada" }, { status: 400 });
+  if (dlErr || !blob) {
+    return Response.json(
+      { error: "Mídia não encontrada: " + (dlErr?.message ?? "arquivo ausente") },
+      { status: 400 },
+    );
+  }
   const bytes = await blob.arrayBuffer();
   const sendBytes = bytes;
   const sendMime = mime || blob.type || "application/octet-stream";

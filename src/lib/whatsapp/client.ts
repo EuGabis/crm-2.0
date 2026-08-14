@@ -15,6 +15,24 @@ function token(): string {
   return t;
 }
 
+/**
+ * Formata o erro da Meta com TODO o contexto de diagnóstico: código, subcódigo,
+ * tipo e status HTTP. A mensagem crua ("Authentication Error") não diz o motivo;
+ * o código (190 = token, 10/200 = permissão, 100 = parâmetro) é o que resolve.
+ */
+function graphError(status: number, json: any, where: string): Error {
+  const e = json?.error ?? {};
+  const parts = [
+    e.message || "erro desconhecido",
+    e.code != null ? `#${e.code}` : null,
+    e.error_subcode != null ? `sub ${e.error_subcode}` : null,
+    e.type ? e.type : null,
+    `HTTP ${status}`,
+    `em ${where}`,
+  ].filter(Boolean);
+  return new Error(parts.join(" · "));
+}
+
 async function graph(path: string, init?: RequestInit): Promise<any> {
   const res = await fetch(`${BASE}/${path}`, {
     ...init,
@@ -26,7 +44,7 @@ async function graph(path: string, init?: RequestInit): Promise<any> {
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(json?.error?.message || `Graph API ${res.status}`);
+    throw graphError(res.status, json, `graph ${path.split("/")[1] ?? path}`);
   }
   return json;
 }
@@ -157,7 +175,7 @@ export async function uploadMedia(
     body: form,
   });
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json?.error?.message || `Upload de mídia falhou (${res.status})`);
+  if (!res.ok) throw graphError(res.status, json, "upload /media");
   return json.id as string;
 }
 
