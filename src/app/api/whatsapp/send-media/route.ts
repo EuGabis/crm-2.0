@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { uploadMedia, sendMediaMessage } from "@/lib/whatsapp/client";
 import ffmpegPath from "ffmpeg-static";
 import { spawn } from "node:child_process";
-import { writeFile, readFile, unlink } from "node:fs/promises";
+import { writeFile, readFile, unlink, copyFile, chmod, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -13,6 +13,24 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+let cachedFfmpeg: string | null = null;
+/** No Vercel o node_modules é read-only e o binário do ffmpeg-static perde a
+ *  permissão de execução no bundle serverless — copiamos p/ /tmp e damos chmod. */
+async function ffmpegBin(): Promise<string> {
+  if (cachedFfmpeg) return cachedFfmpeg;
+  const src = ffmpegPath as unknown as string;
+  if (!src) throw new Error("ffmpeg-static não resolveu o caminho do binário");
+  const dst = join(tmpdir(), "ffmpeg-bin");
+  try {
+    await access(dst);
+  } catch {
+    await copyFile(src, dst); // node_modules é read-only no Vercel → copia p/ /tmp
+    await chmod(dst, 0o755); // garante permissão de execução
+  }
+  cachedFfmpeg = dst;
+  return dst;
+}
+
 /** Converte áudio webm (gravado pelo navegador) para ogg/opus — o único
  *  formato de áudio que a Cloud API do WhatsApp aceita. */
 async function webmToOgg(bytes: ArrayBuffer): Promise<ArrayBuffer> {
@@ -20,8 +38,9 @@ async function webmToOgg(bytes: ArrayBuffer): Promise<ArrayBuffer> {
   const outPath = join(tmpdir(), `a-${randomUUID()}.ogg`);
   await writeFile(inPath, Buffer.from(bytes));
   try {
+    const bin = await ffmpegBin();
     await new Promise<void>((resolve, reject) => {
-      const p = spawn(ffmpegPath as unknown as string, [
+      const p = spawn(bin, [
         "-i",
         inPath,
         "-vn",
@@ -137,9 +156,12 @@ export async function POST(request: Request) {
     try {
       sendBytes = await webmToOgg(bytes);
       sendMime = "audio/ogg";
-    } catch {
+    } catch (e) {
       await supabase.from("messages").update({ status: "failed" }).eq("id", messageId);
-      return Response.json({ error: "Falha ao converter o áudio" }, { status: 502 });
+      return Response.json(
+        { error: "Falha ao converter o áudio: " + (e instanceof Error ? e.message : String(e)) },
+        { status: 502 },
+      );
     }
   }
 
