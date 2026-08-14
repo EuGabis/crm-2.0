@@ -1,9 +1,45 @@
 import { createClient } from "@/lib/supabase/server";
 import { uploadMedia, sendMediaMessage } from "@/lib/whatsapp/client";
+import ffmpegPath from "ffmpeg-static";
+import { spawn } from "node:child_process";
+import { writeFile, readFile, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export const dynamic = "force-dynamic";
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Converte áudio webm (gravado pelo navegador) para ogg/opus — o único
+ *  formato de áudio que a Cloud API do WhatsApp aceita. */
+async function webmToOgg(bytes: ArrayBuffer): Promise<ArrayBuffer> {
+  const inPath = join(tmpdir(), `a-${randomUUID()}.webm`);
+  const outPath = join(tmpdir(), `a-${randomUUID()}.ogg`);
+  await writeFile(inPath, Buffer.from(bytes));
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const p = spawn(ffmpegPath as unknown as string, [
+        "-i",
+        inPath,
+        "-vn",
+        "-c:a",
+        "libopus",
+        "-f",
+        "ogg",
+        "-y",
+        outPath,
+      ]);
+      p.on("error", reject);
+      p.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg saiu ${code}`))));
+    });
+    const out = await readFile(outPath);
+    return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer;
+  } finally {
+    await unlink(inPath).catch(() => {});
+    await unlink(outPath).catch(() => {});
+  }
+}
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -85,10 +121,22 @@ export async function POST(request: Request) {
   if (dlErr || !blob) return Response.json({ error: "Mídia não encontrada" }, { status: 400 });
   const bytes = await blob.arrayBuffer();
 
+  let sendBytes = bytes;
+  let sendMime = mime || blob.type || "application/octet-stream";
+  if (kind === "audio" && /webm/i.test(sendMime)) {
+    try {
+      sendBytes = await webmToOgg(bytes);
+      sendMime = "audio/ogg";
+    } catch {
+      await supabase.from("messages").update({ status: "failed" }).eq("id", messageId);
+      return Response.json({ error: "Falha ao converter o áudio" }, { status: 502 });
+    }
+  }
+
   let waResp: any;
   try {
-    const ext = (String(mime || "application/octet-stream").split("/")[1] || "bin").split(";")[0];
-    const mediaId = await uploadMedia(channel.phone_number_id, bytes, mime || blob.type, `media.${ext}`);
+    const ext = (String(sendMime || "application/octet-stream").split("/")[1] || "bin").split(";")[0];
+    const mediaId = await uploadMedia(channel.phone_number_id, sendBytes, sendMime, `media.${ext}`);
     waResp = await sendMediaMessage(channel.phone_number_id, to, kind, mediaId, caption);
   } catch (e) {
     await supabase.from("messages").update({ status: "failed" }).eq("id", messageId);
