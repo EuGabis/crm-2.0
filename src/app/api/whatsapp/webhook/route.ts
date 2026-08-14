@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isAdvance } from "@/lib/whatsapp/status-rank";
 import { maybeAutoReply } from "@/lib/whatsapp/auto-reply";
+import { getMediaInfo, downloadMedia } from "@/lib/whatsapp/client";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -124,7 +125,43 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
   }
   if (!contact) return;
 
-  const text: string = m.text?.body ?? `[${m.type ?? "mídia"}]`;
+  // Resolve o conteúdo: texto, ou mídia (imagem/áudio/vídeo) baixada da Meta.
+  let msgType = "text";
+  let body = "";
+  const media: {
+    media_path?: string;
+    media_name?: string;
+    media_mime?: string;
+    media_size?: number;
+  } = {};
+
+  if (m.type === "text") {
+    body = m.text?.body ?? "";
+  } else if (m.type === "image" || m.type === "audio" || m.type === "video") {
+    msgType = m.type;
+    const node = m[m.type] ?? {};
+    body = node.caption ?? "";
+    try {
+      const info = await getMediaInfo(node.id);
+      const dl = await downloadMedia(info.url);
+      const mime = dl.mime || info.mime || "application/octet-stream";
+      const ext = (mime.split("/")[1] || "bin").split(";")[0];
+      const path = `${channel.location_id}/${contact.id}/${crypto.randomUUID()}.${ext}`;
+      const { error: upErr } = await db.storage
+        .from("conversation-media")
+        .upload(path, new Uint8Array(dl.bytes), { contentType: mime, upsert: false });
+      if (upErr) throw upErr;
+      media.media_path = path;
+      media.media_name = `${m.type}.${ext}`;
+      media.media_mime = mime;
+      media.media_size = dl.bytes.byteLength;
+    } catch {
+      // Não conseguiu baixar/guardar — grava a mensagem com rótulo (nunca quebra o webhook).
+      if (!body) body = `[${m.type}]`;
+    }
+  } else {
+    body = `[${m.type ?? "mídia"}]`;
+  }
 
   // conversa de whatsapp desse contato
   let { data: conv } = await db
@@ -144,7 +181,7 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
         channel_id: channel.id,
         unread_count: 1,
         last_message_at: nowIso,
-        last_message_preview: text,
+        last_message_preview: body,
       })
       .select("id")
       .single();
@@ -156,7 +193,7 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
         channel_id: channel.id,
         unread_count: (conv.unread_count ?? 0) + 1,
         last_message_at: nowIso,
-        last_message_preview: text,
+        last_message_preview: body,
         // O cliente escreveu: a conversa volta para a caixa mesmo que alguém
         // tenha finalizado ou arquivado antes (0029). Perder mensagem de
         // cliente é pior do que desfazer um arquivamento.
@@ -173,12 +210,13 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
     location_id: channel.location_id,
     conversation_id: conv.id,
     direction: "in",
-    type: "text",
+    type: msgType,
     channel: "whatsapp",
-    body: text,
+    body,
     channel_id: channel.id,
     wa_message_id: waId,
     status: "delivered",
+    ...media,
   });
   if (insErr) {
     // corrida: entrega duplicada da Meta — o índice único barra o 2º insert.
