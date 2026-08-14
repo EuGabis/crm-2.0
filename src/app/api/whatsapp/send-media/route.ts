@@ -9,6 +9,8 @@ import { randomUUID } from "node:crypto";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export const dynamic = "force-dynamic";
+// spawn/fs precisam do runtime Node (não edge) — deixamos explícito.
+export const runtime = "nodejs";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Converte áudio webm (gravado pelo navegador) para ogg/opus — o único
@@ -30,8 +32,16 @@ async function webmToOgg(bytes: ArrayBuffer): Promise<ArrayBuffer> {
         "-y",
         outPath,
       ]);
-      p.on("error", reject);
-      p.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg saiu ${code}`))));
+      // Timeout defensivo: não deixa um ffmpeg travado pendurar a request.
+      const timer = setTimeout(() => p.kill("SIGKILL"), 20000);
+      p.on("error", (e) => {
+        clearTimeout(timer);
+        reject(e);
+      });
+      p.on("close", (code) => {
+        clearTimeout(timer);
+        code === 0 ? resolve() : reject(new Error(`ffmpeg saiu ${code}`));
+      });
     });
     const out = await readFile(outPath);
     return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer;
