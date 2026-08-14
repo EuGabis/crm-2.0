@@ -40,8 +40,13 @@ export function Sidebar() {
     <aside className="flex h-screen w-[240px] shrink-0 flex-col bg-[var(--lito-sidebar)]">
       <div className="px-4 pt-4">
         <div className="flex items-center gap-2">
-          <div className="flex size-8 items-center justify-center rounded-lg bg-[var(--lito-sidebar-accent)] text-sm font-black text-white">
-            {brand.shortName[0]}
+          <div className="flex size-8 items-center justify-center overflow-hidden rounded-lg bg-[var(--lito-sidebar-accent)] text-sm font-black text-white">
+            {company?.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={company.logoUrl} alt="Logo" className="size-full object-cover" />
+            ) : (
+              brand.shortName[0]
+            )}
           </div>
           <span className="text-[15px] font-bold text-white">{brand.name}</span>
         </div>

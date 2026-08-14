@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -15,10 +15,22 @@ export default function PerfilEmpresaPage() {
   const { isAdmin } = useMyMembership();
   const [form, setForm] = useState({ name: "", city: "" });
   const [saving, setSaving] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
 
   useEffect(() => {
     if (company) setForm({ name: company.name, city: company.city });
   }, [company]);
+
+  const onLogoPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // permite re-selecionar o mesmo arquivo
+    if (!file) return;
+    setUploadingLogo(true);
+    const res = await accountActions.uploadCompanyLogo(file);
+    setUploadingLogo(false);
+    res.ok ? toast.success("Logo atualizado") : toast.error(res.error ?? "Não foi possível enviar");
+  };
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -55,16 +67,29 @@ export default function PerfilEmpresaPage() {
       </p>
       <div className="space-y-4 rounded-xl border bg-white p-5">
         <div className="flex items-center gap-3">
-          <div className="flex size-14 items-center justify-center rounded-xl bg-indigo-500 text-xl font-black text-white">
-            {(form.name[0] ?? "?").toUpperCase()}
+          <div className="flex size-14 items-center justify-center overflow-hidden rounded-xl bg-indigo-500 text-xl font-black text-white">
+            {company?.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={company.logoUrl} alt="Logo" className="size-full object-cover" />
+            ) : (
+              (form.name[0] ?? "?").toUpperCase()
+            )}
           </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/svg+xml"
+            className="hidden"
+            onChange={onLogoPick}
+          />
           <Button
             variant="outline"
             size="sm"
             className="h-7 text-xs"
-            onClick={() => toast.info("Upload de logo chega junto com o Storage")}
+            disabled={!isAdmin || uploadingLogo}
+            onClick={() => fileInputRef.current?.click()}
           >
-            Alterar logo
+            {uploadingLogo ? "Enviando..." : "Alterar logo"}
           </Button>
         </div>
 
