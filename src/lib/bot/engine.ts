@@ -15,6 +15,29 @@ const FLOWS: Record<string, BotFlow> = {
   [triagemFlow.key]: triagemFlow,
 };
 
+/** Carrega a definição editável do banco (bot_flows); cai no fluxo embutido. */
+async function getFlow(
+  db: any,
+  locationId: string,
+  key: string | null | undefined,
+): Promise<BotFlow | undefined> {
+  if (!key) return undefined;
+  try {
+    const { data } = await db
+      .from("bot_flows")
+      .select("definition")
+      .eq("location_id", locationId)
+      .eq("key", key)
+      .maybeSingle();
+    if (data?.definition?.nodes && data.definition.start) {
+      return data.definition as BotFlow;
+    }
+  } catch {
+    // banco indisponível ou tabela ausente → usa o padrão em código
+  }
+  return FLOWS[key];
+}
+
 interface Ctx {
   db: any;
   channel: { id: string; phone_number_id: string; location_id: string };
@@ -281,7 +304,7 @@ export async function maybeRunBot(
   let startNode: string | null;
 
   if (session) {
-    flow = FLOWS[session.flow_key];
+    flow = await getFlow(db, channel.location_id, session.flow_key);
     if (!flow || session.status === "concluido") return false;
     vars = session.vars ?? {};
     const node = flow.nodes[session.node_id ?? ""] as any;
@@ -311,7 +334,7 @@ export async function maybeRunBot(
     }
   } else {
     if (!channel.bot_flow) return false;
-    flow = FLOWS[channel.bot_flow];
+    flow = await getFlow(db, channel.location_id, channel.bot_flow);
     if (!flow) return false;
     startNode = flow.start;
   }

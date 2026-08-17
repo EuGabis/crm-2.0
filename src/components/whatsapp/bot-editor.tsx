@@ -1,0 +1,342 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { Plus, Trash2, RotateCcw, Save, GripVertical } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { useBotFlow } from "@/lib/data/repos/db/bot-flows";
+import { normalize, type BotFlow, type BotNode } from "@/lib/bot/types";
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+const FLOW_KEY = "triagem";
+
+/** Rótulo humano de cada tipo de nó pro editor. */
+function nodeLabel(node: BotNode): string {
+  switch (node.type) {
+    case "message":
+      return "Mensagem";
+    case "ask":
+      return node.options?.length ? "Pergunta com lista de opções" : "Pergunta (resposta livre)";
+    case "set_name":
+      return "Salva o nome do contato";
+    case "set_contact":
+      return "Salva um dado do contato";
+    case "score":
+      return "Qualificação (pontuação)";
+    case "sync_card":
+      return "Atualiza o card no funil";
+    case "condition":
+      return "Roteia conforme a qualificação";
+    case "handoff":
+      return "Encerramento — passa pro atendente";
+    case "end":
+      return "Encerramento — envia link e finaliza";
+  }
+}
+
+export function BotEditor() {
+  const { flow, ready, saving, save, reset } = useBotFlow(FLOW_KEY);
+  const [draft, setDraft] = useState<BotFlow | null>(null);
+
+  // Sincroniza o rascunho local quando o fluxo carrega/salva/reseta.
+  useEffect(() => {
+    if (flow) setDraft(structuredClone(flow));
+  }, [flow]);
+
+  if (!ready || !draft) {
+    return <p className="p-4 text-xs text-slate-500">Carregando o fluxo do bot…</p>;
+  }
+
+  const nodes = Object.values(draft.nodes);
+
+  function patchNode(id: string, patch: Partial<any>) {
+    setDraft((d) =>
+      d ? { ...d, nodes: { ...d.nodes, [id]: { ...(d.nodes[id] as any), ...patch } } } : d,
+    );
+  }
+
+  async function handleSave() {
+    if (!draft) return;
+    // Reconstrói os pesos a partir dos títulos atuais das opções (some com chaves órfãs).
+    const clean = structuredClone(draft);
+    for (const node of Object.values(clean.nodes)) {
+      if (node.type === "score") {
+        for (const [varKey, table] of Object.entries(node.weights)) {
+          const ask = Object.values(clean.nodes).find(
+            (n) => n.type === "ask" && (n as any).var === varKey,
+          ) as any;
+          if (!ask?.options?.length) continue;
+          const rebuilt: Record<string, number> = {};
+          for (const opt of ask.options) rebuilt[normalize(opt.title)] = table[normalize(opt.title)] ?? 0;
+          node.weights[varKey] = rebuilt;
+        }
+      }
+    }
+    const res = await save(clean);
+    if (res.ok) toast.success("Fluxo do bot salvo. Já vale nos próximos atendimentos.");
+    else toast.error(res.error ?? "Não foi possível salvar");
+  }
+
+  function handleReset() {
+    reset();
+    toast.info("Voltou ao fluxo padrão. Clique em Salvar para aplicar.");
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-3 rounded-xl border bg-indigo-50/50 p-3">
+        <p className="text-xs text-slate-600">
+          Edite o que a <strong>Lita</strong> fala e pergunta, as opções das listas, o peso de
+          cada resposta na qualificação e para qual etapa do funil o card vai. As mudanças valem
+          para os números de WhatsApp com o bot <strong>Triagem Comercial</strong> ligado.
+        </p>
+        <div className="flex shrink-0 gap-2">
+          <Button variant="outline" className="h-8 text-xs" onClick={handleReset}>
+            <RotateCcw className="mr-1 h-3.5 w-3.5" /> Padrão
+          </Button>
+          <Button className="h-8 text-xs" onClick={handleSave} disabled={saving}>
+            <Save className="mr-1 h-3.5 w-3.5" /> {saving ? "Salvando…" : "Salvar"}
+          </Button>
+        </div>
+      </div>
+
+      <ol className="space-y-3">
+        {nodes.map((node, i) => (
+          <li key={node.id} className="rounded-xl border bg-white p-3">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-500">
+                {i + 1}
+              </span>
+              <span className="text-xs font-semibold text-slate-800">{nodeLabel(node)}</span>
+            </div>
+            <NodeEditor node={node} nodes={draft!.nodes} onPatch={patchNode} />
+          </li>
+        ))}
+      </ol>
+
+      <div className="flex justify-end">
+        <Button className="h-8 text-xs" onClick={handleSave} disabled={saving}>
+          <Save className="mr-1 h-3.5 w-3.5" /> {saving ? "Salvando…" : "Salvar fluxo"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function textareaCls() {
+  return "w-full rounded-lg border px-2 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-400";
+}
+
+function NodeEditor({
+  node,
+  nodes,
+  onPatch,
+}: {
+  node: BotNode;
+  nodes: Record<string, BotNode>;
+  onPatch: (id: string, patch: Partial<any>) => void;
+}) {
+  if (node.type === "message" || node.type === "handoff" || node.type === "end") {
+    return (
+      <textarea
+        className={textareaCls()}
+        rows={3}
+        value={(node as any).text ?? ""}
+        onChange={(e) => onPatch(node.id, { text: e.target.value })}
+        placeholder="Texto que o bot envia…"
+      />
+    );
+  }
+
+  if (node.type === "ask") {
+    return (
+      <div className="space-y-2">
+        <textarea
+          className={textareaCls()}
+          rows={2}
+          value={node.text}
+          onChange={(e) => onPatch(node.id, { text: e.target.value })}
+          placeholder="Texto da pergunta…"
+        />
+        <p className="text-[10px] text-slate-400">
+          Use <code>{"{{name}}"}</code> para inserir o nome do contato. Guarda em:{" "}
+          <span className="font-mono">{node.var}</span>
+        </p>
+        {node.options?.length ? (
+          <OptionsEditor node={node} onPatch={onPatch} />
+        ) : null}
+      </div>
+    );
+  }
+
+  if (node.type === "score") {
+    return <ScoreEditor node={node} nodes={nodes} onPatch={onPatch} />;
+  }
+
+  if (node.type === "sync_card") {
+    return <StageMapEditor node={node} onPatch={onPatch} />;
+  }
+
+  // set_name / set_contact / condition — estruturais, sem edição.
+  return (
+    <p className="text-[11px] text-slate-400">
+      Passo automático — não precisa configurar.
+    </p>
+  );
+}
+
+function OptionsEditor({
+  node,
+  onPatch,
+}: {
+  node: Extract<BotNode, { type: "ask" }>;
+  onPatch: (id: string, patch: Partial<any>) => void;
+}) {
+  const options = node.options ?? [];
+  function setOptions(next: { id: string; title: string }[]) {
+    onPatch(node.id, { options: next });
+  }
+  return (
+    <div className="space-y-1.5 rounded-lg bg-slate-50 p-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-semibold uppercase text-slate-400">Opções da lista</span>
+        <span className="text-[10px] text-slate-400">máx. 24 caracteres cada</span>
+      </div>
+      {options.map((opt, idx) => (
+        <div key={opt.id} className="flex items-center gap-1.5">
+          <GripVertical className="h-3.5 w-3.5 shrink-0 text-slate-300" />
+          <input
+            className="h-8 flex-1 rounded-lg border px-2 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            maxLength={24}
+            value={opt.title}
+            onChange={(e) => {
+              const next = options.slice();
+              next[idx] = { ...opt, title: e.target.value };
+              setOptions(next);
+            }}
+          />
+          <button
+            className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-rose-600"
+            onClick={() => setOptions(options.filter((_, i) => i !== idx))}
+            title="Remover"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ))}
+      {options.length < 10 && (
+        <button
+          className="flex items-center gap-1 text-[11px] font-medium text-indigo-600 hover:text-indigo-700"
+          onClick={() =>
+            setOptions([
+              ...options,
+              { id: `opt_${Date.now().toString(36)}`, title: "Nova opção" },
+            ])
+          }
+        >
+          <Plus className="h-3.5 w-3.5" /> Adicionar opção
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ScoreEditor({
+  node,
+  nodes,
+  onPatch,
+}: {
+  node: Extract<BotNode, { type: "score" }>;
+  nodes: Record<string, BotNode>;
+  onPatch: (id: string, patch: Partial<any>) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <label className="flex items-center gap-2 text-xs text-slate-600">
+        Vira <span className="font-semibold text-emerald-600">quente</span> quando a soma for ≥
+        <input
+          type="number"
+          className="h-8 w-20 rounded-lg border px-2 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400"
+          value={node.threshold}
+          onChange={(e) => onPatch(node.id, { threshold: Number(e.target.value) || 0 })}
+        />
+      </label>
+      {Object.keys(node.weights).map((varKey) => {
+        const ask = Object.values(nodes).find(
+          (n) => n.type === "ask" && (n as any).var === varKey,
+        ) as Extract<BotNode, { type: "ask" }> | undefined;
+        const opts = ask?.options ?? [];
+        const label = ask?.text ?? varKey;
+        return (
+          <div key={varKey} className="rounded-lg bg-slate-50 p-2">
+            <p className="mb-1.5 text-[10px] font-semibold uppercase text-slate-400">
+              Pesos — “{label}”
+            </p>
+            {opts.length === 0 && (
+              <p className="text-[11px] text-slate-400">Esta pergunta não tem opções.</p>
+            )}
+            {opts.map((opt) => {
+              const k = normalize(opt.title);
+              return (
+                <div key={opt.id} className="flex items-center justify-between gap-2 py-0.5">
+                  <span className="text-xs text-slate-600">{opt.title}</span>
+                  <input
+                    type="number"
+                    className="h-7 w-16 rounded-lg border px-2 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                    value={node.weights[varKey]?.[k] ?? 0}
+                    onChange={(e) => {
+                      const n = Number(e.target.value) || 0;
+                      onPatch(node.id, {
+                        weights: {
+                          ...node.weights,
+                          [varKey]: { ...node.weights[varKey], [k]: n },
+                        },
+                      });
+                    }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function StageMapEditor({
+  node,
+  onPatch,
+}: {
+  node: Extract<BotNode, { type: "sync_card" }>;
+  onPatch: (id: string, patch: Partial<any>) => void;
+}) {
+  const rows = Object.entries(node.stageMap);
+  const label: Record<string, string> = { quente: "Quente 🔥", frio: "Frio ❄️" };
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[11px] text-slate-500">
+        Para onde o card do lead vai, conforme a qualificação (nome da etapa do funil):
+      </p>
+      {rows.map(([value, stage]) => (
+        <div key={value} className="flex items-center gap-2">
+          <span className="w-20 text-xs font-medium text-slate-600">{label[value] ?? value}</span>
+          <span className="text-slate-300">→</span>
+          <input
+            className="h-8 flex-1 rounded-lg border px-2 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            value={stage}
+            onChange={(e) =>
+              onPatch(node.id, { stageMap: { ...node.stageMap, [value]: e.target.value } })
+            }
+            placeholder="Nome da etapa (ex.: QUENTE)"
+          />
+        </div>
+      ))}
+      <p className="text-[10px] text-slate-400">
+        Casa por &ldquo;contém&rdquo; e ignora acento/emoji — &ldquo;QUENTE&rdquo; encontra a etapa
+        &ldquo;QUENTE 🔥&rdquo;.
+      </p>
+    </div>
+  );
+}
