@@ -200,3 +200,66 @@ export function sendMediaMessage(
     body: JSON.stringify({ messaging_product: "whatsapp", to, type: kind, [kind]: media }),
   });
 }
+
+/** Opção de lista/botão do bot. `id` volta no webhook quando o cliente clica. */
+export interface InteractiveOption {
+  id: string;
+  title: string;
+  description?: string;
+}
+
+/**
+ * Mensagem de LISTA (até 10 opções). O cliente abre a lista e escolhe; o webhook
+ * recebe `interactive.list_reply.id`. Usada nas perguntas do bot com muitas opções.
+ */
+export function sendInteractiveList(
+  phoneNumberId: string,
+  to: string,
+  bodyText: string,
+  buttonLabel: string,
+  options: InteractiveOption[],
+) {
+  const rows = options.slice(0, 10).map((o) => ({
+    id: o.id.slice(0, 200),
+    title: o.title.slice(0, 24), // limite da Meta
+    ...(o.description ? { description: o.description.slice(0, 72) } : {}),
+  }));
+  return graph(`${phoneNumberId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "list",
+        body: { text: bodyText.slice(0, 1024) },
+        action: {
+          button: (buttonLabel || "Ver opções").slice(0, 20),
+          sections: [{ title: "Opções", rows }],
+        },
+      },
+    }),
+  });
+}
+
+/** Mensagem com até 3 BOTÕES de resposta. Webhook recebe `interactive.button_reply.id`. */
+export function sendInteractiveButtons(
+  phoneNumberId: string,
+  to: string,
+  bodyText: string,
+  options: InteractiveOption[],
+) {
+  const buttons = options.slice(0, 3).map((o) => ({
+    type: "reply",
+    reply: { id: o.id.slice(0, 256), title: o.title.slice(0, 20) },
+  }));
+  return graph(`${phoneNumberId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to,
+      type: "interactive",
+      interactive: { type: "button", body: { text: bodyText.slice(0, 1024) }, action: { buttons } },
+    }),
+  });
+}

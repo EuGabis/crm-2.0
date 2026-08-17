@@ -146,6 +146,11 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
 
   if (m.type === "text") {
     body = m.text?.body ?? "";
+  } else if (m.type === "interactive") {
+    // Resposta de botão/lista do bot: o título escolhido vira o corpo (aparece no
+    // inbox), e o `id` (button_reply/list_reply) será usado pelo motor do bot.
+    const r = m.interactive?.button_reply ?? m.interactive?.list_reply;
+    body = r?.title ?? "[resposta]";
   } else if (
     m.type === "image" ||
     m.type === "audio" ||
