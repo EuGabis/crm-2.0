@@ -24,6 +24,8 @@ export interface ContactNote {
   conversationId: string;
   body: string;
   at: string;
+  /** Quem escreveu (0051); nulo nas notas anteriores à migração. */
+  authorId: string | null;
 }
 
 export function useContactNotes(contactId: string | null | undefined, enabled = true) {
@@ -61,7 +63,7 @@ export function useContactNotes(contactId: string | null | undefined, enabled = 
     }
     const { data } = await supabase
       .from("messages")
-      .select("id, conversation_id, body, created_at")
+      .select("id, conversation_id, body, created_at, created_by")
       .in("conversation_id", ids)
       .eq("internal", true)
       .order("created_at", { ascending: false })
@@ -72,6 +74,7 @@ export function useContactNotes(contactId: string | null | undefined, enabled = 
         conversationId: m.conversation_id,
         body: m.body ?? "",
         at: m.created_at,
+        authorId: m.created_by ?? null,
       })),
     );
     setLoading(false);

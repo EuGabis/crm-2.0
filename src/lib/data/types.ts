@@ -88,6 +88,8 @@ export interface Message {
   readAt?: string;
   /** Escrita por automação/IA, não por uma pessoa (migração 0027). */
   automated?: boolean;
+  /** Quem escreveu (migração 0051); nulo nas mensagens anteriores a ela. */
+  createdBy?: string | null;
   /** Log do agendamento (migração 0028) — só preenchido se scheduledFor existe. */
   scheduledBy?: string | null;
   scheduleStatus?: ScheduleStatus;
