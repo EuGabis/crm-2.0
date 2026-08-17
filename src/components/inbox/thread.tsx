@@ -45,6 +45,7 @@ import {
   useMessages,
 } from "@/lib/data/repos/db/conversations";
 import { useMyMembership, useTeam } from "@/lib/data/repos/db/team";
+import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
 import type { Conversation, Message } from "@/lib/data/types";
 import { cn } from "@/lib/utils";
 
@@ -461,6 +462,7 @@ export function Thread({
   const messages = useMessages(conversationId);
   const callContact = useWebphone((s) => s.callContact);
   const { isAdmin } = useMyMembership();
+  const { channels } = useWhatsappChannels();
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -528,6 +530,13 @@ export function Thread({
 
   if (!conversation || !contact) return null;
 
+  // Número (WhatsApp associado) desta conversa — deixa explícito por qual número
+  // você está falando. A conversa fica travada nele.
+  const waChannel =
+    conversation.channel === "whatsapp" && conversation.channelId
+      ? channels.find((c) => c.id === conversation.channelId)
+      : null;
+
   let lastDay = "";
 
   return (
@@ -544,6 +553,14 @@ export function Thread({
             <p className="text-sm font-semibold text-slate-800">{contactName(contact)}</p>
             <p className="text-[10px] text-slate-400">{contact.phone}</p>
           </div>
+          {waChannel && (
+            <span
+              title="Número por onde esta conversa trafega — ela fica travada nele"
+              className="hidden items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 sm:inline-flex"
+            >
+              via {waChannel.phoneE164 || waChannel.name}
+            </span>
+          )}
           <SlaBadge days={conversation.slaDays} />
         </div>
         <div className="flex items-center gap-1.5">

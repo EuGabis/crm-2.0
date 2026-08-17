@@ -724,6 +724,41 @@ export const conversationActions = {
     }
     return conv.id;
   },
+
+  /**
+   * Cria/reaproveita a conversa de um contato num NÚMERO específico (channel_id).
+   * É o que "Nova conversa" usa quando o usuário escolhe por qual número falar —
+   * e a conversa fica travada nesse número.
+   */
+  async openForChannel(contactId: string, channelId: string): Promise<string | null> {
+    const location = loc();
+    if (!location) return null;
+    const supabase = createClient();
+    const { data: found } = await supabase
+      .from("conversations")
+      .select("*")
+      .eq("contact_id", contactId)
+      .eq("channel_id", channelId)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    const patchIn = (row: any) => {
+      const conv = mapConversation(row);
+      const s = useConvStore.getState();
+      if (!s.conversations.some((c) => c.id === conv.id)) {
+        s.patch({ conversations: [conv, ...s.conversations] });
+      }
+      return conv.id;
+    };
+    if (found) return patchIn(found);
+    const { data, error } = await supabase
+      .from("conversations")
+      .insert({ location_id: location, contact_id: contactId, channel: "whatsapp", channel_id: channelId })
+      .select()
+      .single();
+    if (error || !data) return null;
+    return patchIn(data);
+  },
 };
 
 export const inboxViewActions = {

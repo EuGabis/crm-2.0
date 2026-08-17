@@ -41,6 +41,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { contactName } from "@/lib/data/repos/contacts";
 import { useDbContacts } from "@/lib/data/repos/db/contacts";
+import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
 import {
   conversationActions,
   scheduleActions,
@@ -198,17 +199,35 @@ function NewConversationDialog({
   onCreated: (id: string) => void;
 }) {
   const { contacts } = useDbContacts();
+  const { channels } = useWhatsappChannels();
+  const activeChannels = channels.filter((c) => c.active);
   const [contactId, setContactId] = useState("");
   const [channel, setChannel] = useState<Channel>("whatsapp");
+  const [channelId, setChannelId] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Número padrão = o primeiro ativo; o usuário troca se quiser.
+  useEffect(() => {
+    if (channel === "whatsapp" && !channelId && activeChannels.length) {
+      setChannelId(activeChannels[0].id);
+    }
+  }, [channel, channelId, activeChannels]);
 
   const create = async () => {
     if (!contactId) {
       toast.error("Escolha um contato");
       return;
     }
+    if (channel === "whatsapp" && activeChannels.length && !channelId) {
+      toast.error("Escolha o número de WhatsApp");
+      return;
+    }
     setSaving(true);
-    const id = await conversationActions.open(contactId, channel);
+    // WhatsApp com número escolhido = conversa travada nesse número.
+    const id =
+      channel === "whatsapp" && channelId
+        ? await conversationActions.openForChannel(contactId, channelId)
+        : await conversationActions.open(contactId, channel);
     setSaving(false);
     if (!id) {
       toast.error("Não foi possível abrir a conversa");
@@ -265,6 +284,30 @@ function NewConversationDialog({
               </SelectContent>
             </Select>
           </div>
+          {channel === "whatsapp" && activeChannels.length > 0 && (
+            <div className="space-y-1">
+              <Label className="text-xs">Número (WhatsApp associado) *</Label>
+              <Select value={channelId} onValueChange={(v) => setChannelId(v ?? "")}>
+                <SelectTrigger className="h-8 w-full text-xs">
+                  <SelectValue>
+                    {(() => {
+                      const ch = activeChannels.find((c) => c.id === channelId);
+                      return ch ? ch.phoneE164 || ch.name : "Selecionar número";
+                    })()}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {activeChannels.map((c) => (
+                    <SelectItem key={c.id} value={c.id} className="text-xs">
+                      {c.name}
+                      {c.phoneE164 ? ` · ${c.phoneE164}` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-slate-400">A conversa fica travada neste número.</p>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>

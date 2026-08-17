@@ -181,13 +181,15 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
     body = `[${m.type ?? "mídia"}]`;
   }
 
-  // conversa de whatsapp desse contato
+  // Uma conversa por NÚMERO: casa contato + channel_id (o número que recebeu),
+  // não uma conversa única por contato. Assim cada número tem seu próprio
+  // histórico e o número da conversa nunca "migra".
   let { data: conv } = await db
     .from("conversations")
     .select("id, unread_count")
     .eq("location_id", channel.location_id)
     .eq("contact_id", contact.id)
-    .eq("channel", "whatsapp")
+    .eq("channel_id", channel.id)
     .maybeSingle();
   if (!conv) {
     const { data: created } = await db
@@ -208,7 +210,7 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
     await db
       .from("conversations")
       .update({
-        channel_id: channel.id,
+        // channel_id NÃO é reescrito: a conversa já é a deste número e fica nele.
         unread_count: (conv.unread_count ?? 0) + 1,
         last_message_at: nowIso,
         last_message_preview: body,
