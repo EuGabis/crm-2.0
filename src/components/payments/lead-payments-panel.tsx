@@ -1,9 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { BadgeCheck, CreditCard, Repeat, ShieldQuestion } from "lucide-react";
+import {
+  BadgeCheck,
+  CreditCard,
+  ExternalLink,
+  Repeat,
+  ShieldQuestion,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -329,6 +336,153 @@ export function PaymentsProfileView({
       </div>
       <SaleDialog sale={saleDetail} onClose={() => setSaleDetail(null)} />
       <SubDialog sub={subDetail} onClose={() => setSubDetail(null)} />
+    </div>
+  );
+}
+
+/**
+ * Link para a aba Contatos de Pagamentos já buscando este comprador. Prefere o
+ * e-mail (é o que identifica sem ambiguidade); cai no nome quando não há.
+ */
+export function paymentsDeepLink(
+  contact: Contact,
+  profile: LeadPaymentProfile,
+): string {
+  const termo =
+    profile.guruContact?.email?.trim() ||
+    contact.email?.trim() ||
+    profile.guruContact?.name?.trim() ||
+    `${contact.firstName} ${contact.lastName}`.trim();
+  return `/pagamentos?tab=Contatos&busca=${encodeURIComponent(termo)}`;
+}
+
+/**
+ * Versão ENXUTA para a barra lateral da caixa de entrada (~300 px): assinaturas
+ * e as 3 compras mais recentes, com atalho para o histórico completo. A visão
+ * larga (`PaymentsProfileView`) não cabe aqui — a grade de 4 KPIs e a tabela de
+ * 4 colunas viram um amontoado ilegível nessa largura.
+ *
+ * Devolve `null` sem permissão de Pagamentos: a aba nem chega a existir para
+ * quem não enxerga o módulo.
+ */
+export function ContactPaymentsSummary({
+  contact,
+  maxSales = 3,
+}: {
+  contact: Contact;
+  maxSales?: number;
+}) {
+  const { can } = useMyMembership();
+  const canPayments = can("pagamentos");
+  const { profile, loading, error } = useLeadPaymentProfile(contact, canPayments);
+
+  if (!canPayments) return null;
+
+  if (loading) {
+    return <p className="py-2 text-[11px] text-slate-400">Cruzando com a Guru…</p>;
+  }
+
+  if (error) {
+    return <p className="py-2 text-[11px] text-amber-700">{error}</p>;
+  }
+
+  if (!profile.matchKey) {
+    const tried = attemptedKeys(contact);
+    return (
+      <div className="py-1">
+        <p className="text-[11px] text-slate-500">Nenhuma compra encontrada na Guru.</p>
+        <p className="mt-1 text-[10px] text-slate-400">
+          {tried.length > 0
+            ? `Tentamos casar por ${tried.map((k) => MATCH_KEY_LABEL[k]).join(", ")}.`
+            : "Sem CPF, telefone, e-mail ou nome para casar."}
+        </p>
+      </div>
+    );
+  }
+
+  const totals = profile.totals;
+  const sales = profile.sales.slice(0, maxSales);
+
+  return (
+    <div className="space-y-2.5">
+      <div className="flex flex-wrap items-center gap-1">
+        <Badge variant="secondary" className="gap-1 bg-indigo-100 text-[10px] text-indigo-700">
+          <BadgeCheck className="size-2.5" />
+          Casado por {MATCH_KEY_LABEL[profile.matchKey]}
+        </Badge>
+      </div>
+
+      <div className="rounded-lg border bg-slate-50 p-2">
+        <p className="text-[10px] text-slate-400">Total aprovado</p>
+        <p className="text-sm font-bold text-slate-900">
+          {formatBRL(totals?.approvedTotal ?? 0)}
+        </p>
+        <p className="text-[10px] text-slate-400">
+          {totals?.approvedCount ?? 0} de {totals?.salesCount ?? 0} venda(s)
+        </p>
+      </div>
+
+      <div>
+        <p className="mb-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+          <Repeat className="size-3" /> Assinaturas
+        </p>
+        {profile.subscriptions.length === 0 ? (
+          <p className="text-[11px] text-slate-400">Nenhuma assinatura.</p>
+        ) : (
+          <ul className="space-y-1">
+            {profile.subscriptions.map((s) => (
+              <li key={s.id} className="rounded-md border bg-white p-1.5">
+                <div className="flex items-start justify-between gap-1.5">
+                  <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-slate-800">
+                    {s.productName ?? "—"}
+                  </span>
+                  <GuruStatusBadge status={s.status} />
+                </div>
+                {s.nextCycleAt && (
+                  <p className="mt-0.5 text-[10px] text-slate-400">
+                    Próximo ciclo {fmtDate(s.nextCycleAt)}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div>
+        <p className="mb-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+          <CreditCard className="size-3" /> Últimas compras
+        </p>
+        {sales.length === 0 ? (
+          <p className="text-[11px] text-slate-400">Nenhuma venda registrada.</p>
+        ) : (
+          <ul className="space-y-1">
+            {sales.map((s) => (
+              <li key={s.id} className="rounded-md border bg-white p-1.5">
+                <p className="truncate text-[11px] font-medium text-slate-800">
+                  {s.productName ?? "—"}
+                </p>
+                <div className="mt-0.5 flex items-center justify-between gap-1.5">
+                  <span className="text-[10px] text-slate-400">{fmtDate(s.guruCreatedAt)}</span>
+                  <span className="text-[11px] font-semibold text-slate-700">
+                    {s.amount === null ? "—" : formatBRL(s.amount)}
+                  </span>
+                </div>
+                <div className="mt-0.5">
+                  <GuruStatusBadge status={s.status} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <Link
+        href={paymentsDeepLink(contact, profile)}
+        className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:underline"
+      >
+        Ver detalhes completos <ExternalLink className="size-3" />
+      </Link>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -1369,11 +1370,11 @@ function ProductDetailDialog({
 
 /* -------------------------------- Contatos ------------------------------- */
 
-function ContatosTab() {
+function ContatosTab({ initialSearch }: { initialSearch?: string }) {
   const { guru, loaded } = useGuruIntegration();
   if (!loaded) return null;
   return guru.connected ? (
-    <ContatosGuruTab />
+    <ContatosGuruTab initialSearch={initialSearch} />
   ) : (
     <EmptyState
       icon={Users2}
@@ -1568,10 +1569,13 @@ const CONTATOS_FLAGS = [
   { value: "assinantes", label: "Com assinatura ativa" },
 ];
 
-function ContatosGuruTab() {
+function ContatosGuruTab({ initialSearch = "" }: { initialSearch?: string }) {
   const [page, setPage] = useState(0);
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
+  // Semeado pelo `?busca=` da URL — o atalho "Ver detalhes completos" (barra
+  // lateral das Conversas, painel do contato) precisa cair no comprador certo,
+  // e nao numa lista de 7 mil contatos para o usuario procurar a mao.
+  const [searchInput, setSearchInput] = useState(initialSearch);
+  const [search, setSearch] = useState(initialSearch);
   const [selectedContact, setSelectedContact] = useState<GuruContact | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<PaymentFilters>(() => emptyFilters("last_activity"));
@@ -2188,14 +2192,33 @@ function ArquivosTab() {
 
 /* ---------------------------------- Page --------------------------------- */
 
+/**
+ * `useSearchParams` obriga um limite de Suspense — sem ele o build falha ao
+ * pre-renderizar /pagamentos. Dai a casca abaixo (mesmo padrao de /leads).
+ */
 export default function PagamentosPage() {
+  return (
+    <Suspense fallback={null}>
+      <PagamentosPageInner />
+    </Suspense>
+  );
+}
+
+function PagamentosPageInner() {
   const { isAdmin, loaded: meLoaded } = useMyMembership();
   // Integrações é tela de configuração: só admin. Quem não é cai em Vendas.
   const tabs = useMemo(
     () => (isAdmin ? TABS : TABS.filter((t) => t.label !== "Integrações")),
     [isAdmin]
   );
-  const [tab, setTab] = useState("Integrações");
+  // Vindo de outra tela: ?tab=Contatos&busca=<termo>. A aba so e aceita se
+  // existir de verdade — URL torta nao pode deixar a pagina em branco.
+  const searchParams = useSearchParams();
+  const urlTab = searchParams.get("tab");
+  const urlSearch = searchParams.get("busca") ?? "";
+  const [tab, setTab] = useState(() =>
+    urlTab && TABS.some((t) => t.label === urlTab) ? urlTab : "Integrações"
+  );
 
   useEffect(() => {
     if (meLoaded && !isAdmin && tab === "Integrações") setTab("Vendas");
@@ -2226,7 +2249,7 @@ export default function PagamentosPage() {
         ) : tab === "Assinaturas" ? (
           <AssinaturasTab />
         ) : tab === "Contatos" ? (
-          <ContatosTab />
+          <ContatosTab initialSearch={urlSearch} />
         ) : tab === "Leads" ? (
           <LeadsTab />
         ) : tab === "Produtos" ? (
