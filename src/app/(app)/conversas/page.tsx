@@ -134,7 +134,14 @@ function ConversasPageInner() {
       <SubNav tabs={TABS} active={tab} onChange={setTab} />
       {tab !== "Conversas" ? (
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
-          {tab === "Relatório" && <ConversationsReport />}
+          {tab === "Relatório" && (
+            <ConversationsReport
+              onOpen={(id) => {
+                setSelectedId(id);
+                setTab("Conversas");
+              }}
+            />
+          )}
           {tab === "Templates" && <TemplatesPanel />}
           {tab === "Agendadas" && <AgendadasTab />}
           {tab === "Ações manuais" && <AcoesManuaisTab />}

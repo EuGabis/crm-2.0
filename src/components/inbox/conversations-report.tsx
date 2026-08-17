@@ -45,7 +45,7 @@ interface Row {
 
 const PER_PAGE = 25;
 
-export function ConversationsReport() {
+export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: string) => void }) {
   const conversations = useConversations("all");
   const { contacts } = useDbContacts();
   const { channels } = useWhatsappChannels();
@@ -310,13 +310,14 @@ export function ConversationsReport() {
                     >
                       <User className="size-3.5" />
                     </Link>
-                    <Link
-                      href={`/conversas?c=${r.id}`}
+                    <button
+                      type="button"
+                      onClick={() => onOpen?.(r.id)}
                       title="Abrir conversa"
                       className="flex size-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-indigo-600"
                     >
                       <MessageSquare className="size-3.5" />
-                    </Link>
+                    </button>
                   </div>
                 </td>
               </tr>
