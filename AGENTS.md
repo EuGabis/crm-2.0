@@ -417,8 +417,9 @@ Cloud API → celular.
   0039 = segmentação dos pipelines,
   0040 = só admin exclui conversa/mensagem,
   0041 = compromisso vinculado a lead, 0042 = lembrete do compromisso,
-  0043 = agenda por usuário;
-  **próxima migração livre: 0044**.
+  0043 = agenda por usuário, 0044 = mídia drive (bucket + pastas/arquivos),
+  0045 = conexões de mídia (Google Drive/Canva);
+  **próxima migração livre: 0046**.
 - Env (privadas, nunca `NEXT_PUBLIC_`): `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`,
   `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_GRAPH_VERSION` (default `v21.0`).
 - **Mídia real (imagem/áudio/vídeo)** — helpers em `src/lib/whatsapp/client.ts`
@@ -526,6 +527,33 @@ capturando lead como Contato real + tag, pronto pra e-mail marketing.
 - Sem env nova, sem serviço externo. Embed = colar
   `<script src="https://lito-crm.vercel.app/api/forms/{slug}/embed.js"></script>`
   no HTML da página.
+
+## Mídia Drive (arquivos reais + Google Drive e Canva)
+
+Módulo **`/midia`**: armazenamento próprio da empresa mais duas integrações de
+leitura. Spec: `docs/superpowers/specs/2026-08-17-midia-drive-design.md`.
+
+- Migração **0044** — bucket PRIVADO `media-drive` + `media_folders`/`media_files`
+  (RLS padrão membership; policies de `storage.objects` pelo primeiro segmento
+  do caminho, `{location_id}/{uuid}.{ext}`). Pastas são TABELA, não prefixo do
+  caminho (com prefixo, renomear viraria mover N objetos e pasta vazia não
+  existiria). Excluir pasta **não** exclui arquivo (`on delete set null` → volta
+  pra raiz). Upload que falha no metadado remove o binário (órfão contaria no
+  espaço usado sem aparecer em tela).
+- Migração **0045** — `media_connections` (uma linha por provedor) é
+  **admin-only** como `payment_credentials`; quem lê o token nas rotas é a
+  **service role**, e as telas leem a view `media_integration_status` (sem
+  token). ⚠️ Ler a tabela com a sessão do usuário faria a tela dizer "não
+  conectado" pra todo não-admin — mesmo bug da Guru.
+- `src/lib/integrations/media-oauth.ts` — state HMAC + cookie httpOnly, PKCE
+  S256 no Canva (o `code_verifier` vai em cookie httpOnly, nunca localStorage),
+  e **renovação automática** pelo refresh token (sem ela a integração morreria
+  em 1h). O Canva rotaciona o refresh token a cada uso.
+- Env novas: `CANVA_CLIENT_ID`, `CANVA_CLIENT_SECRET`. O Drive reusa
+  `GOOGLE_OAUTH_CLIENT_ID/SECRET` do Google Ads (escopo `drive.readonly`).
+- **Passos manuais pendentes:** aplicar 0044/0045; ativar a Google Drive API +
+  escopo + redirect `/api/media/oauth/callback`; criar o app no Canva Developers
+  e pôr as duas envs na Vercel.
 
 ## Fundação de IA (OpenAI)
 
