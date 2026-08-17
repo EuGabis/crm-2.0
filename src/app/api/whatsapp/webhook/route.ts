@@ -107,13 +107,14 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
   const profileName: string = value?.contacts?.[0]?.profile?.name || phone;
   const nowIso = new Date().toISOString();
 
-  // contato por telefone dentro da empresa
-  let { data: contact } = await db
-    .from("contacts")
-    .select("id")
-    .eq("location_id", channel.location_id)
-    .eq("phone", phone)
-    .maybeSingle();
+  // contato por telefone dentro da empresa — busca NORMALIZADA (0047): casa
+  // "(21) 99717-0842", "5521997170842", etc. como o mesmo número. Antes era `eq`
+  // por texto exato, o que criava um contato novo a cada formato diferente.
+  const { data: foundId } = await db.rpc("find_contact_by_phone", {
+    p_location: channel.location_id,
+    p_phone: phone,
+  });
+  let contact: { id: string } | null = foundId ? { id: foundId as string } : null;
   if (!contact) {
     const parts = profileName.trim().split(/\s+/);
     const first = parts.shift() || phone;

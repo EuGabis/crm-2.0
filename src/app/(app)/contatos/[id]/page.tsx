@@ -81,6 +81,13 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
       toast.error("O nome é obrigatório");
       return;
     }
+    if (form.phone.trim()) {
+      const dup = await dbContactActions.findByPhone(form.phone);
+      if (dup && dup.id !== contact.id) {
+        toast.error(`Já existe um contato com esse número: ${contactName(dup)}`);
+        return;
+      }
+    }
     setSaving(true);
     const ok = await dbContactActions.update(contact.id, {
       firstName: form.firstName.trim(),

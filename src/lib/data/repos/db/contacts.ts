@@ -140,6 +140,15 @@ export const dbContactActions = {
     const { locationId, userId, setContacts } = useDbStore.getState();
     if (!locationId) return false;
     const supabase = createClient();
+    // Bloqueia duplicado por número (0047): não deixa criar 2 contatos com o
+    // mesmo telefone, em qualquer formato.
+    if (input.phone.trim()) {
+      const { data: existingId } = await supabase.rpc("find_contact_by_phone", {
+        p_location: locationId,
+        p_phone: input.phone,
+      });
+      if (existingId) return false;
+    }
     const { data, error } = await supabase
       .from("contacts")
       .insert({
@@ -158,6 +167,19 @@ export const dbContactActions = {
     if (error || !data) return false;
     setContacts((prev) => [mapContact(data), ...prev]);
     return true;
+  },
+
+  /** Devolve o contato já existente com esse número (ou null) — p/ avisar antes de duplicar. */
+  async findByPhone(phone: string): Promise<Contact | null> {
+    const { locationId, contacts } = useDbStore.getState();
+    if (!locationId || !phone.trim()) return null;
+    const supabase = createClient();
+    const { data: existingId } = await supabase.rpc("find_contact_by_phone", {
+      p_location: locationId,
+      p_phone: phone,
+    });
+    if (!existingId) return null;
+    return contacts.find((c) => c.id === existingId) ?? null;
   },
 
   async addTag(ids: string[], tag: string): Promise<boolean> {
@@ -216,6 +238,15 @@ export const dbContactActions = {
     >
   ): Promise<boolean> {
     const supabase = createClient();
+    // Bloqueia trocar o telefone para um que já pertence a OUTRO contato (0047).
+    if (patch.phone !== undefined && patch.phone.trim()) {
+      const { locationId } = useDbStore.getState();
+      const { data: existingId } = await supabase.rpc("find_contact_by_phone", {
+        p_location: locationId,
+        p_phone: patch.phone,
+      });
+      if (existingId && existingId !== id) return false;
+    }
     const row: Record<string, unknown> = {};
     if (patch.firstName !== undefined) row.first_name = patch.firstName;
     if (patch.lastName !== undefined) row.last_name = patch.lastName;
