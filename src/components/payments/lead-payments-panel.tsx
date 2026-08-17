@@ -1,15 +1,24 @@
 "use client";
 
+import { useState } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { BadgeCheck, CreditCard, Repeat, ShieldQuestion } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { GuruStatusBadge } from "@/components/payments/status-badge";
 import {
   attemptedKeys,
   MATCH_KEY_LABEL,
   useLeadPaymentProfile,
   type LeadPaymentProfile,
+  type LeadSale,
+  type LeadSubscription,
 } from "@/lib/data/repos/db/lead-payments";
 import { useMyMembership } from "@/lib/data/repos/db/team";
 import { formatBRL } from "@/lib/data/repos/opportunities";
@@ -53,6 +62,78 @@ function formatDoc(raw: string | null | undefined): string {
   return raw?.trim() || "—";
 }
 
+/** Linha de detalhe que NÃO trunca (código de transação precisa aparecer inteiro). */
+function DetailLine({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-4 border-b py-1.5 last:border-0">
+      <span className="shrink-0 text-[11px] text-slate-500">{label}</span>
+      <span className="min-w-0 break-all text-right text-xs font-medium text-slate-800">{value}</span>
+    </div>
+  );
+}
+
+/** Detalhes de uma compra (venda), abre ao clicar na linha. */
+function SaleDialog({ sale, onClose }: { sale: LeadSale | null; onClose: () => void }) {
+  return (
+    <Dialog open={!!sale} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Detalhes da compra</DialogTitle>
+        </DialogHeader>
+        {sale && (
+          <div>
+            <div className="mb-2">
+              <GuruStatusBadge status={sale.status} />
+            </div>
+            <DetailLine label="Produto" value={sale.productName ?? "—"} />
+            <DetailLine label="Valor" value={sale.amount === null ? "—" : formatBRL(sale.amount)} />
+            <DetailLine label="Código" value={sale.code ?? "—"} />
+            <DetailLine label="Data da compra" value={fmtDate(sale.guruCreatedAt, true)} />
+            <DetailLine label="Recebido em" value={fmtDate(sale.receivedAt, true)} />
+            <p className="mb-1 mt-3 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              Comprador na Guru
+            </p>
+            <DetailLine label="Nome" value={sale.contactName ?? "—"} />
+            <DetailLine label="E-mail" value={sale.contactEmail ?? "—"} />
+            <DetailLine label="CPF/CNPJ" value={formatDoc(sale.contactDoc)} />
+            <DetailLine label="Telefone" value={sale.contactPhone ?? "—"} />
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Detalhes de uma assinatura. */
+function SubDialog({ sub, onClose }: { sub: LeadSubscription | null; onClose: () => void }) {
+  return (
+    <Dialog open={!!sub} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Detalhes da assinatura</DialogTitle>
+        </DialogHeader>
+        {sub && (
+          <div>
+            <div className="mb-2">
+              <GuruStatusBadge status={sub.status} />
+            </div>
+            <DetailLine label="Produto" value={sub.productName ?? "—"} />
+            <DetailLine label="Valor" value={sub.amount === null ? "—" : formatBRL(sub.amount)} />
+            <DetailLine label="Código" value={sub.code ?? "—"} />
+            <DetailLine
+              label="Cobranças"
+              value={`${sub.chargedTimes ?? 0}${sub.chargedEveryDays ? ` · a cada ${sub.chargedEveryDays} dias` : ""}`}
+            />
+            <DetailLine label="Início" value={fmtDate(sub.guruStartedAt, true)} />
+            <DetailLine label="Próximo ciclo" value={fmtDate(sub.nextCycleAt)} />
+            <DetailLine label="Atualizado em" value={fmtDate(sub.guruUpdatedAt, true)} />
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /** Rendering puro do perfil de pagamento (recebe o profile já carregado). */
 export function PaymentsProfileView({
   contact,
@@ -65,6 +146,8 @@ export function PaymentsProfileView({
   loading: boolean;
   error: string | null;
 }) {
+  const [saleDetail, setSaleDetail] = useState<LeadSale | null>(null);
+  const [subDetail, setSubDetail] = useState<LeadSubscription | null>(null);
   const totals = profile.totals;
 
   if (loading) {
@@ -183,7 +266,12 @@ export function PaymentsProfileView({
               </thead>
               <tbody>
                 {profile.sales.map((s) => (
-                  <tr key={s.id} className="border-t">
+                  <tr
+                    key={s.id}
+                    onClick={() => setSaleDetail(s)}
+                    title="Ver detalhes da compra"
+                    className="cursor-pointer border-t hover:bg-slate-50"
+                  >
                     <td className="max-w-[220px] truncate px-2 py-1.5 text-slate-700">
                       {s.productName ?? "—"}
                     </td>
@@ -215,7 +303,12 @@ export function PaymentsProfileView({
         ) : (
           <ul className="space-y-1.5">
             {profile.subscriptions.map((s) => (
-              <li key={s.id} className="rounded-lg border bg-white p-2.5">
+              <li
+                key={s.id}
+                onClick={() => setSubDetail(s)}
+                title="Ver detalhes da assinatura"
+                className="cursor-pointer rounded-lg border bg-white p-2.5 hover:bg-slate-50"
+              >
                 <div className="flex items-start justify-between gap-2">
                   <span className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-800">
                     {s.productName ?? "—"}
@@ -234,6 +327,8 @@ export function PaymentsProfileView({
           </ul>
         )}
       </div>
+      <SaleDialog sale={saleDetail} onClose={() => setSaleDetail(null)} />
+      <SubDialog sub={subDetail} onClose={() => setSubDetail(null)} />
     </div>
   );
 }
