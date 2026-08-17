@@ -832,6 +832,18 @@ os módulos ainda não migrados continuam importando dos repos mock em
   Reabrir/Desarquivar ao lado. **Mensagem de entrada reabre E desarquiva**
   (webhook do WhatsApp) — perder mensagem de cliente é pior do que desfazer um
   arquivamento.
+  **Janela de 24h visível no composer** (sem migração/env) — o campo de texto
+  nasce BLOQUEADO quando a janela fechou, com o aviso e o botão "Enviar
+  template" no lugar. Antes o CRM só descobria no 409 da rota, depois de a
+  pessoa escrever: o seletor abria por cima e o texto digitado se perdia. A
+  conta é sobre a última mensagem DE ENTRADA (nota interna e mensagem nossa não
+  reabrem janela); sem nenhuma entrada, a janela nunca existiu. Só vale para
+  conversa de WhatsApp COM canal conectado — nos outros canais a regra não
+  existe. **Comentário interno continua liberado** (não sai do CRM), e o próprio
+  aviso oferece esse caminho. O `now` é atualizado a cada minuto: a janela
+  expira com a tela aberta e o campo precisa travar sozinho. O tratamento do 409
+  na rota continua lá como rede de segurança — relógio do navegador não é
+  autoridade sobre a Meta.
   **Template em lote + enviar para pipeline** (sem migração/env/rota nova) — o
   ícone de seleção na barra do título liga os checkboxes; a barra "N
   selecionadas" dispara um **template aprovado** para todas via um
