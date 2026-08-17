@@ -63,8 +63,8 @@ export function useMediaConnections() {
 export interface MediaSetup {
   redirectUri: string;
   appUrl: string | null;
-  google_drive: { configured: boolean };
-  canva: { configured: boolean };
+  google_drive: { configured: boolean; clientId: string | null };
+  canva: { configured: boolean; clientId: string | null };
 }
 
 export const mediaConnectionActions = {

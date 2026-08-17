@@ -10,7 +10,11 @@ export const dynamic = "force-dynamic";
  * cadastrar no provedor e (b) qual env está faltando. Nada disso é adivinhável
  * pela tela.
  *
- * Devolve só presença/ausência de credencial (booleano), NUNCA o valor.
+ * Devolve presença/ausência do SECRET (booleano, nunca o valor) e o
+ * `client_id`. O client id não é segredo — ele viaja na querystring da URL de
+ * consentimento, visível na barra do navegador — e é o que resolve a dúvida
+ * "cadastrei a URI, mas em qual dos clients do projeto?".
+ *
  * Restrito a admin: é informação de configuração da empresa.
  */
 export async function GET() {
@@ -34,7 +38,13 @@ export async function GET() {
   return Response.json({
     redirectUri: redirectUri(),
     appUrl: process.env.NEXT_PUBLIC_APP_URL ?? null,
-    google_drive: { configured: !!drive.clientId && !!drive.clientSecret },
-    canva: { configured: !!canva.clientId && !!canva.clientSecret },
+    google_drive: {
+      configured: !!drive.clientId && !!drive.clientSecret,
+      clientId: drive.clientId || null,
+    },
+    canva: {
+      configured: !!canva.clientId && !!canva.clientSecret,
+      clientId: canva.clientId || null,
+    },
   });
 }

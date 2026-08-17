@@ -523,6 +523,20 @@ function ExternalTab({
                   vem de NEXT_PUBLIC_APP_URL ({setup.appUrl ?? "não definida"}), então cadastre
                   também a de localhost se você testa local.
                 </p>
+                {setup[provider].clientId && (
+                  <>
+                    <p className="mt-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                      No client (ID em uso)
+                    </p>
+                    <code className="mt-0.5 block break-all text-[11px] text-slate-700">
+                      {setup[provider].clientId}
+                    </code>
+                    <p className="mt-1 text-[10px] text-slate-400">
+                      Cadastre a URI NESTE client — se o projeto tem mais de um, cadastrar no
+                      outro não muda nada.
+                    </p>
+                  </>
+                )}
               </div>
             )}
           </>
