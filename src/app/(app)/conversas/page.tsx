@@ -12,6 +12,7 @@ import { ContactPanel } from "@/components/inbox/contact-panel";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { Thread } from "@/components/inbox/thread";
 import { ViewsRail } from "@/components/inbox/views-rail";
+import { ConversationsReport } from "@/components/inbox/conversations-report";
 import { TemplatesTab } from "@/components/whatsapp/templates-tab";
 import { TemplateLogsTab } from "@/components/whatsapp/template-logs-tab";
 import { DataTable, type Column } from "@/components/shared/data-table";
@@ -56,6 +57,7 @@ import type { Channel, ScheduleStatus } from "@/lib/data/types";
 
 const TABS = [
   { label: "Conversas" },
+  { label: "Relatório" },
   { label: "Templates" },
   { label: "Agendadas" },
   { label: "Ações manuais" },
@@ -131,6 +133,7 @@ function ConversasPageInner() {
       <SubNav tabs={TABS} active={tab} onChange={setTab} />
       {tab !== "Conversas" ? (
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
+          {tab === "Relatório" && <ConversationsReport />}
           {tab === "Templates" && <TemplatesPanel />}
           {tab === "Agendadas" && <AgendadasTab />}
           {tab === "Ações manuais" && <AcoesManuaisTab />}

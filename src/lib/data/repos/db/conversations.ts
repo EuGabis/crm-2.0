@@ -38,6 +38,8 @@ const mapConversation = (r: any): Conversation => ({
   closedBy: r.closed_by ?? null,
   archivedAt: r.archived_at ?? null,
   archivedBy: r.archived_by ?? null,
+  createdAt: r.created_at,
+  botPaused: r.bot_paused ?? false,
 });
 
 const mapMessage = (r: any): Message => ({

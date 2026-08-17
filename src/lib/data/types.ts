@@ -113,6 +113,10 @@ export interface Conversation {
   closedBy?: string | null;
   archivedAt?: string | null;
   archivedBy?: string | null;
+  /** Início da conversa (created_at) — usado no relatório. */
+  createdAt?: string;
+  /** Bot pausado = humano assumiu (migração 0032). false = bot ainda ativo. */
+  botPaused?: boolean;
 }
 
 /** Abas de filtro da caixa de entrada. */
