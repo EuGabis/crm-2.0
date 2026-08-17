@@ -52,7 +52,7 @@ de demonstração — ver `MAPA_FUNCIONALIDADES.md`, a especificação funcional
 
 **Backend Supabase em migração módulo a módulo.** Módulos já reais: Contatos,
 Leads/Pipelines, Conversas (Realtime), Dashboard, Calendários, Equipe/permissões,
-Configurações (empresa/perfil), Checklist de ativação e Pagamentos (via Guru — ver
+Configurações (empresa/perfil) e Pagamentos (via Guru — ver
 seção própria abaixo). Os demais ainda usam os repositórios mock sobre Zustand — ver
 "Padrão de migração módulo a módulo" abaixo.
 
@@ -97,11 +97,11 @@ lucide-react · sonner (toasts) · Tiptap (editor rich text do Marketing) · svi
 
 ```
 src/
-  app/(app)/           # 19 módulos, cada pasta = 1 item da sidebar
+  app/(app)/           # 18 módulos, cada pasta = 1 item da sidebar
     dashboard/  conversas/  calendarios/  contatos/ (+[id])  leads/
     pagamentos/  ai-studio/  agentes-ia/  marketing/  automacoes/ (+[id] builder)
     sites/  assinaturas/  midia/  reputacao/  relatorios/  marketplace/
-    whatsapp/  configuracoes/ (layout próprio + 16 sub-páginas)  ativacao/
+    whatsapp/  configuracoes/ (layout próprio + 16 sub-páginas)
   app/api/
     automations/tick/    marketing/{tick,resend-webhook,unsubscribe,campaigns/[id]/*}
     webhooks/guru/       integrations/guru/sync/    team/invite/
@@ -899,8 +899,14 @@ os módulos ainda não migrados continuam importando dos repos mock em
 - ✅ **Cadastro fechado** (migração 0006): só entra quem tem convite pendente — o
   trigger de signup aborta a transação, então nem chamando a API de auth direto
   a conta é criada. Reabrir: `update private.app_settings set signup_mode = 'open';`
-- ✅ Backend F2h: **Calendários**, **Configurações** (empresa/perfil reais, sidebar
-  mostrando a empresa do banco) e **Checklist de ativação** persistente (migração 0005).
+- ✅ Backend F2h: **Calendários** e **Configurações** (empresa/perfil reais, sidebar
+  mostrando a empresa do banco).
+- 🗑️ **Checklist de ativação REMOVIDO** (2026-08-17, a pedido do Gabriel): saíram a
+  rota `/ativacao`, o item da sidebar e o repo `db/activation.ts`. A tabela
+  `activation_steps` (migração 0005) **continua no banco de propósito** — dropar
+  é irreversível e não há ganho nenhum em fazê-lo; se o checklist voltar, o
+  progresso de quem já marcou passo ainda está lá. `PERMISSION_MODULES` deixou de
+  precisar da exceção que tirava "ativacao" da lista.
 - ✅ **Automações** — motor + pg_cron em produção (ver seção própria acima).
 - ✅ Backend F2g: **Equipe e permissões** (migração 0004) — convites por e-mail
   (trigger de signup vincula à empresa que convidou em vez de criar nova),
