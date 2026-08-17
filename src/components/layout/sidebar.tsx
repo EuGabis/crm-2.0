@@ -39,27 +39,27 @@ export function Sidebar() {
   return (
     <aside className="flex h-screen w-[240px] shrink-0 flex-col bg-[var(--lito-sidebar)]">
       <div className="px-4 pt-4">
-        <div className="flex items-center gap-2">
-          <div className="flex size-8 items-center justify-center overflow-hidden rounded-lg bg-[var(--lito-sidebar-accent)] text-sm font-black text-white">
-            {company?.logoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={company.logoUrl} alt="Logo" className="size-full object-cover" />
-            ) : (
-              brand.shortName[0]
-            )}
-          </div>
-          <span className="text-[15px] font-bold text-white">{brand.name}</span>
-        </div>
+        {/* Um só bloco de "workspace": logo + nome da empresa + cidade. Antes eram
+            dois blocos empilhados (logo+produto e depois a empresa), o que ficava
+            redundante e apertado. */}
         <Link
           href="/configuracoes/perfil"
           title="Perfil da empresa"
-          className="mt-3 flex w-full items-center justify-between rounded-lg bg-[var(--lito-sidebar-hover)] px-3 py-2 text-left"
+          className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-[var(--lito-sidebar-hover)]"
         >
-          <span className="min-w-0">
-            <span className="block truncate text-xs font-semibold text-white">
+          <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--lito-sidebar-accent)] text-sm font-black text-white">
+            {company?.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={company.logoUrl} alt="Logo da empresa" className="size-full object-cover" />
+            ) : (
+              (company?.name?.[0] ?? brand.shortName[0]).toUpperCase()
+            )}
+          </div>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-bold leading-tight text-white">
               {company?.name ?? "Minha empresa"}
             </span>
-            <span className="block truncate text-[10px] text-slate-400">
+            <span className="block truncate text-[10px] leading-tight text-slate-400">
               {company?.city || "Definir localização"}
             </span>
           </span>
