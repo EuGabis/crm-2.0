@@ -379,6 +379,52 @@ select cron.unschedule('lito-guru-sync');
 select * from public.payment_credentials where provider = 'guru';
 ```
 
+## Detalhe do lead (Leads → clicar no card) — cruzamento com a Guru
+
+Clicar no card do funil (ou na linha, na vista lista) abre **Detalhe do lead**
+(`src/components/pipeline/lead-detail-dialog.tsx`) com três abas: **Resumo**
+(contato + lead + outros leads do contato + tarefas + compromissos),
+**Pagamentos** (histórico do mesmo comprador na Guru — só para quem tem acesso
+ao módulo, via `useMyMembership().can("pagamentos")`) e **Comentários** (as
+notas internas do contato + escrever outra).
+
+**Cruzamento CRM ↔ Guru** (migração **0048**, aplicada em 2026-08-17): a ordem é
+**CPF/CNPJ → telefone → e-mail → nome**, a primeira chave que acha algo ganha, e
+a tela mostra QUAL casou (casamento por nome vem com aviso de chave fraca —
+homônimo existe). Nada casou? o vazio diz quais chaves foram tentadas, em vez de
+sugerir que o cliente nunca comprou.
+
+- Quem decide é o banco: `public.lead_payment_profile(location, doc, phone,
+  email, name, limit)` devolve `{match_key, guru_contact, sales, subscriptions,
+  totals}` numa chamada. No client, cada passo seria uma ida e volta e o rótulo
+  poderia sair de uma consulta com as vendas vindo de outra.
+- A função é `stable` e **sem** `security definer` de propósito: a RLS de
+  membership das tabelas de pagamento continua valendo para quem chama.
+- **Sem coluna nova em `payment_events`/`payment_subscriptions`**: documento e
+  telefone do comprador não existem como coluna (0008/0012) mas estão em
+  `raw->'contact'` em 100% das linhas — a migração indexa a EXPRESSÃO que lê do
+  `raw` (0,2 ms por busca; ~20 ms a chamada inteira). Coluna exigiria backfill e
+  mais um lugar para o mapeamento da Guru esquecer de preencher.
+- `private.phone_key` (0047, da deduplicação por telefone) é **reusada como
+  está**; o documento ganhou a irmã `private.doc_key` (só dígitos), porque o CRM
+  recebe o CPF pontuado e a Guru devolve sem pontuação.
+- `contacts.doc` é coluna de primeira classe (não campo personalizado): é a
+  chave principal e precisa de índice. Aparece no cadastro e no detalhe do
+  contato.
+- Comentário continua sendo **mensagem interna da conversa** (`messages.internal`)
+  — é onde a nota já é gravada pela ação `nota-interna` das automações e pelo
+  botão "Nota" do card. Tabela nova faria a nota de um lugar não aparecer no
+  outro. A listagem (`db/notes.ts`) usa consulta própria e enxuta: o store de
+  Conversas carrega todas as mensagens da empresa.
+- Os totais somam o histórico inteiro, não o array exibido (limitado a 200).
+- ⚠️ O corpo do card é o punho do arrasto. O `click` do navegador dispara mesmo
+  depois de um arrasto que voltou para perto do início, então o card guarda onde
+  o ponteiro desceu e só abre o detalhe se soltou a menos de 6 px de lá.
+- `GuruStatusBadge`/`guruStatusBadgeClass` saíram de `pagamentos/page.tsx` para
+  `src/components/payments/status-badge.tsx` (duas cópias da tabela de cores
+  divergiriam).
+- Sem env nova. Spec: `docs/superpowers/specs/2026-08-17-lead-detalhe-design.md`.
+
 ## WhatsApp — Meta Cloud API (número real, inbox de 2 vias)
 
 Módulo **`/whatsapp`** ("Canais de atendimento") integrado à Cloud API oficial da
@@ -418,8 +464,11 @@ Cloud API → celular.
   0040 = só admin exclui conversa/mensagem,
   0041 = compromisso vinculado a lead, 0042 = lembrete do compromisso,
   0043 = agenda por usuário, 0044 = mídia drive (bucket + pastas/arquivos),
-  0045 = conexões de mídia (Canva), 0046 = arquivos do Drive via Picker;
-  **próxima migração livre: 0047**.
+  0045 = conexões de mídia (Canva), 0046 = arquivos do Drive via Picker,
+  0047 = deduplicação de contato por telefone (`private.phone_key`),
+  0048 = detalhe do lead / cruzamento com a Guru (`private.doc_key`,
+  `contacts.doc`, `public.lead_payment_profile`);
+  **próxima migração livre: 0049**.
 - Env (privadas, nunca `NEXT_PUBLIC_`): `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`,
   `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_GRAPH_VERSION` (default `v21.0`).
 - **Mídia real (imagem/áudio/vídeo)** — helpers em `src/lib/whatsapp/client.ts`

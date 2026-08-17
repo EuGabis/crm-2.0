@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useDraggable } from "@dnd-kit/core";
 import { format } from "date-fns";
@@ -32,6 +32,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useWebphone } from "@/components/layout/webphone-store";
+import { LeadDetailDialog } from "@/components/pipeline/lead-detail-dialog";
 import { dbContactActions, useDbContact, useDbTeam } from "@/lib/data/repos/db/contacts";
 import { conversationActions } from "@/lib/data/repos/db/conversations";
 import { oppActions } from "@/lib/data/repos/db/pipeline";
@@ -147,6 +148,12 @@ export function OpportunityCard({
   const [apptDate, setApptDate] = useState("");
   const [apptTime, setApptTime] = useState("09:00");
   const [busy, setBusy] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+  // Onde o dedo/ponteiro desceu. O PointerSensor do kanban só começa a arrastar
+  // depois de 6px, mas o `click` do navegador dispara mesmo depois de um
+  // arrasto que voltou para perto do começo — sem esta guarda, soltar o card na
+  // mesma coluna abriria o detalhe sem ninguém ter pedido.
+  const pressAt = useRef<{ x: number; y: number } | null>(null);
 
   const close = () => setOpenAction(null);
 
@@ -292,7 +299,22 @@ export function OpportunityCard({
     >
       {/* Só o corpo arrasta: com os listeners no card inteiro, abrir um popover
           da barra de ações competia com o gesto de arrastar. */}
-      <div {...listeners} {...attributes} className="cursor-grab">
+      <div
+        {...listeners}
+        {...attributes}
+        onPointerDown={(e) => {
+          pressAt.current = { x: e.clientX, y: e.clientY };
+          listeners?.onPointerDown?.(e);
+        }}
+        onClick={(e) => {
+          const from = pressAt.current;
+          pressAt.current = null;
+          if (from && Math.hypot(e.clientX - from.x, e.clientY - from.y) > 6) return;
+          setDetailOpen(true);
+        }}
+        title="Ver detalhes do lead"
+        className="cursor-pointer"
+      >
         <div className="flex items-start justify-between gap-2">
           {onToggleSelect && (
             // Fora do drag: marcar não pode arrastar o card junto.
@@ -518,6 +540,12 @@ export function OpportunityCard({
           </button>
         </ActionPopover>
       </div>
+
+      <LeadDetailDialog
+        opportunity={opportunity}
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+      />
     </div>
   );
 }

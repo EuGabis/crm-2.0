@@ -38,6 +38,7 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
     lastName: "",
     email: "",
     phone: "",
+    doc: "",
     company: "",
   });
   const [custom, setCustom] = useState<Record<string, string>>({});
@@ -49,6 +50,7 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
         lastName: contact.lastName,
         email: contact.email,
         phone: contact.phone,
+        doc: contact.doc ?? "",
         company: contact.company ?? "",
       });
       setCustom(contact.customFields);
@@ -94,6 +96,7 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
       lastName: form.lastName.trim(),
       email: form.email.trim(),
       phone: form.phone.trim(),
+      doc: form.doc.trim(),
       company: form.company.trim(),
       customFields: Object.fromEntries(
         Object.entries(custom).filter(([, v]) => String(v).trim() !== "")
@@ -210,6 +213,11 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
                 <Input value={form.phone} onChange={set("phone")} className="h-8" />
               </div>
               <div className="space-y-1">
+                {/* Chave principal do cruzamento com a Guru (migração 0048). */}
+                <Label className="text-xs">CPF/CNPJ</Label>
+                <Input value={form.doc} onChange={set("doc")} className="h-8" />
+              </div>
+              <div className="space-y-1">
                 <Label className="text-xs">Empresa</Label>
                 <Input value={form.company} onChange={set("company")} className="h-8" />
               </div>
@@ -227,6 +235,7 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
                   ["Sobrenome", contact.lastName || "—"],
                   ["E-mail", contact.email || "—"],
                   ["Telefone", contact.phone || "—"],
+                  ["CPF/CNPJ", contact.doc || "—"],
                   ["Empresa", contact.company ?? "—"],
                   ["DND", contact.dnd ? "Ativado" : "Desativado"],
                   [

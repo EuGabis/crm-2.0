@@ -29,6 +29,7 @@ export function ContactFormDialog({
     lastName: "",
     email: "",
     phone: "",
+    doc: "",
     company: "",
     tags: "",
   });
@@ -58,6 +59,7 @@ export function ContactFormDialog({
       lastName: form.lastName.trim(),
       email: form.email.trim(),
       phone: form.phone.trim(),
+      doc: form.doc.trim(),
       company: form.company.trim() || undefined,
       tags: form.tags
         .split(",")
@@ -73,7 +75,15 @@ export function ContactFormDialog({
       return;
     }
     toast.success("Contato criado");
-    setForm({ firstName: "", lastName: "", email: "", phone: "", company: "", tags: "" });
+    setForm({
+      firstName: "",
+      lastName: "",
+      email: "",
+      phone: "",
+      doc: "",
+      company: "",
+      tags: "",
+    });
     setCustom({});
     onOpenChange(false);
   };
@@ -100,6 +110,16 @@ export function ContactFormDialog({
           <div className="space-y-1">
             <Label className="text-xs">Telefone</Label>
             <Input value={form.phone} onChange={set("phone")} className="h-8" />
+          </div>
+          <div className="space-y-1">
+            {/* Chave principal do cruzamento com a Guru (migração 0048). */}
+            <Label className="text-xs">CPF/CNPJ</Label>
+            <Input
+              value={form.doc}
+              onChange={set("doc")}
+              placeholder="000.000.000-00"
+              className="h-8"
+            />
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Empresa</Label>

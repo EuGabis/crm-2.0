@@ -79,7 +79,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useMyMembership } from "@/lib/data/repos/db/team";
 import {
   classifyGuruStatus,
-  guruStatusLabel,
   SALE_STATUS_OPTIONS,
   SUBSCRIPTION_STATUS_OPTIONS,
 } from "@/lib/data/guru";
@@ -91,6 +90,7 @@ import {
   FilterPanel,
   type PaymentFilters,
 } from "@/components/payments/filters";
+import { GuruStatusBadge } from "@/components/payments/status-badge";
 import { cn } from "@/lib/utils";
 
 const TABS = [
@@ -310,32 +310,6 @@ function GuruDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function guruStatusBadgeClass(status: string | null): string {
-  switch (classifyGuruStatus(status)) {
-    case "aprovado":
-      return "bg-emerald-100 text-emerald-700";
-    case "pendente":
-    case "atrasado":
-      return "bg-amber-100 text-amber-700";
-    case "recusado":
-    case "reembolsado":
-    case "chargeback":
-    case "cancelado":
-    case "expirado":
-      return "bg-red-100 text-red-600";
-    default:
-      return "bg-slate-100 text-slate-600";
-  }
-}
-
-function GuruStatusBadge({ status }: { status: string | null }) {
-  return (
-    <Badge variant="secondary" className={cn(guruStatusBadgeClass(status))}>
-      {guruStatusLabel(status)}
-    </Badge>
   );
 }
 

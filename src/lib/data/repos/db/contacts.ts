@@ -13,6 +13,7 @@ function mapContact(row: any): Contact {
     lastName: row.last_name,
     email: row.email,
     phone: row.phone,
+    doc: row.doc ?? undefined,
     company: row.company ?? undefined,
     tags: row.tags ?? [],
     ownerId: row.owner_id ?? "",
@@ -133,6 +134,7 @@ export const dbContactActions = {
     lastName: string;
     email: string;
     phone: string;
+    doc?: string;
     company?: string;
     tags: string[];
     customFields?: Record<string, string>;
@@ -157,6 +159,7 @@ export const dbContactActions = {
         last_name: input.lastName,
         email: input.email,
         phone: input.phone,
+        doc: input.doc?.trim() || null,
         company: input.company ?? null,
         tags: input.tags,
         owner_id: userId,
@@ -234,7 +237,10 @@ export const dbContactActions = {
   async update(
     id: string,
     patch: Partial<
-      Pick<Contact, "firstName" | "lastName" | "email" | "phone" | "company" | "customFields">
+      Pick<
+        Contact,
+        "firstName" | "lastName" | "email" | "phone" | "doc" | "company" | "customFields"
+      >
     >
   ): Promise<boolean> {
     const supabase = createClient();
@@ -252,6 +258,7 @@ export const dbContactActions = {
     if (patch.lastName !== undefined) row.last_name = patch.lastName;
     if (patch.email !== undefined) row.email = patch.email;
     if (patch.phone !== undefined) row.phone = patch.phone;
+    if (patch.doc !== undefined) row.doc = patch.doc?.trim() || null;
     if (patch.company !== undefined) row.company = patch.company || null;
     if (patch.customFields !== undefined) row.custom_fields = patch.customFields;
     const { data, error } = await supabase
