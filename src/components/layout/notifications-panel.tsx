@@ -9,12 +9,14 @@ import {
   Bell,
   CalendarClock,
   Check,
+  CheckSquare,
   MessageSquare,
   Undo2,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { createClient } from "@/lib/supabase/client";
 import { useApptStore } from "@/lib/data/repos/db/appointments";
+import { useModuleStore } from "@/lib/data/repos/db/contacts-module";
 import { useDbStore } from "@/lib/data/repos/db/contacts";
 import { cn } from "@/lib/utils";
 
@@ -46,7 +48,7 @@ const READ_LIMIT = 300;
 const REFRESH_MS = 60_000;
 const UPCOMING_HOURS = 24;
 
-type NotificationKind = "conversa" | "compromisso" | "agendamento";
+type NotificationKind = "conversa" | "compromisso" | "agendamento" | "tarefa";
 
 interface NotificationItem {
   id: string;
@@ -62,12 +64,14 @@ const ICON: Record<NotificationKind, typeof Bell> = {
   conversa: MessageSquare,
   compromisso: CalendarClock,
   agendamento: AlertTriangle,
+  tarefa: CheckSquare,
 };
 
 const ICON_CLASS: Record<NotificationKind, string> = {
   conversa: "bg-indigo-50 text-indigo-600",
   compromisso: "bg-emerald-50 text-emerald-600",
   agendamento: "bg-rose-50 text-rose-600",
+  tarefa: "bg-amber-50 text-amber-600",
 };
 
 function loadRead(): string[] {
@@ -146,6 +150,14 @@ export function NotificationsPanel() {
       return start >= now && start <= now + UPCOMING_HOURS * 3_600_000;
     });
 
+    // 4) Tarefas pendentes vencendo (ou já vencidas). Mesma fonte de graça: a
+    // store de tarefas já é carregada pelo lembrete, que vive neste shell.
+    // Vencida ENTRA de propósito — é justamente a que não pode ser esquecida.
+    const tasks = useModuleStore.getState().tasks.filter((t) => {
+      if (t.status !== "pending" || !t.dueAt) return false;
+      return new Date(t.dueAt).getTime() <= now + UPCOMING_HOURS * 3_600_000;
+    });
+
     const next: NotificationItem[] = [
       ...(convs ?? []).map((c: any) => ({
         id: `conv-${c.id}`,
@@ -165,6 +177,19 @@ export function NotificationsPanel() {
         at: m.scheduled_for ?? new Date(now).toISOString(),
         href: `/conversas?c=${m.conversation_id}`,
       })),
+      ...tasks.map((t) => {
+        const late = new Date(t.dueAt as string).getTime() < now;
+        return {
+          id: `task-${t.id}`,
+          kind: "tarefa" as const,
+          title: t.title,
+          description: late
+            ? `Venceu ${format(new Date(t.dueAt as string), "dd/MM 'às' HH:mm", { locale: ptBR })}`
+            : `Vence ${format(new Date(t.dueAt as string), "EEEE 'às' HH:mm", { locale: ptBR })}`,
+          at: t.dueAt as string,
+          href: "/contatos",
+        };
+      }),
       ...appointments.map((a) => ({
         id: `appt-${a.id}`,
         kind: "compromisso" as const,

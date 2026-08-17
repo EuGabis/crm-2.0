@@ -39,6 +39,62 @@ export function formatFileSize(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/**
+ * Quantos comentários e arquivos o contato tem — só os NÚMEROS, para os
+ * indicadores da barra lateral.
+ *
+ * Duas contagens `head: true` (o Postgres devolve o total, nenhuma linha
+ * trafega) em vez de reusar `useContactNotes`/`useContactFiles`: o painel de
+ * contato monta em toda conversa aberta, e baixar 200 notas + 200 anexos para
+ * escrever "3" ao lado de um ícone seria caro à toa.
+ */
+export function useContactActivityCounts(contactId: string | null | undefined) {
+  const [counts, setCounts] = useState({ notes: 0, files: 0 });
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      await useDbStore.getState().load();
+      if (!contactId) {
+        if (active) setCounts({ notes: 0, files: 0 });
+        return;
+      }
+      const loc = useDbStore.getState().locationId;
+      if (!loc) return;
+      const supabase = createClient();
+      const { data: convs } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("location_id", loc)
+        .eq("contact_id", contactId);
+      const ids = (convs ?? []).map((c: any) => c.id);
+      if (ids.length === 0) {
+        if (active) setCounts({ notes: 0, files: 0 });
+        return;
+      }
+      const [notes, files] = await Promise.all([
+        supabase
+          .from("messages")
+          .select("id", { count: "exact", head: true })
+          .in("conversation_id", ids)
+          .eq("internal", true),
+        supabase
+          .from("messages")
+          .select("id", { count: "exact", head: true })
+          .in("conversation_id", ids)
+          .not("media_path", "is", null),
+      ]);
+      if (!active) return;
+      setCounts({ notes: notes.count ?? 0, files: files.count ?? 0 });
+    })();
+    return () => {
+      active = false;
+    };
+  }, [contactId]);
+
+  return counts;
+}
+
 export function useContactFiles(contactId: string | null | undefined, enabled = true) {
   const [files, setFiles] = useState<ContactFile[]>([]);
   const [loading, setLoading] = useState(false);

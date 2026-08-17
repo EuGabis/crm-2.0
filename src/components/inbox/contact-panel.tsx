@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   CalendarDays,
   CheckSquare,
+  Clock,
   ChevronDown,
   FileText,
   Pencil,
@@ -12,6 +13,8 @@ import {
   User,
   UserPlus,
 } from "lucide-react";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -41,7 +44,10 @@ import {
 } from "./contact-side-panels";
 import { SendToPipelineDialog } from "./send-to-pipeline-dialog";
 import { contactName } from "@/lib/data/repos/contacts";
+import { useDbAppointments } from "@/lib/data/repos/db/appointments";
 import { useDbContact, useDbTeam } from "@/lib/data/repos/db/contacts";
+import { useContactsModule } from "@/lib/data/repos/db/contacts-module";
+import { useContactActivityCounts } from "@/lib/data/repos/db/contact-files";
 import { conversationActions } from "@/lib/data/repos/db/conversations";
 import { oppActions, usePipelineDb } from "@/lib/data/repos/db/pipeline";
 import { useMyMembership } from "@/lib/data/repos/db/team";
@@ -50,6 +56,9 @@ import type { Opportunity, Pipeline, Stage, User as TeamUser } from "@/lib/data/
 import { cn } from "@/lib/utils";
 
 type Panel = "campos" | "tarefas" | "notas" | "compromissos" | "arquivos";
+
+const fmtShort = (v: string, withTime = false) =>
+  format(new Date(v), withTime ? "dd/MM 'às' HH:mm" : "dd/MM", { locale: ptBR });
 
 /**
  * Editor da oportunidade do contato dentro do painel da conversa: dá pra MOVER
@@ -203,13 +212,38 @@ export function ContactPanel({
   const [pipelineOpen, setPipelineOpen] = useState(false);
   // Seções abertas do acordeão. Controlado (e não `defaultValue`) porque
   // "Resumo pagamentos" só consulta a Guru quando o usuário abre a seção.
-  const [sections, setSections] = useState<string[]>(["contato", "custom"]);
+  const [sections, setSections] = useState<string[]>(["contato"]);
   const { can } = useMyMembership();
   const canPayments = can("pagamentos");
   const { contact } = useDbContact(contactId);
   const team = useDbTeam();
   const { pipelines, opportunities: allOpps } = usePipelineDb();
   const opportunities = allOpps.filter((o) => o.contactId === contactId);
+  // Contagens dos indicadores. Tarefas e compromissos saem de stores já
+  // carregadas (de graça); comentários e arquivos vêm de duas contagens
+  // `head` (nenhuma linha trafega) — ver useContactActivityCounts.
+  const { tasks } = useContactsModule();
+  const { appointments } = useDbAppointments();
+  const { notes: notesCount, files: filesCount } = useContactActivityCounts(contactId);
+  // Inicializador preguiçoso: relógio no corpo do render quebra a regra de
+  // pureza do React. Só separa passado de futuro, não precisa acompanhar o
+  // minuto.
+  const [nowIso] = useState(() => new Date().toISOString());
+
+  const pendingTasks = tasks
+    .filter((t) => t.contactId === contactId && t.status === "pending")
+    .sort((a, b) => (a.dueAt ?? "9999").localeCompare(b.dueAt ?? "9999"));
+  const contactAppointments = appointments
+    .filter((a) => a.contactId === contactId)
+    .sort((a, b) => a.start.localeCompare(b.start));
+  const nextAppointment = contactAppointments.find((a) => a.start >= nowIso);
+  const counts: Record<Panel, number> = {
+    campos: 0,
+    tarefas: pendingTasks.length,
+    notas: notesCount,
+    compromissos: contactAppointments.length,
+    arquivos: filesCount,
+  };
 
   if (!contact) return null;
 
@@ -236,6 +270,55 @@ export function ContactPanel({
               >
                 <Target className="size-3" /> Enviar para pipeline
               </button>
+              {/* Pendências à vista, sem trocar de painel: o atendente abre a
+                  conversa e já vê que existe tarefa em aberto ou reunião
+                  marcada — que é o ponto de "não esquecer". */}
+              {(pendingTasks.length > 0 || nextAppointment) && (
+                <div className="mt-2 space-y-1 rounded-md border border-amber-200 bg-amber-50 p-2">
+                  {pendingTasks.slice(0, 3).map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => setPanel("tarefas")}
+                      className="flex w-full items-start gap-1.5 text-left"
+                    >
+                      <CheckSquare className="mt-0.5 size-3 shrink-0 text-amber-600" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[11px] text-slate-700">{t.title}</span>
+                        <span className="block text-[10px] text-amber-700">
+                          {t.dueAt ? `Prazo ${fmtShort(t.dueAt)}` : "Sem prazo"}
+                          {t.reminderMinutes !== null && t.reminderMinutes !== undefined
+                            ? " · com lembrete"
+                            : ""}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                  {pendingTasks.length > 3 && (
+                    <button
+                      onClick={() => setPanel("tarefas")}
+                      className="text-[10px] font-semibold text-amber-700 hover:underline"
+                    >
+                      +{pendingTasks.length - 3} outra(s) tarefa(s)
+                    </button>
+                  )}
+                  {nextAppointment && (
+                    <button
+                      onClick={() => setPanel("compromissos")}
+                      className="flex w-full items-start gap-1.5 text-left"
+                    >
+                      <Clock className="mt-0.5 size-3 shrink-0 text-amber-600" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[11px] text-slate-700">
+                          {nextAppointment.title}
+                        </span>
+                        <span className="block text-[10px] text-amber-700">
+                          {fmtShort(nextAppointment.start, true)}
+                        </span>
+                      </span>
+                    </button>
+                  )}
+                </div>
+              )}
               {opportunities.length > 0 && (
                 <div className="mt-2 space-y-1.5">
                   <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
@@ -286,6 +369,11 @@ export function ContactPanel({
                         ["Telefone", contact.phone],
                         ["CPF/CNPJ", contact.doc || "—"],
                         ["Empresa", contact.company ?? "—"],
+                        // A seção "Campos personalizados" era um cabeçalho com
+                        // nada embaixo em toda empresa que não criou campo
+                        // nenhum. Quem TEM campo continua vendo o valor — agora
+                        // junto do resto, sem seção separada só para isso.
+                        ...Object.entries(contact.customFields),
                       ].map(([k, v]) => (
                         <div key={k}>
                           <p className="text-[10px] text-slate-400">{k}</p>
@@ -294,19 +382,7 @@ export function ContactPanel({
                       ))}
                     </AccordionContent>
                   </AccordionItem>
-                  <AccordionItem value="custom">
-                    <AccordionTrigger className="py-2 text-xs font-bold">
-                      Campos personalizados
-                    </AccordionTrigger>
-                    <AccordionContent className="space-y-2">
-                      {Object.entries(contact.customFields).map(([k, v]) => (
-                        <div key={k}>
-                          <p className="text-[10px] text-slate-400">{k}</p>
-                          <p className="truncate text-xs text-slate-700">{v}</p>
-                        </div>
-                      ))}
-                    </AccordionContent>
-                  </AccordionItem>
+
                   {/* Só existe para quem enxerga o módulo Pagamentos. */}
                   {canPayments && (
                     <AccordionItem value="pagamentos">
@@ -396,7 +472,7 @@ export function ContactPanel({
                 <button
                   onClick={() => setPanel(key)}
                   className={cn(
-                    "flex size-8 items-center justify-center rounded-md",
+                    "relative flex size-8 items-center justify-center rounded-md",
                     panel === key
                       ? "bg-indigo-100 text-indigo-600"
                       : "text-slate-400 hover:bg-slate-100"
@@ -405,9 +481,22 @@ export function ContactPanel({
               }
             >
               <Icon className="size-4" />
+              {/* O que existe ali dentro, sem precisar abrir. Tarefas conta só
+                  as PENDENTES: um selo que nunca zera vira enfeite. */}
+              {counts[key] > 0 && (
+                <span
+                  className={cn(
+                    "absolute -right-0.5 -top-0.5 flex min-w-3.5 items-center justify-center rounded-full px-0.5 text-[9px] font-bold leading-[14px] text-white",
+                    key === "tarefas" ? "bg-amber-500" : "bg-indigo-500"
+                  )}
+                >
+                  {counts[key] > 9 ? "9+" : counts[key]}
+                </span>
+              )}
             </TooltipTrigger>
             <TooltipContent side="left" className="text-[10px]">
               {label}
+              {counts[key] > 0 ? ` (${counts[key]})` : ""}
             </TooltipContent>
           </Tooltip>
         ))}
