@@ -17,6 +17,8 @@ export interface WhatsappChannel {
   sector: string;
   dailyLimit: number;
   active: boolean;
+  /** Fluxo de bot que este número roda (null/"" = sem bot). */
+  botFlow: string;
   createdAt: string;
 }
 
@@ -31,6 +33,7 @@ function mapRow(r: any): WhatsappChannel {
     sector: r.sector ?? "",
     dailyLimit: r.daily_limit ?? 1000,
     active: r.active,
+    botFlow: r.bot_flow ?? "",
     createdAt: r.created_at,
   };
 }
@@ -141,18 +144,26 @@ export const whatsappActions = {
   /** Edita os dados editáveis do canal (nome, setor, limite). Os ids da Meta ficam fixos. */
   async updateChannel(
     id: string,
-    patch: { name: string; sector: string; dailyLimit: number },
+    patch: { name: string; sector: string; dailyLimit: number; botFlow?: string },
   ): Promise<boolean> {
     const supabase = createClient();
+    const botFlow = patch.botFlow ?? "";
     const { error } = await supabase
       .from("whatsapp_channels")
-      .update({ name: patch.name, sector: patch.sector, daily_limit: patch.dailyLimit })
+      .update({
+        name: patch.name,
+        sector: patch.sector,
+        daily_limit: patch.dailyLimit,
+        bot_flow: botFlow || null,
+      })
       .eq("id", id);
     if (error) return false;
     const s = useChannelsStore.getState();
     s.set(
       s.channels.map((c) =>
-        c.id === id ? { ...c, name: patch.name, sector: patch.sector, dailyLimit: patch.dailyLimit } : c,
+        c.id === id
+          ? { ...c, name: patch.name, sector: patch.sector, dailyLimit: patch.dailyLimit, botFlow }
+          : c,
       ),
     );
     return true;

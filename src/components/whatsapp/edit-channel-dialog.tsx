@@ -19,8 +19,15 @@ interface Channel {
   name: string;
   sector: string;
   dailyLimit: number;
+  botFlow?: string;
   phoneE164?: string;
 }
+
+// Fluxos de bot disponíveis (config-driven por enquanto).
+const BOT_FLOWS: { value: string; label: string }[] = [
+  { value: "", label: "Nenhum (sem bot)" },
+  { value: "triagem", label: "Triagem Comercial" },
+];
 
 /**
  * Edita nome, setor e limite diário de um canal. Os identificadores da Meta
@@ -37,7 +44,7 @@ export function EditChannelDialog({
   onOpenChange: (v: boolean) => void;
 }) {
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: "", sector: "", dailyLimit: "1000" });
+  const [form, setForm] = useState({ name: "", sector: "", dailyLimit: "1000", botFlow: "" });
 
   useEffect(() => {
     if (channel) {
@@ -45,6 +52,7 @@ export function EditChannelDialog({
         name: channel.name,
         sector: channel.sector,
         dailyLimit: String(channel.dailyLimit),
+        botFlow: channel.botFlow ?? "",
       });
     }
   }, [channel]);
@@ -60,6 +68,7 @@ export function EditChannelDialog({
       name: form.name.trim(),
       sector: form.sector.trim(),
       dailyLimit: Number(form.dailyLimit) || 1000,
+      botFlow: form.botFlow,
     });
     setSaving(false);
     if (ok) {
@@ -103,6 +112,23 @@ export function EditChannelDialog({
               placeholder="1000"
               className="h-8 text-xs"
             />
+          </div>
+          <div className="grid gap-1">
+            <Label className="text-xs">Bot de atendimento</Label>
+            <select
+              value={form.botFlow}
+              onChange={(e) => setForm((f) => ({ ...f, botFlow: e.target.value }))}
+              className="h-8 rounded-md border bg-white px-2 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-300"
+            >
+              {BOT_FLOWS.map((b) => (
+                <option key={b.value} value={b.value}>
+                  {b.label}
+                </option>
+              ))}
+            </select>
+            <p className="text-[10px] text-slate-400">
+              Quando ativo, o bot responde a 1ª mensagem deste número e conduz o fluxo até passar pra um humano.
+            </p>
           </div>
         </div>
         <DialogFooter>

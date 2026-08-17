@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { isAdvance } from "@/lib/whatsapp/status-rank";
 import { maybeAutoReply } from "@/lib/whatsapp/auto-reply";
 import { getMediaInfo, downloadMedia } from "@/lib/whatsapp/client";
+import { maybeRunBot } from "@/lib/bot/engine";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -63,7 +64,7 @@ export async function POST(request: Request) {
 
       const { data: channel } = await db
         .from("whatsapp_channels")
-        .select("id, location_id, daily_limit")
+        .select("id, location_id, daily_limit, phone_number_id, bot_flow")
         .eq("phone_number_id", phoneNumberId)
         .maybeSingle();
       if (!channel) continue; // número não cadastrado aqui — ignora
@@ -250,13 +251,29 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
     return;
   }
 
-  // Auto-responder: só para mensagens de texto de verdade, best-effort.
-  if (m.text?.body) {
+  // Bot conversacional primeiro (fluxo com passos/botões). Se ele não tratar a
+  // mensagem, cai no auto-responder de IA single-turn. Best-effort.
+  const replyId =
+    m.interactive?.list_reply?.id ?? m.interactive?.button_reply?.id ?? null;
+  const botHandled = await maybeRunBot(db, {
+    channel: {
+      id: channel.id,
+      phone_number_id: channel.phone_number_id,
+      location_id: channel.location_id,
+      bot_flow: channel.bot_flow ?? null,
+    },
+    conversationId: conv.id,
+    contact: { id: contact.id, phone },
+    text: body,
+    replyId,
+  }).catch(() => false);
+
+  if (!botHandled && m.text?.body) {
     await maybeAutoReply(db, {
       locationId: channel.location_id,
       conversationId: conv.id,
       channelId: channel.id,
-      phoneNumberId: value?.metadata?.phone_number_id,
+      phoneNumberId: channel.phone_number_id,
       toPhone: phone,
       dailyLimit: channel.daily_limit ?? 1000,
     });
