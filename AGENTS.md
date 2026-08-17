@@ -1014,7 +1014,18 @@ os módulos ainda não migrados continuam importando dos repos mock em
   TODAS as mensagens da empresa e o sino vive no shell. Abas **Não lidas /
   Lidas**: o "lido" é um CONJUNTO DE IDS no `localStorage` (por item, não um
   carimbo de última abertura — senão abrir o sino esvaziaria "Não lidas"), e
-  abrir o painel não marca nada. Spec:
+  abrir o painel não marca nada. Também lista tarefa pendente vencendo em 24h
+  (a vencida entra de propósito).
+  ⚠️ **O sino tem MEMÓRIA PRÓPRIA** (`lito.notifications.archive`, localStorage,
+  teto de 150) desde 2026-08-17, e isso é o que faz as abas existirem de
+  verdade: derivar do banco significa que o aviso morre junto com a condição que
+  o gerou — clicar na notificação abre a conversa, o `unread_count` zera e o
+  aviso sumia das DUAS abas no mesmo instante, sem virar histórico. Agora todo
+  aviso visto é gravado com o texto dele, as abas leem do ARQUIVO e a consulta
+  só atualiza o que já está lá ("2 não lidas" vira "3") e acrescenta o que é
+  novo. Consequência assumida: aviso não lido continua em "Não lidas" mesmo
+  depois de a origem sumir — some quando alguém marca como lido, e "Lidas" tem
+  "Limpar histórico". Spec:
   `docs/superpowers/specs/2026-08-14-central-notificacoes-design.md`.
 - ⏳ Próximo: Automações reais (Edge Functions) tarefas 5–8, Agentes de IA.
 - ⏳ Backlog: personalizar template/remetente dos e-mails de auth do Supabase
