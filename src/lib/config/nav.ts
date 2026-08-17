@@ -1,5 +1,4 @@
 import {
-  Rocket,
   LayoutDashboard,
   MessageSquare,
   CalendarDays,
@@ -31,7 +30,6 @@ export interface NavItem {
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { href: "/ativacao", label: "Checklist de Ativação", icon: Rocket, key: "ativacao" },
   { href: "/dashboard", label: "Painel de controle", icon: LayoutDashboard, key: "dashboard" },
   { href: "/conversas", label: "Conversas", icon: MessageSquare, key: "conversas" },
   { href: "/calendarios", label: "Calendários", icon: CalendarDays, key: "calendarios" },
@@ -52,7 +50,7 @@ export const NAV_ITEMS: NavItem[] = [
 ];
 
 /** Módulos que podem ser ligados/desligados por usuário na tela de Equipe. */
-export const PERMISSION_MODULES = NAV_ITEMS.filter((i) => i.key !== "ativacao").map((i) => ({
+export const PERMISSION_MODULES = NAV_ITEMS.map((i) => ({
   key: i.key,
   label: i.label,
 }));
