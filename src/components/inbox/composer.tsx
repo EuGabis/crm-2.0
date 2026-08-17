@@ -38,7 +38,7 @@ import { channelLabel } from "@/components/shared/channel-icon";
 import { conversationActions, useConversation, useSnippets } from "@/lib/data/repos/db/conversations";
 import { whatsappActions } from "@/lib/data/repos/db/whatsapp";
 import { TemplatePicker } from "@/components/whatsapp/template-picker";
-import { dbContactActions } from "@/lib/data/repos/db/contacts";
+import { dbContactActions, useDbContact } from "@/lib/data/repos/db/contacts";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -89,6 +89,7 @@ export function Composer({ conversationId }: { conversationId: string }) {
   const snippets = useSnippets();
   const conversation = useConversation(conversationId);
   const contactId = conversation?.contactId ?? null;
+  const { contact } = useDbContact(contactId);
   const isWhatsapp = conversation?.channel === "whatsapp" && !!conversation?.channelId;
 
   const fmtSecs = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -583,6 +584,7 @@ export function Composer({ conversationId }: { conversationId: string }) {
         onOpenChange={setTemplateOpen}
         outsideWindow={templateForced}
         channelId={conversation?.channelId ?? null}
+        contactName={contact?.firstName}
         onPick={async (tpl) => {
           setSending(true);
           const res = await whatsappActions.send({
