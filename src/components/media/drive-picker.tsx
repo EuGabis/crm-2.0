@@ -76,6 +76,7 @@ function loadPicker(): Promise<void> {
 
 export function DrivePicker({ onPicked }: { onPicked: () => void }) {
   const [busy, setBusy] = useState(false);
+  const [originError, setOriginError] = useState<string | null>(null);
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID ?? "";
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_API_KEY ?? "";
   // O appId do Picker é o NÚMERO DO PROJETO, que é justamente o prefixo do
@@ -133,7 +134,18 @@ export function DrivePicker({ onPicked }: { onPicked: () => void }) {
       picker.setVisible(true);
     } catch (e) {
       setBusy(false);
-      toast.error(e instanceof Error ? e.message : "Não foi possível abrir o Google Drive");
+      const msg = e instanceof Error ? e.message : "Não foi possível abrir o Google Drive";
+      // "no registered origin" / invalid_client = a ORIGEM desta página não está
+      // cadastrada no client OAuth. Dizer qual origem é resolve em um passo; sem
+      // isso a pessoa fica adivinhando entre localhost, produção e preview.
+      const originIssue = /origin|invalid_client/i.test(msg);
+      setOriginError(originIssue ? window.location.origin : null);
+      toast.error(
+        originIssue
+          ? `${msg} — cadastre a origem ${window.location.origin} no client OAuth do Google.`
+          : msg,
+        { duration: originIssue ? 12000 : 6000 }
+      );
     }
   };
 
@@ -152,9 +164,31 @@ export function DrivePicker({ onPicked }: { onPicked: () => void }) {
   }
 
   return (
-    <Button size="sm" className="h-8 gap-1.5 text-xs" disabled={busy} onClick={open}>
-      {busy ? <Loader2 className="size-3.5 animate-spin" /> : <FolderOpen className="size-3.5" />}
-      {busy ? "Abrindo o Drive..." : "Escolher no Google Drive"}
-    </Button>
+    <div className="flex flex-col items-end gap-1.5">
+      <Button size="sm" className="h-8 gap-1.5 text-xs" disabled={busy} onClick={open}>
+        {busy ? (
+          <Loader2 className="size-3.5 animate-spin" />
+        ) : (
+          <FolderOpen className="size-3.5" />
+        )}
+        {busy ? "Abrindo o Drive..." : "Escolher no Google Drive"}
+      </Button>
+      {originError && (
+        <div className="max-w-sm rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-left">
+          <p className="text-[11px] font-semibold text-amber-800">Origem não cadastrada</p>
+          <p className="mt-1 text-[11px] text-amber-700">
+            No client OAuth do Google, em <strong>Origens JavaScript autorizadas</strong>,
+            adicione exatamente:
+          </p>
+          <code className="mt-1 block break-all text-[11px] font-semibold text-amber-900">
+            {originError}
+          </code>
+          <p className="mt-1 text-[10px] text-amber-600">
+            Sem barra no fim e sem caminho. Cada endereço é uma origem diferente — localhost,
+            produção e cada preview da Vercel precisam estar na lista.
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
