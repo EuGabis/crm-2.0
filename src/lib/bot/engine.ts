@@ -148,33 +148,30 @@ async function syncCard(
     .eq("location_id", loc)
     .order("position");
   if (!pipelines?.length) return;
-  const pick =
-    (node.pipeline
-      ? pipelines.find((p: any) => normalize(p.name) === normalize(node.pipeline))
-      : null) ?? pipelines[0];
-  const { data: stages } = await ctx.db
+  const { data: allStages } = await ctx.db
     .from("stages")
-    .select("id, name, position")
-    .eq("pipeline_id", pick.id)
+    .select("id, name, position, pipeline_id")
+    .in("pipeline_id", pipelines.map((p: any) => p.id))
     .order("position");
-  if (!stages?.length) return;
+  const stagesOf = (pid: string) => (allStages ?? []).filter((s: any) => s.pipeline_id === pid);
+  const stageByName = (pid: string, name: string) =>
+    name ? stagesOf(pid).find((s: any) => normalize(s.name).includes(normalize(name))) : null;
 
   const wantName = node.stageMap[normalize(vars[node.var])] ?? "";
-  const target = wantName
-    ? stages.find((s: any) => normalize(s.name).includes(normalize(wantName)))
-    : null;
   const fullName = String(vars.name ?? "").trim();
 
+  // Oportunidade existente do contato em QUALQUER funil (a mais recente): move ela
+  // dentro do próprio funil, para o card que a pessoa vê realmente andar.
   const { data: opp } = await ctx.db
     .from("opportunities")
-    .select("id")
+    .select("id, pipeline_id")
     .eq("contact_id", ctx.contact.id)
-    .eq("pipeline_id", pick.id)
-    .order("created_at")
+    .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
   if (opp) {
+    const target = stageByName(opp.pipeline_id, wantName);
     const patch: any = {};
     if (fullName) patch.name = fullName;
     if (target) {
@@ -185,7 +182,14 @@ async function syncCard(
       await ctx.db.from("opportunities").update(patch).eq("id", opp.id);
     }
   } else {
-    const stage = target ?? stages[0];
+    // Sem card ainda: cria no funil configurado (ou no primeiro) na etapa alvo.
+    const pick =
+      (node.pipeline
+        ? pipelines.find((p: any) => normalize(p.name) === normalize(node.pipeline))
+        : null) ?? pipelines[0];
+    const stages = stagesOf(pick.id);
+    if (!stages.length) return;
+    const stage = stageByName(pick.id, wantName) ?? stages[0];
     await ctx.db.from("opportunities").insert({
       location_id: loc,
       contact_id: ctx.contact.id,
@@ -255,7 +259,11 @@ async function advance(
       return;
     } else if (node.type === "handoff") {
       if (node.text) await botSend(ctx, render(node.text, vars));
-      await ctx.db.from("conversations").update({ bot_paused: true }).eq("id", ctx.conversationId);
+      // "humano": pausa o bot (atendente assume). "ia": não pausa — o agente de IA
+      // principal responde as próximas mensagens (auto-reply).
+      if ((node.to ?? "humano") === "humano") {
+        await ctx.db.from("conversations").update({ bot_paused: true }).eq("id", ctx.conversationId);
+      }
       await saveSession(ctx, nodeId, "concluido", vars);
       return;
     } else if (node.type === "end") {

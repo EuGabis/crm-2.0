@@ -69,8 +69,10 @@ export type BotNode =
       ifTrue: string | null;
       ifFalse: string | null;
     }
-  // Encerra o bot e passa pro humano (bot_paused = true).
-  | { id: string; type: "handoff"; text?: string }
+  // Encerra o script e entrega a conversa. `to`:
+  //  - "humano" (padrão): pausa o bot (bot_paused = true), um atendente assume.
+  //  - "ia": deixa o Agente de IA principal responder as próximas mensagens.
+  | { id: string; type: "handoff"; text?: string; to?: "humano" | "ia" }
   // Encerra o bot sem handoff.
   | { id: string; type: "end"; text?: string };
 

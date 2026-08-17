@@ -29,9 +29,11 @@ function nodeLabel(node: BotNode): string {
     case "condition":
       return "Roteia conforme a qualificação";
     case "handoff":
-      return "Encerramento — passa pro atendente";
+      return node.to === "ia"
+        ? "Encerramento — Agente de IA assume"
+        : "Encerramento — passa pro atendente";
     case "end":
-      return "Encerramento — envia link e finaliza";
+      return "Encerramento — envia mensagem e finaliza";
   }
 }
 
@@ -137,15 +139,30 @@ function NodeEditor({
   nodes: Record<string, BotNode>;
   onPatch: (id: string, patch: Partial<any>) => void;
 }) {
-  if (node.type === "message" || node.type === "handoff" || node.type === "end") {
+  if (node.type === "message") {
     return (
       <textarea
         className={textareaCls()}
         rows={3}
-        value={(node as any).text ?? ""}
+        value={node.text ?? ""}
         onChange={(e) => onPatch(node.id, { text: e.target.value })}
         placeholder="Texto que o bot envia…"
       />
+    );
+  }
+
+  if (node.type === "handoff" || node.type === "end") {
+    return (
+      <div className="space-y-2">
+        <textarea
+          className={textareaCls()}
+          rows={3}
+          value={(node as any).text ?? ""}
+          onChange={(e) => onPatch(node.id, { text: e.target.value })}
+          placeholder="Última mensagem que o bot envia…"
+        />
+        <TerminalSelect node={node} onPatch={onPatch} />
+      </div>
     );
   }
 
@@ -302,6 +319,35 @@ function ScoreEditor({
         );
       })}
     </div>
+  );
+}
+
+function TerminalSelect({
+  node,
+  onPatch,
+}: {
+  node: Extract<BotNode, { type: "handoff" | "end" }>;
+  onPatch: (id: string, patch: Partial<any>) => void;
+}) {
+  const value = node.type === "end" ? "encerrar" : node.to === "ia" ? "ia" : "humano";
+  return (
+    <label className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+      Ao terminar:
+      <select
+        className="h-8 rounded-lg border px-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+        value={value}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === "humano") onPatch(node.id, { type: "handoff", to: "humano" });
+          else if (v === "ia") onPatch(node.id, { type: "handoff", to: "ia" });
+          else onPatch(node.id, { type: "end" });
+        }}
+      >
+        <option value="humano">Passar pro atendente humano</option>
+        <option value="ia">Deixar o Agente de IA responder</option>
+        <option value="encerrar">Só enviar a mensagem e encerrar</option>
+      </select>
+    </label>
   );
 }
 

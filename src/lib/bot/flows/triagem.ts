@@ -150,13 +150,14 @@ export const triagemFlow: BotFlow = {
       type: "handoff",
       text: "Perfeito, {{name}}! Já estou passando você para um consultor. Em breve alguém da nossa tripulação fala com você por aqui. ✈️",
     },
-    // FRIO: manda o link e encerra.
+    // FRIO: manda o link e deixa o agente de IA seguir tirando dúvidas.
     frio_link: {
       id: "frio_link",
-      type: "end",
+      type: "handoff",
+      to: "ia",
       text:
-        "Obrigado pelas respostas, {{name}}! Você pode verificar todas as informações do nosso curso neste link. " +
-        "Se ainda tiver dúvidas, é só voltar aqui que eu te atendo: https://litoaviationacademy.com.br/",
+        "Obrigado pelas respostas, {{name}}! Você pode ver tudo sobre os nossos cursos neste link: " +
+        "https://litoaviationacademy.com.br/\n\nFicou com alguma dúvida? Pode me perguntar por aqui que eu te ajudo. ✈️",
     },
   },
 };

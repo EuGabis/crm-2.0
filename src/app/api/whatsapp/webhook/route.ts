@@ -192,11 +192,14 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
   // histórico e o número da conversa nunca "migra".
   let { data: conv } = await db
     .from("conversations")
-    .select("id, unread_count")
+    .select("id, unread_count, closed_at, archived_at")
     .eq("location_id", channel.location_id)
     .eq("contact_id", contact.id)
     .eq("channel_id", channel.id)
     .maybeSingle();
+  // Conversa fechada/arquivada + cliente escreveu de novo = reabrir E reiniciar o
+  // agente do zero (nova sessão), sem precisar apagar a conversa.
+  const wasClosed = !!(conv && (conv.closed_at || conv.archived_at));
   if (!conv) {
     const { data: created } = await db
       .from("conversations")
@@ -227,10 +230,17 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
         closed_by: null,
         archived_at: null,
         archived_by: null,
+        // Reabriu do fechado: solta o bot para poder recomeçar.
+        ...(wasClosed ? { bot_paused: false } : {}),
       })
       .eq("id", conv.id);
   }
   if (!conv) return;
+
+  // Reabriu uma conversa fechada: zera a sessão do agente para ele iniciar de novo.
+  if (wasClosed) {
+    await db.from("bot_sessions").delete().eq("conversation_id", conv.id);
+  }
 
   const { error: insErr } = await db.from("messages").insert({
     location_id: channel.location_id,
