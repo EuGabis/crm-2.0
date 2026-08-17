@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronsUpDown, Plus, Search } from "lucide-react";
+import { ChevronsUpDown } from "lucide-react";
 import { brand } from "@/lib/config/brand";
 import { NAV_ITEMS, SETTINGS_ITEM, type NavItem } from "@/lib/config/nav";
 import { useAccount } from "@/lib/data/repos/db/account";
@@ -65,16 +65,6 @@ export function Sidebar() {
           </span>
           <ChevronsUpDown className="size-3.5 shrink-0 text-slate-400" />
         </Link>
-        <div className="mt-2 flex items-center gap-1.5">
-          <div className="flex flex-1 items-center gap-2 rounded-md border border-slate-700 px-2.5 py-1.5">
-            <Search className="size-3.5 text-slate-500" />
-            <span className="flex-1 text-xs text-slate-500">Pesquisar</span>
-            <kbd className="rounded bg-slate-700 px-1 text-[10px] text-slate-300">Ctrl K</kbd>
-          </div>
-          <button className="flex size-7 items-center justify-center rounded-md bg-emerald-500 text-white">
-            <Plus className="size-4" />
-          </button>
-        </div>
       </div>
       <nav className="mt-3 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2 [scrollbar-width:thin]">
         <NavLink item={NAV_ITEMS[0]} active={pathname.startsWith(NAV_ITEMS[0].href)} />
