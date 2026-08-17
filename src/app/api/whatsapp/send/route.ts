@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { sendText, sendTemplate } from "@/lib/whatsapp/client";
+import { toWhatsAppNumber } from "@/lib/whatsapp/phone";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -51,7 +52,7 @@ export async function POST(request: Request) {
     .select("phone")
     .eq("id", conv.contact_id)
     .maybeSingle();
-  const to = (contact?.phone ?? "").replace(/\D/g, "");
+  const to = toWhatsAppNumber(contact?.phone);
   if (!to) return Response.json({ error: "Contato sem telefone" }, { status: 400 });
 
   // limite diário (conta saídas do canal hoje)
