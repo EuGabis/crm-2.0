@@ -362,11 +362,19 @@ export const conversationActions = {
       kind: "image" | "file" | "audio" | "video";
       channel: Channel;
       duration?: string;
+      /**
+       * Anexo INTERNO (padrão: false). O painel "Arquivos" do contato sobe
+       * documento sem despachar nada para o cliente — só esta função grava a
+       * mensagem, quem entrega no WhatsApp é a rota `send-media` chamada pelo
+       * composer. Sem esta marca o arquivo apareceria no thread com cara de
+       * enviado, e o cliente nunca recebeu.
+       */
+      internal?: boolean;
     }
   ): Promise<{ ok: boolean; error?: string; messageId?: string; mediaPath?: string; mime?: string }> {
     const location = loc();
     if (!location) return { ok: false, error: "Empresa não encontrada" };
-    const { file, kind, channel, duration } = opts;
+    const { file, kind, channel, duration, internal = false } = opts;
     if (file.size > MAX_MEDIA_BYTES) return { ok: false, error: "Arquivo maior que 15 MB" };
 
     const supabase = createClient();
@@ -389,6 +397,7 @@ export const conversationActions = {
         type: kind,
         channel,
         body,
+        internal,
         media_path: path,
         media_name: file.name,
         media_mime: file.type || null,
@@ -402,8 +411,9 @@ export const conversationActions = {
       return { ok: false, error: error?.message ?? "Não foi possível enviar a mídia" };
     }
 
-    const preview =
-      kind === "image"
+    const preview = internal
+      ? "Comentário interno"
+      : kind === "image"
         ? "📷 Imagem"
         : kind === "audio"
           ? "🎤 Áudio"

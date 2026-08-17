@@ -8,8 +8,6 @@ import {
   ChevronDown,
   FileText,
   Pencil,
-  Plus,
-  Search,
   Target,
   User,
   UserPlus,
@@ -17,7 +15,6 @@ import {
 import { toast } from "sonner";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import {
   Accordion,
   AccordionContent,
@@ -36,6 +33,12 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ContactPaymentsSummary } from "@/components/payments/lead-payments-panel";
+import {
+  AppointmentsPanel,
+  FilesPanel,
+  NotesPanel,
+  TasksPanel,
+} from "./contact-side-panels";
 import { SendToPipelineDialog } from "./send-to-pipeline-dialog";
 import { contactName } from "@/lib/data/repos/contacts";
 import { useDbContact, useDbTeam } from "@/lib/data/repos/db/contacts";
@@ -188,51 +191,6 @@ const PANELS: { key: Panel; icon: typeof User; label: string }[] = [
   { key: "arquivos", icon: FileText, label: "Arquivos" },
 ];
 
-function PanelShell({
-  title,
-  children,
-  searchPlaceholder,
-}: {
-  title: string;
-  children: React.ReactNode;
-  searchPlaceholder?: string;
-}) {
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center justify-between border-b px-3 py-2">
-        <h3 className="text-xs font-bold text-slate-700">{title}</h3>
-        <button
-          onClick={() => toast.info(`Adicionar em "${title}" chega com o backend`)}
-          className="flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:underline"
-        >
-          <Plus className="size-3" /> Adicionar
-        </button>
-      </div>
-      {searchPlaceholder && (
-        <div className="flex items-center gap-1.5 border-b px-3 py-1.5">
-          <Search className="size-3 text-slate-400" />
-          <Input
-            placeholder={searchPlaceholder}
-            className="h-6 border-0 p-0 text-[11px] shadow-none focus-visible:ring-0"
-          />
-        </div>
-      )}
-      <div className="min-h-0 flex-1 overflow-y-auto p-3 [scrollbar-width:thin]">{children}</div>
-    </div>
-  );
-}
-
-function SmallEmpty({ icon, title, text }: { icon: typeof User; title: string; text: string }) {
-  const Icon = icon;
-  return (
-    <div className="flex flex-col items-center gap-1.5 py-8 text-center">
-      <Icon className="size-6 text-slate-300" />
-      <p className="text-xs font-semibold text-slate-600">{title}</p>
-      <p className="text-[11px] text-slate-400">{text}</p>
-    </div>
-  );
-}
-
 export function ContactPanel({
   contactId,
   conversationId,
@@ -242,7 +200,6 @@ export function ContactPanel({
 }) {
   const [panel, setPanel] = useState<Panel>("campos");
   const [tab, setTab] = useState<"todos" | "dnd" | "acoes">("todos");
-  const [fileTab, setFileTab] = useState("Todos");
   const [pipelineOpen, setPipelineOpen] = useState(false);
   // Seções abertas do acordeão. Controlado (e não `defaultValue`) porque
   // "Resumo pagamentos" só consulta a Guru quando o usuário abre a seção.
@@ -406,62 +363,29 @@ export function ContactPanel({
                       </div>
                     );
                   })}
+                  {/* Aqui havia dois nomes de automação FIXOS no código
+                      ("Boas-vindas | Novo Lead · Follow-up 3 dias"), iguais para
+                      todo contato — parecia dado e não era. Enquanto o motor não
+                      expõe as inscrições por contato, é melhor dizer isso. */}
                   <p className="pt-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">
                     Fluxos de trabalho ativos
                   </p>
                   <p className="text-[11px] text-slate-400">
-                    Boas-vindas | Novo Lead · Follow-up 3 dias
+                    As inscrições em automações por contato ainda não são exibidas aqui — veja
+                    em Automações.
                   </p>
                 </div>
               )}
             </div>
           </div>
         ) : panel === "tarefas" ? (
-          <PanelShell title="Tarefas" searchPlaceholder="Pesquisar por título">
-            <SmallEmpty
-              icon={CheckSquare}
-              title="Ainda não há tarefas"
-              text="Mantenha a organização criando sua primeira tarefa."
-            />
-          </PanelShell>
+          <TasksPanel contactId={contact.id} />
         ) : panel === "notas" ? (
-          <PanelShell title="Observações" searchPlaceholder="Pesquisar notas">
-            <SmallEmpty
-              icon={Pencil}
-              title="Ainda não há observações"
-              text="Adicione a primeira observação sobre este lead."
-            />
-          </PanelShell>
+          <NotesPanel contactId={contact.id} />
         ) : panel === "compromissos" ? (
-          <PanelShell title="Compromissos" searchPlaceholder="Pesquisar por calendário">
-            <SmallEmpty
-              icon={CalendarDays}
-              title="Ainda não há compromissos"
-              text="Dê início ao processo agendando o primeiro compromisso."
-            />
-          </PanelShell>
+          <AppointmentsPanel contactId={contact.id} />
         ) : (
-          <PanelShell title="Arquivos" searchPlaceholder="Pesquisar por documento">
-            <div className="mb-2 flex gap-1">
-              {["Todos", "Interno", "Enviado", "Recebido"].map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setFileTab(t)}
-                  className={cn(
-                    "rounded-full px-2 py-0.5 text-[10px] font-medium",
-                    fileTab === t ? "bg-indigo-100 text-indigo-700" : "text-slate-500 hover:bg-slate-100"
-                  )}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-            <SmallEmpty
-              icon={FileText}
-              title="Ainda não há documentos"
-              text="Carregue ou envie documentos para vê-los aqui."
-            />
-          </PanelShell>
+          <FilesPanel contactId={contact.id} />
         )}
       </div>
       <div className="flex w-11 shrink-0 flex-col items-center gap-1 border-l py-2">
