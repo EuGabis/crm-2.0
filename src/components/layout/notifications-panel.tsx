@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { format, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -11,10 +11,30 @@ import {
   Check,
   CheckSquare,
   MessageSquare,
+  Monitor,
+  Play,
+  Settings2,
   Undo2,
+  Volume2,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { createClient } from "@/lib/supabase/client";
+import {
+  DEFAULT_SOUND,
+  loadSound,
+  playSound,
+  saveSound,
+  SOUNDS,
+  type SoundId,
+} from "@/lib/notifications/sounds";
+import {
+  desktopEnabled,
+  desktopPermission,
+  requestDesktop,
+  setDesktopEnabled,
+  showDesktop,
+  type DesktopPermission,
+} from "@/lib/notifications/desktop";
 import { useApptStore } from "@/lib/data/repos/db/appointments";
 import { useModuleStore } from "@/lib/data/repos/db/contacts-module";
 import { useDbStore } from "@/lib/data/repos/db/contacts";
@@ -156,6 +176,16 @@ export function NotificationsPanel() {
   const [tab, setTab] = useState<"nao-lidas" | "lidas">("nao-lidas");
   const [items, setItems] = useState<ArchivedItem[]>([]);
   const [readIds, setReadIds] = useState<string[]>([]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sound, setSound] = useState<SoundId>(DEFAULT_SOUND);
+  const [permission, setPermission] = useState<DesktopPermission>("default");
+  const [desktopOn, setDesktopOn] = useState(false);
+  /**
+   * A PRIMEIRA carga não avisa. O arquivo começa vazio, então todo aviso já
+   * existente pareceria novo — abrir o CRM tocaria o sino vinte vezes e
+   * empilharia vinte pop-ups. A primeira volta só semeia o arquivo.
+   */
+  const seeded = useRef(false);
   const locationId = useDbStore((s) => s.locationId);
 
   const refresh = useCallback(async () => {
@@ -260,9 +290,36 @@ export function NotificationsPanel() {
     ].sort((x, y) => y.at.localeCompare(x.at));
 
     // O arquivo é a fonte da tela; a consulta só atualiza e acrescenta.
-    const merged = mergeArchive(loadArchive(), next);
+    const before = loadArchive();
+    const known = new Set(before.map((a) => a.id));
+    const merged = mergeArchive(before, next);
     saveArchive(merged);
     setItems(merged);
+
+    // Avisa só do que É NOVO e ainda não foi lido — reavisar algo que a pessoa
+    // já marcou como lido em outro dispositivo seria barulho puro.
+    const alreadyRead = new Set(loadRead());
+    const fresh = next.filter((i) => !known.has(i.id) && !alreadyRead.has(i.id));
+    if (!seeded.current) {
+      seeded.current = true;
+      return;
+    }
+    if (fresh.length === 0) return;
+
+    playSound(loadSound());
+    if (fresh.length <= 3) {
+      for (const i of fresh) {
+        showDesktop({ id: i.id, title: i.title, body: i.description, href: i.href });
+      }
+    } else {
+      // Em rajada, um aviso só: cinco pop-ups empilhados são pior que nenhum.
+      showDesktop({
+        id: "lote",
+        title: `${fresh.length} novas notificações`,
+        body: "Abra o sino no CRM para ver a lista.",
+        href: "/conversas",
+      });
+    }
   }, []);
 
   useEffect(() => {
@@ -272,7 +329,14 @@ export function NotificationsPanel() {
     // vazio no HTML e o valor real na hidratação, com o contador piscando.
     const run = async () => {
       await refresh();
-      if (alive) setReadIds(loadRead());
+      if (!alive) return;
+      setReadIds(loadRead());
+      // Preferências saem do localStorage aqui dentro, pelo mesmo motivo das
+      // lidas: no servidor não existe localStorage nem Notification, e ler no
+      // render daria um valor no HTML e outro na hidratação.
+      setSound(loadSound());
+      setPermission(desktopPermission());
+      setDesktopOn(desktopEnabled());
     };
     void run();
     const timer = setInterval(() => void run(), REFRESH_MS);
@@ -337,7 +401,19 @@ export function NotificationsPanel() {
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80 p-0">
         <div className="flex items-center justify-between border-b px-3 py-2">
-          <p className="text-xs font-bold text-slate-700">Notificações</p>
+          <p className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+            Notificações
+            <button
+              onClick={() => setSettingsOpen((v) => !v)}
+              title="Som e avisos na área de trabalho"
+              className={cn(
+                "flex size-5 items-center justify-center rounded",
+                settingsOpen ? "bg-indigo-100 text-indigo-600" : "text-slate-400 hover:bg-slate-100"
+              )}
+            >
+              <Settings2 className="size-3" />
+            </button>
+          </p>
           {tab === "nao-lidas" && unread.length > 0 && (
             <button
               onClick={() => markRead(unread.map((i) => i.id))}
@@ -355,6 +431,96 @@ export function NotificationsPanel() {
             </button>
           )}
         </div>
+        {settingsOpen && (
+          <div className="space-y-2.5 border-b bg-slate-50 px-3 py-2.5">
+            <div>
+              <p className="mb-1 flex items-center gap-1.5 text-[11px] font-bold text-slate-600">
+                <Volume2 className="size-3" /> Som da notificação
+              </p>
+              <div className="space-y-0.5">
+                {SOUNDS.map((s) => (
+                  <div key={s.id} className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => {
+                        setSound(s.id);
+                        saveSound(s.id);
+                        // Tocar na escolha serve de confirmação E destrava o
+                        // AudioContext, que só nasce com um gesto do usuário.
+                        playSound(s.id);
+                      }}
+                      className={cn(
+                        "flex min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 py-1 text-left text-[11px]",
+                        sound === s.id
+                          ? "bg-indigo-100 font-semibold text-indigo-700"
+                          : "text-slate-600 hover:bg-white"
+                      )}
+                    >
+                      <span className="min-w-0 flex-1 truncate">{s.label}</span>
+                      <span className="hidden truncate text-[10px] text-slate-400 sm:block">
+                        {s.hint}
+                      </span>
+                    </button>
+                    {s.id !== "mudo" && (
+                      <button
+                        onClick={() => playSound(s.id)}
+                        title={`Ouvir "${s.label}"`}
+                        className="flex size-5 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-white hover:text-indigo-600"
+                      >
+                        <Play className="size-2.5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="border-t pt-2">
+              <p className="mb-1 flex items-center gap-1.5 text-[11px] font-bold text-slate-600">
+                <Monitor className="size-3" /> Aviso na área de trabalho
+              </p>
+              {permission === "unsupported" ? (
+                <p className="text-[10px] text-slate-400">
+                  Este navegador não suporta avisos do sistema.
+                </p>
+              ) : permission === "denied" ? (
+                <p className="text-[10px] text-amber-600">
+                  O navegador bloqueou os avisos deste site. Para liberar, abra o cadeado ao
+                  lado do endereço → Notificações → Permitir.
+                </p>
+              ) : permission === "granted" ? (
+                <label className="flex items-center gap-1.5 text-[11px] text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={desktopOn}
+                    onChange={(e) => {
+                      setDesktopEnabled(e.target.checked);
+                      setDesktopOn(e.target.checked);
+                    }}
+                    className="size-3"
+                  />
+                  Mostrar pop-up no computador a cada aviso novo
+                </label>
+              ) : (
+                <>
+                  <button
+                    onClick={async () => {
+                      const result = await requestDesktop();
+                      setPermission(result);
+                      setDesktopOn(desktopEnabled());
+                    }}
+                    className="rounded-md bg-indigo-500 px-2 py-1 text-[11px] font-semibold text-white hover:bg-indigo-600"
+                  >
+                    Ativar avisos no computador
+                  </button>
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    O navegador vai pedir sua permissão. Funciona com o CRM aberto em
+                    qualquer aba.
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+        )}
         <div className="flex gap-1 border-b px-2 py-1.5">
           {(
             [
