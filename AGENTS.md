@@ -1037,7 +1037,27 @@ os módulos ainda não migrados continuam importando dos repos mock em
   só atualiza o que já está lá ("2 não lidas" vira "3") e acrescenta o que é
   novo. Consequência assumida: aviso não lido continua em "Não lidas" mesmo
   depois de a origem sumir — some quando alguém marca como lido, e "Lidas" tem
-  "Limpar histórico". Spec:
+  "Limpar histórico".
+  **Som e pop-up do sistema** (2026-08-17, sem migração e sem env): engrenagem
+  no topo do painel escolhe entre 5 toques + "Sem som", e um botão pede a
+  permissão de aviso na área de trabalho. Decisões:
+  * Os toques são **sintetizados no navegador** (Web Audio, `lib/notifications/
+    sounds.ts`), não arquivos: nada para baixar (a primeira notificação toca na
+    hora, e funciona com a rede caindo), nada em `/public` para versionar e
+    nenhuma dúvida de licença. O padrão é o *ding-dong* de cabine de avião.
+  * O `AudioContext` nasce SUSPENSO até um gesto do usuário (política de
+    autoplay). Ele é criado no primeiro clique em "ouvir"/escolher um som — por
+    isso escolher já toca. Sem esse gesto, a notificação automática ficaria
+    muda.
+  * A permissão do pop-up **só pode ser pedida a partir de um clique**; pedir ao
+    carregar seria bloqueado e queimaria a única chance de perguntar. Negada, o
+    código não pode perguntar de novo — a tela explica onde liberar.
+  * ⚠️ **A primeira carga não avisa**: o arquivo começa vazio, então todo aviso
+    já existente pareceria novo e abrir o CRM tocaria o sino vinte vezes. O
+    primeiro `refresh` só semeia (`seeded`). Em rajada (>3 novos), sai UM
+    pop-up resumindo — cinco empilhados são pior que nenhum.
+  * `tag` na Notification faz o mesmo aviso se substituir em vez de empilhar.
+  Spec:
   `docs/superpowers/specs/2026-08-14-central-notificacoes-design.md`.
 - ⏳ Próximo: Automações reais (Edge Functions) tarefas 5–8, Agentes de IA.
 - ⏳ Backlog: personalizar template/remetente dos e-mails de auth do Supabase
