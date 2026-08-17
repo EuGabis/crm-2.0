@@ -71,7 +71,7 @@ export default function PerfilEmpresaPage() {
 
       <div className="overflow-hidden rounded-2xl border bg-white shadow-sm">
         {/* Faixa da marca + logo sobreposto */}
-        <div className="relative h-24 bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500">
+        <div className="relative h-24 bg-gradient-to-br from-slate-800 to-slate-600">
           <input
             ref={fileInputRef}
             type="file"
