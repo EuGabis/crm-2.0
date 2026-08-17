@@ -61,6 +61,7 @@ const mapMessage = (r: any): Message => ({
   deliveredAt: r.delivered_at ?? undefined,
   readAt: r.read_at ?? undefined,
   automated: r.automated || undefined,
+  createdBy: r.created_by ?? null,
   scheduledBy: r.scheduled_by ?? null,
   scheduleStatus: r.schedule_status ?? undefined,
   dispatchedAt: r.dispatched_at ?? undefined,
@@ -314,6 +315,8 @@ export const conversationActions = {
         channel: msg.channel,
         body: msg.body,
         internal: msg.internal ?? false,
+        // Autor (0051): é o que permite o próprio excluir a nota que escreveu.
+        created_by: useDbStore.getState().userId,
         ...scheduling,
       })
       .select()
@@ -400,6 +403,7 @@ export const conversationActions = {
         channel,
         body,
         internal,
+        created_by: useDbStore.getState().userId,
         media_path: path,
         media_name: file.name,
         media_mime: file.type || null,
@@ -594,6 +598,24 @@ export const conversationActions = {
 
   /** Exclui a conversa e todas as mensagens dela. */
   /** Só administrador (a RLS da 0040 recusa os demais). */
+  /**
+    * Exclui UMA mensagem — hoje só usado para nota interna, no painel
+    * Observações.
+    *
+    * Confere as linhas devolvidas em vez do `error`: DELETE recusado pela RLS
+    * não vem com erro nenhum, só sem linhas. Sem esta checagem a tela diria
+    * "excluída" com a nota ainda no banco (o mesmo tropeço que já aconteceu
+    * com a exclusão de conversa).
+    */
+  async removeMessage(id: string): Promise<boolean> {
+    const supabase = createClient();
+    const { data, error } = await supabase.from("messages").delete().eq("id", id).select("id");
+    if (error || !data || data.length === 0) return false;
+    const s = useConvStore.getState();
+    s.patch({ messages: s.messages.filter((m) => m.id !== id) });
+    return true;
+  },
+
   async remove(conversationId: string): Promise<boolean> {
     const supabase = createClient();
     // Só a conversa: `messages.conversation_id` tem ON DELETE CASCADE, então

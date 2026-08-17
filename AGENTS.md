@@ -494,6 +494,19 @@ Compromissos → `appointments` · Arquivos → anexos das conversas do contato
   painel Arquivos **não despacha nada** para o cliente — quem entrega no
   WhatsApp é a rota `send-media` chamada pelo composer. Sem essa marca o arquivo
   apareceria no thread com cara de enviado.
+- **Excluir observação** (migração **0051**, aplicada): `messages.created_by` +
+  policy `autor exclui a propria nota`. A 0040 tinha deixado DELETE em
+  `messages` só para admin — certo para mensagem de cliente, atrito puro para a
+  nota que o próprio atendente acabou de escrever com erro de digitação. A
+  policy nova exige `internal is true` E `created_by = auth.uid()`, então
+  mensagem de cliente segue intocável para quem não é admin; a da 0040 continua
+  valendo por cima (policies permissivas somam). Notas anteriores à migração têm
+  `created_by` nulo e seguem admin-only — não dá para adivinhar o autor depois.
+  Conferido como `authenticated`: própria nota apaga (1 linha), nota alheia 0,
+  mensagem de cliente 0, e admin apaga qualquer uma.
+  ⚠️ `conversationActions.removeMessage` confere as LINHAS devolvidas, não o
+  `error`: DELETE recusado pela RLS não vem com erro, e a tela diria "excluída"
+  com a nota ainda no banco.
 - A seção **"Campos personalizados" saiu** da barra lateral: era um cabeçalho
   com nada embaixo em toda empresa que não criou campo. Os campos que existirem
   aparecem junto do bloco Contato (nada de dado se perdeu); criar/editar campo
@@ -544,8 +557,9 @@ Cloud API → celular.
   `contacts.doc`, `public.lead_payment_profile`),
   0049 = `lead_payment_profile` vira `security definer` (RLS + função
   não-leakproof = Seq Scan, ver seção do detalhe do lead),
-  0050 = lembrete de tarefa (`tasks.reminder_minutes`, irmã da 0042);
-  **próxima migração livre: 0051**.
+  0050 = lembrete de tarefa (`tasks.reminder_minutes`, irmã da 0042),
+  0051 = autor exclui a própria nota interna (`messages.created_by`);
+  **próxima migração livre: 0052**.
 - Env (privadas, nunca `NEXT_PUBLIC_`): `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`,
   `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_GRAPH_VERSION` (default `v21.0`).
 - **Mídia real (imagem/áudio/vídeo)** — helpers em `src/lib/whatsapp/client.ts`

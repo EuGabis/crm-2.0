@@ -29,7 +29,8 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { appointmentActions, useDbAppointments } from "@/lib/data/repos/db/appointments";
-import { useDbStore } from "@/lib/data/repos/db/contacts";
+import { useDbStore, useDbTeam } from "@/lib/data/repos/db/contacts";
+import { useMyMembership } from "@/lib/data/repos/db/team";
 import { taskActions, useContactsModule } from "@/lib/data/repos/db/contacts-module";
 import {
   formatFileSize,
@@ -311,6 +312,8 @@ export function TasksPanel({ contactId }: { contactId: string }) {
 
 export function NotesPanel({ contactId }: { contactId: string }) {
   const { notes, reload } = useContactNotes(contactId);
+  const team = useDbTeam();
+  const { me, isAdmin } = useMyMembership();
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
   const [body, setBody] = useState("");
@@ -382,12 +385,43 @@ export function NotesPanel({ contactId }: { contactId: string }) {
         />
       ) : (
         <ul className="space-y-1.5">
-          {rows.map((n) => (
-            <li key={n.id} className="rounded-md border border-amber-200 bg-amber-50 p-2">
-              <p className="whitespace-pre-wrap text-[11px] text-slate-700">{n.body}</p>
-              <p className="mt-1 text-[10px] text-amber-700">{fmtDate(n.at, true)}</p>
-            </li>
-          ))}
+          {rows.map((n) => {
+            // Regra da 0051: o autor apaga a própria nota; admin apaga qualquer
+            // uma. Nota anterior à migração não tem autor — só admin.
+            const canDelete = isAdmin || (!!n.authorId && n.authorId === me?.userId);
+            const author = n.authorId ? team.find((u) => u.id === n.authorId) : null;
+            return (
+              <li
+                key={n.id}
+                className="group flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 p-2"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="whitespace-pre-wrap text-[11px] text-slate-700">{n.body}</p>
+                  <p className="mt-1 text-[10px] text-amber-700">
+                    {fmtDate(n.at, true)}
+                    {author ? ` · ${author.name}` : ""}
+                  </p>
+                </div>
+                {canDelete && (
+                  <button
+                    onClick={async () => {
+                      if (!window.confirm("Excluir esta observação?")) return;
+                      if (await conversationActions.removeMessage(n.id)) {
+                        await reload();
+                        toast.success("Observação excluída");
+                      } else {
+                        toast.error("Não foi possível excluir");
+                      }
+                    }}
+                    title="Excluir observação"
+                    className="shrink-0 text-amber-300 hover:text-red-500 group-hover:text-amber-500"
+                  >
+                    <Trash2 className="size-3" />
+                  </button>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </PanelShell>
