@@ -15,10 +15,13 @@ import type { WidgetConfig } from "@/components/dashboard/widget-catalog";
  *   * "department" — montado pelo admin para um departamento; todo mundo do
  *                    departamento lê, só admin edita.
  *
- * A RLS já devolve exatamente o que a pessoa pode ver, então aqui não há
- * filtro de dono no client — o banco é a fronteira. Admin recebe TODOS os
- * painéis de departamento da empresa (precisa deles para editar); por isso a
- * lista do seletor separa "meus" de "do departamento".
+ * A RLS é a fronteira (migração 0052: painel pessoal só o dono lê; admin lê
+ * todos os de departamento, porque é ele quem os monta). O filtro por dono
+ * abaixo é uma SEGUNDA barreira, no client: enquanto a policy da 0037 esteve no
+ * ar, o admin recebia o painel pessoal dos colegas, a tela adotava o primeiro
+ * como se fosse o dele e salvar respondia "sem permissão para editar este
+ * painel" — o erro não era de permissão, era o painel errado na tela. Um
+ * ambiente com a migração atrasada não deve reviver isso.
  */
 
 export type DashboardScope = "user" | "department";
@@ -81,7 +84,12 @@ const useStore = create<State>((setState, get) => ({
       setState({ loading: false });
       return;
     }
-    setState({ loaded: true, loading: false, views: (data ?? []).map(mapRow) });
+    const userId = useDbStore.getState().userId;
+    const views = (data ?? [])
+      .map(mapRow)
+      // Painel pessoal que não é meu não é meu, nem para admin.
+      .filter((v) => v.scope !== "user" || !v.userId || v.userId === userId);
+    setState({ loaded: true, loading: false, views });
   },
 }));
 
@@ -125,7 +133,10 @@ export const dashboardActions = {
         // entender por quê.
         is_default: isDept
           ? !useStore.getState().views.some((v) => v.departmentId === departmentId)
-          : !useStore.getState().views.some((v) => v.scope === "user"),
+          : // "já tenho painel pessoal?" — contar o dos outros faria o primeiro
+            // painel de alguém nascer sem ser padrão, e a pessoa voltaria ao
+            // layout de fábrica no F5 seguinte.
+            !useStore.getState().views.some((v) => v.scope === "user" && v.userId === userId),
       })
       .select()
       .single();
