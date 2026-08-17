@@ -94,3 +94,17 @@ papel; a RLS recusaria a gravação de qualquer forma.
 
 **Sem passo 2 e 3, o resto do módulo funciona normalmente** — as abas mostram
 "não conectado" e a rota responde 503 explicando qual credencial falta.
+
+### Os dois erros de estreia (e por que a tela agora ajuda)
+
+Na primeira tentativa apareceram exatamente os dois sintomas previstos:
+
+- **Google: `Erro 400: redirect_uri_mismatch`.** A URI que o CRM envia é
+  `${NEXT_PUBLIC_APP_URL}/api/media/oauth/callback` e ela não estava cadastrada
+  no OAuth client — o do Google Ads só tinha o callback dele.
+- **Canva: "não configurado no servidor".** As envs ainda não existiam.
+
+Nenhum dos dois é adivinhável pela tela, então o card de "não conectado" passou
+a mostrar, para admin, **a URI exata a cadastrar** (com o `NEXT_PUBLIC_APP_URL`
+de onde ela sai) e qual env está faltando. Serve `GET /api/media/setup`, que
+devolve só presença/ausência de credencial — **nunca o valor**.

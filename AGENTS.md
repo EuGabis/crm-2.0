@@ -554,6 +554,10 @@ leitura. Spec: `docs/superpowers/specs/2026-08-17-midia-drive-design.md`.
 - **Passos manuais pendentes:** aplicar 0044/0045; ativar a Google Drive API +
   escopo + redirect `/api/media/oauth/callback`; criar o app no Canva Developers
   e pôr as duas envs na Vercel.
+- ⚠️ `redirect_uri_mismatch` (Google) é SEMPRE divergência entre a URI cadastrada
+  no provedor e `${NEXT_PUBLIC_APP_URL}/api/media/oauth/callback`. O card de "não
+  conectado" mostra a URI exata para admin (via `GET /api/media/setup`, que
+  devolve só presença/ausência de credencial, nunca o valor).
 
 ## Fundação de IA (OpenAI)
 

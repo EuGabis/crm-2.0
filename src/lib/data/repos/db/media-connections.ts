@@ -60,7 +60,21 @@ export function useMediaConnections() {
   return { connections, loaded, reload: load };
 }
 
+export interface MediaSetup {
+  redirectUri: string;
+  appUrl: string | null;
+  google_drive: { configured: boolean; clientId: string | null };
+  canva: { configured: boolean; clientId: string | null };
+}
+
 export const mediaConnectionActions = {
+  /** Estado da configuração do servidor (só admin). Null se não puder ver. */
+  async setup(): Promise<MediaSetup | null> {
+    const res = await fetch("/api/media/setup");
+    if (!res.ok) return null;
+    return (await res.json()) as MediaSetup;
+  },
+
   startPath(provider: MediaProvider) {
     return `/api/media/oauth/start?provider=${provider}`;
   },

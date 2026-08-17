@@ -40,12 +40,15 @@ export async function GET(request: Request) {
 
   const cfg = providerConfig(provider);
   if (!cfg.clientId || !cfg.clientSecret) {
+    // Diz TAMBÉM qual URI cadastrar: é a informação que falta para resolver, e
+    // ela depende de NEXT_PUBLIC_APP_URL — não é adivinhável de fora.
     return Response.json(
       {
         error:
           provider === "canva"
-            ? "Canva não configurado no servidor (CANVA_CLIENT_ID/SECRET)"
-            : "OAuth do Google não configurado no servidor",
+            ? "Canva não configurado no servidor: defina CANVA_CLIENT_ID e CANVA_CLIENT_SECRET (Vercel e .env.local)."
+            : "OAuth do Google não configurado no servidor: defina GOOGLE_OAUTH_CLIENT_ID e GOOGLE_OAUTH_CLIENT_SECRET.",
+        redirectUriParaCadastrar: redirectUri(),
       },
       { status: 503 }
     );
