@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Camera, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { brand } from "@/lib/config/brand";
 import { accountActions, useAccount } from "@/lib/data/repos/db/account";
 import { useMyMembership } from "@/lib/data/repos/db/team";
+import { cn } from "@/lib/utils";
 
 export default function PerfilEmpresaPage() {
   const { company, loaded } = useAccount();
@@ -59,22 +60,18 @@ export default function PerfilEmpresaPage() {
     );
   }
 
+  const initial = (form.name[0] ?? company?.name?.[0] ?? "?").toUpperCase();
+
   return (
     <div className="max-w-xl">
       <h1 className="text-lg font-bold text-slate-900">Perfil da empresa</h1>
       <p className="mb-5 text-xs text-slate-500">
         Esses dados aparecem na barra lateral e nos convites enviados pelo {brand.name}.
       </p>
-      <div className="space-y-4 rounded-xl border bg-white p-5">
-        <div className="flex items-center gap-3">
-          <div className="flex size-14 items-center justify-center overflow-hidden rounded-xl bg-indigo-500 text-xl font-black text-white">
-            {company?.logoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={company.logoUrl} alt="Logo" className="size-full object-cover" />
-            ) : (
-              (form.name[0] ?? "?").toUpperCase()
-            )}
-          </div>
+
+      <div className="overflow-hidden rounded-2xl border bg-white shadow-sm">
+        {/* Faixa da marca + logo sobreposto */}
+        <div className="relative h-24 bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500">
           <input
             ref={fileInputRef}
             type="file"
@@ -82,46 +79,72 @@ export default function PerfilEmpresaPage() {
             className="hidden"
             onChange={onLogoPick}
           />
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-xs"
+          <button
+            type="button"
+            onClick={() => isAdmin && fileInputRef.current?.click()}
             disabled={!isAdmin || uploadingLogo}
-            onClick={() => fileInputRef.current?.click()}
+            title={isAdmin ? "Alterar logo" : undefined}
+            className={cn(
+              "group absolute -bottom-10 left-6 block size-20 overflow-hidden rounded-2xl border-4 border-white bg-indigo-500 shadow-md",
+              isAdmin ? "cursor-pointer" : "cursor-default",
+            )}
           >
-            {uploadingLogo ? "Enviando..." : "Alterar logo"}
-          </Button>
+            {company?.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={company.logoUrl} alt="Logo da empresa" className="size-full object-cover" />
+            ) : (
+              <span className="flex size-full items-center justify-center text-2xl font-black text-white">
+                {initial}
+              </span>
+            )}
+            {isAdmin && (
+              <span className="absolute inset-0 flex items-center justify-center bg-black/45 text-white opacity-0 transition group-hover:opacity-100">
+                {uploadingLogo ? (
+                  <Loader2 className="size-5 animate-spin" />
+                ) : (
+                  <Camera className="size-5" />
+                )}
+              </span>
+            )}
+          </button>
         </div>
 
-        <div className="space-y-1">
-          <Label className="text-xs">Nome da empresa *</Label>
-          <Input
-            value={form.name}
-            onChange={set("name")}
-            disabled={!isAdmin}
-            className="h-8 text-sm"
-          />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">Cidade / Estado</Label>
-          <Input
-            value={form.city}
-            onChange={set("city")}
-            disabled={!isAdmin}
-            placeholder="São Gonçalo, RJ"
-            className="h-8 text-sm"
-          />
+        {/* Campos */}
+        <div className="space-y-4 px-6 pb-6 pt-14">
+          {isAdmin && (
+            <p className="text-[11px] text-slate-400">
+              Clique no logo para trocar a imagem — PNG, JPG, WEBP ou SVG, até 2 MB.
+            </p>
+          )}
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium text-slate-600">Nome da empresa *</Label>
+            <Input value={form.name} onChange={set("name")} disabled={!isAdmin} className="h-9 text-sm" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium text-slate-600">Cidade / Estado</Label>
+            <Input
+              value={form.city}
+              onChange={set("city")}
+              disabled={!isAdmin}
+              placeholder="São Gonçalo, RJ"
+              className="h-9 text-sm"
+            />
+          </div>
         </div>
 
-        {isAdmin ? (
-          <Button size="sm" className="text-xs" onClick={save} disabled={saving}>
-            {saving ? "Salvando..." : "Salvar alterações"}
-          </Button>
-        ) : (
+        {/* Rodapé */}
+        <div className="flex items-center justify-between gap-3 border-t bg-slate-50 px-6 py-3">
           <p className="text-[11px] text-slate-400">
-            Somente administradores podem editar os dados da empresa.
+            {isAdmin
+              ? "As alterações aparecem na barra lateral na hora."
+              : "Somente administradores podem editar os dados da empresa."}
           </p>
-        )}
+          {isAdmin && (
+            <Button size="sm" className="h-8 shrink-0 text-xs" onClick={save} disabled={saving}>
+              {saving ? "Salvando..." : "Salvar alterações"}
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );
