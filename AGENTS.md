@@ -569,8 +569,9 @@ Cloud API → celular.
   0049 = `lead_payment_profile` vira `security definer` (RLS + função
   não-leakproof = Seq Scan, ver seção do detalhe do lead),
   0050 = lembrete de tarefa (`tasks.reminder_minutes`, irmã da 0042),
-  0051 = autor exclui a própria nota interna (`messages.created_by`);
-  **próxima migração livre: 0052**.
+  0051 = autor exclui a própria nota interna (`messages.created_by`),
+  0052 = painel pessoal volta a ser privado (policy de leitura da 0037);
+  **próxima migração livre: 0053**.
 - Env (privadas, nunca `NEXT_PUBLIC_`): `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`,
   `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_GRAPH_VERSION` (default `v21.0`).
 - **Mídia real (imagem/áudio/vídeo)** — helpers em `src/lib/whatsapp/client.ts`
@@ -867,7 +868,18 @@ os módulos ainda não migrados continuam importando dos repos mock em
   `channel_allowed`). Catálogo em `components/dashboard/widget-catalog.ts`;
   quem nunca personalizou vê `DEFAULT_WIDGETS`, que é o painel fixo de antes.
   Widgets novos de Pagamentos (vendas recentes, receita por mês, assinaturas)
-  só aparecem para quem enxerga o módulo. Spec:
+  só aparecem para quem enxerga o módulo.
+  ⚠️ **Corrigido na 0052:** a policy de leitura da 0037 entregava ao admin TODOS
+  os painéis da empresa, inclusive os de escopo `user` (pessoais) dos colegas —
+  contra o que a própria 0037 escreveu ("user: só o dono lê e edita"). A tela
+  escolhe o padrão pegando o primeiro `scope='user'` marcado como padrão, e esse
+  primeiro era o painel PESSOAL DE OUTRA PESSOA; salvar batia na policy de
+  UPDATE e respondia "sem permissão para editar este painel", como se o admin
+  não fosse admin. Não era permissão: era o painel errado na tela. Agora admin
+  lê o próprio pessoal + todos os de departamento, e `db/dashboards.ts` filtra
+  por dono como segunda barreira (ambiente com migração atrasada não revive o
+  bug). O mesmo vazamento fazia o `is_default` do primeiro painel de alguém
+  nascer `false` — contava o painel dos outros. Spec:
   `docs/superpowers/specs/2026-08-14-paineis-personalizados-design.md`.
 - ✅ Backend F2f: módulo **Calendários** real — compromissos do banco (repo
   db/appointments.ts), grade semanal com navegação e "Hoje", criar/excluir
