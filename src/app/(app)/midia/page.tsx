@@ -42,6 +42,8 @@ import {
   type ExternalItem,
   type MediaProvider,
 } from "@/lib/data/repos/db/media-connections";
+import { driveActions, useDriveItems } from "@/lib/data/repos/db/media-drive";
+import { DrivePicker } from "@/components/media/drive-picker";
 import { cn } from "@/lib/utils";
 
 /**
@@ -214,7 +216,7 @@ function MidiaPageInner() {
             )}
           >
             {label}
-            {key !== "arquivos" && connected(key as MediaProvider) && (
+            {key === "canva" && connected("canva") && (
               <span className="ml-1.5 inline-block size-1.5 rounded-full bg-emerald-500" />
             )}
           </button>
@@ -407,15 +409,122 @@ function MidiaPageInner() {
             os links de visualização expiram em 1 hora.
           </p>
         </>
+      ) : tab === "google_drive" ? (
+        <DriveTab />
       ) : (
         <ExternalTab
-          provider={tab}
+          provider="canva"
           isAdmin={isAdmin}
-          connection={connections.find((c) => c.provider === tab) ?? null}
+          connection={connections.find((c) => c.provider === "canva") ?? null}
           onChanged={reloadConnections}
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Aba do Google Drive. Não lista o Drive inteiro: a pessoa ESCOLHE arquivos no
+ * Google Picker e o CRM guarda a referência.
+ *
+ * É o caminho recomendado pela doc do Drive — `drive.file` + Picker dá acesso
+ * só ao que foi escolhido, enquanto `drive.readonly` (listar tudo) é escopo
+ * RESTRITO e exigiria verificação de segurança do Google para funcionar fora
+ * dos test users.
+ */
+function DriveTab() {
+  const { items, loaded, reload } = useDriveItems();
+  const [query, setQuery] = useState("");
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? items.filter((i) => i.name.toLowerCase().includes(q)) : items;
+  }, [items, query]);
+
+  return (
+    <>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[11px] text-slate-500">
+          Arquivos vinculados do Google Drive. O CRM guarda só o atalho — o arquivo continua no
+          Drive de quem escolheu.
+        </p>
+        <div className="flex items-center gap-2">
+          {items.length > 0 && (
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar"
+              className="h-8 w-40 text-xs"
+            />
+          )}
+          <DrivePicker onPicked={reload} />
+        </div>
+      </div>
+
+      {!loaded ? (
+        <p className="rounded-xl border bg-white p-8 text-center text-xs text-slate-400">
+          Carregando...
+        </p>
+      ) : visible.length === 0 ? (
+        <p className="rounded-xl border bg-white p-8 text-center text-xs text-slate-400">
+          {items.length === 0
+            ? "Nenhum arquivo do Drive vinculado. Use “Escolher no Google Drive”."
+            : `Nenhum arquivo com “${query}”.`}
+        </p>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {visible.map((item) => {
+            const Icon = iconFor(item.mime, item.name);
+            return (
+              <div
+                key={item.id}
+                className="group flex flex-col rounded-xl border bg-white p-3 hover:border-indigo-300"
+              >
+                <a
+                  href={item.url ?? "#"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex h-24 items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200"
+                >
+                  <Icon className="size-8 text-slate-400" />
+                </a>
+                <p className="mt-2 flex items-center gap-1 text-xs font-medium text-slate-700">
+                  <span className="truncate" title={item.name}>
+                    {item.name}
+                  </span>
+                  <ExternalLink className="size-3 shrink-0 text-slate-300" />
+                </p>
+                <p className="text-[10px] text-slate-400">
+                  Vinculado em {format(new Date(item.createdAt), "dd MMM yyyy", { locale: ptBR })}
+                </p>
+                <div className="mt-2 flex justify-end opacity-0 transition-opacity group-hover:opacity-100">
+                  <button
+                    onClick={async () => {
+                      if (
+                        !window.confirm(
+                          `Remover o atalho de "${item.name}"? O arquivo no Drive não é apagado.`
+                        )
+                      )
+                        return;
+                      if (await driveActions.remove(item.id)) {
+                        toast.success("Atalho removido");
+                        void reload();
+                      } else {
+                        toast.error("Não foi possível remover");
+                      }
+                    }}
+                    title="Remover atalho (não apaga no Drive)"
+                    className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-rose-600"
+                  >
+                    <Trash2 className="size-3" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }
 
