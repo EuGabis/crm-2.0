@@ -96,6 +96,24 @@ begin
         end;
       end loop;
 
+      -- 2.5) preserva o MELHOR dado no keeper antes de apagar o duplicado:
+      --      nome mais completo, e-mail/empresa que faltarem, e une as tags.
+      update public.contacts k
+        set first_name = case
+              when length(trim(coalesce(d.first_name,'') || ' ' || coalesce(d.last_name,'')))
+                 > length(trim(coalesce(k.first_name,'') || ' ' || coalesce(k.last_name,'')))
+              then d.first_name else k.first_name end,
+            last_name = case
+              when length(trim(coalesce(d.first_name,'') || ' ' || coalesce(d.last_name,'')))
+                 > length(trim(coalesce(k.first_name,'') || ' ' || coalesce(k.last_name,'')))
+              then d.last_name else k.last_name end,
+            email   = coalesce(nullif(k.email, ''), nullif(d.email, '')),
+            company = coalesce(k.company, d.company),
+            tags    = (select array(select distinct e
+                                     from unnest(coalesce(k.tags,'{}') || coalesce(d.tags,'{}')) e))
+        from public.contacts d
+        where k.id = keeper_id and d.id = dup;
+
       -- 3) apaga o contato duplicado
       delete from public.contacts where id = dup;
       cnt := cnt + 1;
