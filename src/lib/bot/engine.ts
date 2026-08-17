@@ -104,6 +104,78 @@ async function saveSession(
   );
 }
 
+/** Status da oportunidade deduzido do nome da etapa (igual ao pipeline.ts). */
+function statusForStageName(name: string): "open" | "won" | "lost" {
+  const n = (name ?? "").toUpperCase();
+  if (n.includes("PERDID")) return "lost";
+  if (n.includes("ASSINOU") || n.includes("GANHO") || n.includes("GANHA")) return "won";
+  return "open";
+}
+
+/** Atualiza o card do contato no funil (nome + etapa); cria se não existir. */
+async function syncCard(
+  ctx: Ctx,
+  node: { pipeline?: string; var: string; stageMap: Record<string, string> },
+  vars: Record<string, any>,
+) {
+  const loc = ctx.channel.location_id;
+  const { data: pipelines } = await ctx.db
+    .from("pipelines")
+    .select("id, name, position")
+    .eq("location_id", loc)
+    .order("position");
+  if (!pipelines?.length) return;
+  const pick =
+    (node.pipeline
+      ? pipelines.find((p: any) => normalize(p.name) === normalize(node.pipeline))
+      : null) ?? pipelines[0];
+  const { data: stages } = await ctx.db
+    .from("stages")
+    .select("id, name, position")
+    .eq("pipeline_id", pick.id)
+    .order("position");
+  if (!stages?.length) return;
+
+  const wantName = node.stageMap[normalize(vars[node.var])] ?? "";
+  const target = wantName
+    ? stages.find((s: any) => normalize(s.name).includes(normalize(wantName)))
+    : null;
+  const fullName = String(vars.name ?? "").trim();
+
+  const { data: opp } = await ctx.db
+    .from("opportunities")
+    .select("id")
+    .eq("contact_id", ctx.contact.id)
+    .eq("pipeline_id", pick.id)
+    .order("created_at")
+    .limit(1)
+    .maybeSingle();
+
+  if (opp) {
+    const patch: any = {};
+    if (fullName) patch.name = fullName;
+    if (target) {
+      patch.stage_id = target.id;
+      patch.status = statusForStageName(target.name);
+    }
+    if (Object.keys(patch).length) {
+      await ctx.db.from("opportunities").update(patch).eq("id", opp.id);
+    }
+  } else {
+    const stage = target ?? stages[0];
+    await ctx.db.from("opportunities").insert({
+      location_id: loc,
+      contact_id: ctx.contact.id,
+      pipeline_id: pick.id,
+      stage_id: stage.id,
+      name: fullName || "Lead",
+      source: "Bot",
+      value: 0,
+      status: statusForStageName(stage.name),
+    });
+  }
+}
+
 /** Caminha pelos nós até uma pergunta (para e espera) ou o fim. */
 async function advance(
   ctx: Ctx,
@@ -144,6 +216,9 @@ async function advance(
         sum += table[normalize(vars[v])] ?? 0;
       }
       vars[node.var] = sum >= node.threshold ? node.hotValue : node.coldValue;
+      nodeId = node.next;
+    } else if (node.type === "sync_card") {
+      await syncCard(ctx, node, vars);
       nodeId = node.next;
     } else if (node.type === "condition") {
       nodeId = normalize(vars[node.var]) === normalize(node.equals) ? node.ifTrue : node.ifFalse;

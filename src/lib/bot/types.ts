@@ -46,6 +46,20 @@ export type BotNode =
       coldValue: string;
       next: string | null;
     }
+  // Sincroniza o CARD (oportunidade) do contato no funil: atualiza o nome e move
+  // pra etapa mapeada pela variável (ex.: qualificacao=quente → etapa "QUENTE").
+  // Cria a oportunidade se o contato ainda não tiver uma no funil.
+  | {
+      id: string;
+      type: "sync_card";
+      /** Nome do funil (default: o primeiro). */
+      pipeline?: string;
+      /** Variável que decide a etapa (ex.: "qualificacao"). */
+      var: string;
+      /** valor da variável → nome da etapa (match por "contém", ignora emoji/acento). */
+      stageMap: Record<string, string>;
+      next: string | null;
+    }
   // Desvia conforme uma variável coletada.
   | {
       id: string;

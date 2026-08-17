@@ -111,6 +111,17 @@ export const triagemFlow: BotFlow = {
           "apenas curiosidade": 0,
         },
       },
+      next: "atualiza_card",
+    },
+    // Atualiza o card no funil: nome do lead + move pra etapa conforme quente/frio.
+    atualiza_card: {
+      id: "atualiza_card",
+      type: "sync_card",
+      var: "qualificacao",
+      stageMap: {
+        quente: "QUENTE",
+        frio: "NOVO LEAD",
+      },
       next: "rota_qualificacao",
     },
     rota_qualificacao: {
