@@ -43,6 +43,15 @@ export function ContactFormDialog({
       toast.error("Nome e sobrenome são obrigatórios");
       return;
     }
+    if (form.phone.trim()) {
+      const dup = await dbContactActions.findByPhone(form.phone);
+      if (dup) {
+        toast.error(
+          `Já existe um contato com esse número: ${`${dup.firstName} ${dup.lastName}`.trim()}`,
+        );
+        return;
+      }
+    }
     setSaving(true);
     const ok = await dbContactActions.add({
       firstName: form.firstName.trim(),
