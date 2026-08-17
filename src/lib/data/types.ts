@@ -14,6 +14,8 @@ export interface Contact {
   lastName: string;
   email: string;
   phone: string;
+  /** CPF/CNPJ (migração 0048) — chave principal do cruzamento com a Guru. */
+  doc?: string;
   company?: string;
   tags: string[];
   ownerId: string;

@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { SubNav } from "@/components/layout/subnav";
 import { DataTable, type Column } from "@/components/shared/data-table";
 import { BulkLogTab } from "@/components/contacts/module-tabs";
+import { LeadDetailDialog } from "@/components/pipeline/lead-detail-dialog";
 import { OpportunityCard } from "@/components/pipeline/opportunity-card";
 import { OpportunityDialog } from "@/components/pipeline/opportunity-dialog";
 import { PipelinesManageTab } from "@/components/pipeline/pipelines-manage-tab";
@@ -67,6 +68,8 @@ function LeadsPageInner() {
   const [view, setView] = useState<"kanban" | "list">("kanban");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
+  // Detalhe aberto pela vista LISTA (no kanban quem abre é o próprio card).
+  const [detailOpp, setDetailOpp] = useState<Opportunity | null>(null);
   // Seleção do kanban (a lista tem a própria, dentro do DataTable).
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
@@ -344,9 +347,17 @@ function LeadsPageInner() {
               pageSize={15}
               selectable
               bulkBar={(ids, clear) => <ListBulkBar ids={ids} clear={clear} />}
+              onRowClick={(o) => setDetailOpp(o)}
             />
           )}
         </div>
+      )}
+      {detailOpp && (
+        <LeadDetailDialog
+          opportunity={detailOpp}
+          open
+          onOpenChange={(v) => !v && setDetailOpp(null)}
+        />
       )}
       {pipeline && (
         <OpportunityDialog
