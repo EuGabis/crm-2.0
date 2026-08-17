@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   Download,
   FileText,
+  Mail,
   Pause,
   Phone,
   Play,
@@ -489,6 +490,16 @@ export function Thread({
         </div>
         <div className="flex items-center gap-1.5">
           <AssignPicker conversation={conversation} />
+          <button
+            onClick={async () => {
+              await conversationActions.markUnread(conversation.id);
+              toast.success("Marcada como não lida");
+            }}
+            title="Marcar como não lida (volta pra caixa como pendente)"
+            className="flex size-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"
+          >
+            <Mail className="size-3.5" />
+          </button>
           <button
             onClick={async () => {
               const done = !conversation.closedAt;

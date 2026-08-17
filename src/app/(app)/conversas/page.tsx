@@ -12,6 +12,8 @@ import { ContactPanel } from "@/components/inbox/contact-panel";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { Thread } from "@/components/inbox/thread";
 import { ViewsRail } from "@/components/inbox/views-rail";
+import { TemplatesTab } from "@/components/whatsapp/templates-tab";
+import { TemplateLogsTab } from "@/components/whatsapp/template-logs-tab";
 import { DataTable, type Column } from "@/components/shared/data-table";
 import { EmptyState } from "@/components/shared/empty-state";
 import { KpiCard } from "@/components/shared/kpi-card";
@@ -54,6 +56,7 @@ import type { Channel, ScheduleStatus } from "@/lib/data/types";
 
 const TABS = [
   { label: "Conversas" },
+  { label: "Templates" },
   { label: "Agendadas" },
   { label: "Ações manuais" },
   { label: "Trechos" },
@@ -61,6 +64,39 @@ const TABS = [
   { label: "Estatísticas" },
   { label: "Configurações" },
 ];
+
+/**
+ * Templates da Meta + rastreio (Logs) dentro da própria aba Conversas — o mesmo
+ * conteúdo de /whatsapp, pra criar/ver template sem trocar de módulo.
+ */
+function TemplatesPanel() {
+  const [sub, setSub] = useState<"templates" | "logs">("templates");
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-1 border-b">
+        {(
+          [
+            ["templates", "Templates"],
+            ["logs", "Logs"],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setSub(key)}
+            className={`-mb-px border-b-2 px-3 py-2 text-xs font-medium ${
+              sub === key
+                ? "border-indigo-500 text-indigo-600"
+                : "border-transparent text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {sub === "templates" ? <TemplatesTab /> : <TemplateLogsTab />}
+    </div>
+  );
+}
 
 /**
  * `useSearchParams` obriga um limite de Suspense — sem ele o build falha ao
@@ -95,6 +131,7 @@ function ConversasPageInner() {
       <SubNav tabs={TABS} active={tab} onChange={setTab} />
       {tab !== "Conversas" ? (
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
+          {tab === "Templates" && <TemplatesPanel />}
           {tab === "Agendadas" && <AgendadasTab />}
           {tab === "Ações manuais" && <AcoesManuaisTab />}
           {tab === "Trechos" && <TrechosTab />}

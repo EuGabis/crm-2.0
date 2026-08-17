@@ -447,6 +447,24 @@ export const conversationActions = {
     });
   },
 
+  /**
+   * Marca como NÃO lida (volta a aparecer como pendente na lista). Oposto do
+   * markRead; mantém a contagem se já havia não lidas. Ao reabrir a conversa,
+   * o markRead (disparado no clique da lista) zera de novo.
+   */
+  async markUnread(conversationId: string): Promise<void> {
+    const supabase = createClient();
+    const s = useConvStore.getState();
+    const conv = s.conversations.find((c) => c.id === conversationId);
+    const next = Math.max(1, conv?.unreadCount ?? 0);
+    await supabase.from("conversations").update({ unread_count: next }).eq("id", conversationId);
+    s.patch({
+      conversations: s.conversations.map((c) =>
+        c.id === conversationId ? { ...c, unreadCount: next } : c
+      ),
+    });
+  },
+
   async star(conversationId: string): Promise<void> {
     const s = useConvStore.getState();
     const conv = s.conversations.find((c) => c.id === conversationId);
