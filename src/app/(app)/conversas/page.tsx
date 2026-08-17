@@ -64,7 +64,6 @@ const TABS = [
   { label: "Ações manuais" },
   { label: "Trechos" },
   { label: "Links de acionamento" },
-  { label: "Estatísticas" },
   { label: "Configurações" },
 ];
 
@@ -147,7 +146,6 @@ function ConversasPageInner() {
           {tab === "Ações manuais" && <AcoesManuaisTab />}
           {tab === "Trechos" && <TrechosTab />}
           {tab === "Links de acionamento" && <LinksTab />}
-          {tab === "Estatísticas" && <EstatisticasTab />}
           {tab === "Configurações" && <ConfiguracoesTab />}
         </div>
       ) : (
