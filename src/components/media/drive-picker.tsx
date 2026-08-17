@@ -208,10 +208,11 @@ export function DrivePicker({ onPicked }: { onPicked: () => void }) {
             </ul>
             <p className="mt-1.5 text-[11px] text-amber-700">
               Na Vercel (production + preview + development) e no{" "}
-              <code>.env.local</code>. As variáveis <strong>sem</strong>{" "}
-              <code>NEXT_PUBLIC_</code> valem na requisição seguinte;{" "}
-              <strong>as com precisam de um novo deploy</strong>, porque ficam
-              embutidas no build.
+              <code>.env.local</code>. Na Vercel, variável nova só passa a valer
+              no <strong>próximo deploy</strong> — salvar não muda o deploy que
+              já está no ar (use Redeploy no painel, ou mescle algo na{" "}
+              <code>main</code>). No local, basta reiniciar o{" "}
+              <code>npm run dev</code>.
             </p>
             <p className="mt-1.5 text-[11px] text-amber-700">
               No client OAuth, cadastre a <strong>origem JavaScript</strong> do CRM

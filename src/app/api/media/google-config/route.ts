@@ -4,10 +4,13 @@ import { NextResponse } from "next/server";
  * Configuração pública do Google Picker (client id + chave de API).
  *
  * Por que uma rota em vez de ler `process.env.NEXT_PUBLIC_*` no componente:
- * variável `NEXT_PUBLIC_` é **embutida no bundle na hora do build**. Definir na
- * Vercel sem refazer o deploy não muda nada, e a tela continua dizendo "falta
- * configurar" — foi exatamente o que aconteceu em produção. Lida aqui, no
- * servidor, a variável passa a valer na requisição seguinte, sem rebuild.
+ * variável `NEXT_PUBLIC_` é **embutida no bundle na hora do build**, então o
+ * valor vira código entregue ao navegador e trocá-lo obriga a reconstruir o
+ * bundle. Lida aqui, no servidor, ela é consultada a cada requisição — no local
+ * basta reiniciar o `npm run dev`.
+ * ⚠️ Isso NÃO dispensa deploy na Vercel: lá qualquer variável (com ou sem
+ * `NEXT_PUBLIC_`) fica atrelada ao deploy, e salvar no painel não muda o que já
+ * está no ar. Depois de cadastrar, é Redeploy (ou o deploy do próximo merge).
  *
  * Não é segredo: client id e chave de API do Picker são visíveis no navegador
  * por definição (a chave é restringida por referrer HTTP no console do Google,
