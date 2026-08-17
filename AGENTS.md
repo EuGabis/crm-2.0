@@ -444,6 +444,17 @@ sugerir que o cliente nunca comprou.
 - `GuruStatusBadge`/`guruStatusBadgeClass` saíram de `pagamentos/page.tsx` para
   `src/components/payments/status-badge.tsx` (duas cópias da tabela de cores
   divergiriam).
+- **O documento se prende ao contato sozinho** quando o cruzamento identifica o
+  comprador: `contacts.doc` vazio + casamento por chave FORTE (documento,
+  telefone ou e-mail) → grava. Não é cosmética: o documento é a chave principal
+  da cascata, e uma vez preso o cruzamento deixa de depender de telefone/e-mail,
+  que mudam. ⚠️ Casamento por **nome não grava sozinho** — homônimo existe, e
+  carimbar o CPF de outra pessoa é pior que o campo vazio, porque a partir dali
+  a cascata usaria a chave errada como se fosse a mais confiável; nesse caso a
+  tela oferece o botão "Vincular ao contato". Documento já preenchido nunca é
+  sobrescrito. A fonte é o contato da Guru e, quando ele está atrasado na
+  sincronização, a própria venda (`raw->contact->doc`) — conferido: de 8 leads
+  reais, 2 só tinham o documento na venda.
 - **Onde o mesmo cruzamento aparece** (tudo em
   `src/components/payments/lead-payments-panel.tsx`, um componente só para não
   divergirem): `PaymentsProfileView` (visão larga) no detalhe do lead,

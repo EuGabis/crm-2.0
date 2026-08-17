@@ -35,7 +35,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { ContactPaymentsSummary } from "@/components/payments/lead-payments-panel";
+import { ContactPaymentsSummary, formatDoc } from "@/components/payments/lead-payments-panel";
 import {
   AppointmentsPanel,
   FilesPanel,
@@ -367,7 +367,7 @@ export function ContactPanel({
                         ["Sobrenome", contact.lastName],
                         ["E-mail", contact.email],
                         ["Telefone", contact.phone],
-                        ["CPF/CNPJ", contact.doc || "—"],
+                        ["CPF/CNPJ", contact.doc ? formatDoc(contact.doc) : "—"],
                         ["Empresa", contact.company ?? "—"],
                         // A seção "Campos personalizados" era um cabeçalho com
                         // nada embaixo em toda empresa que não criou campo
