@@ -207,9 +207,21 @@ function NewConversationDialog({
   const { channels } = useWhatsappChannels();
   const activeChannels = channels.filter((c) => c.active);
   const [contactId, setContactId] = useState("");
+  const [contactQuery, setContactQuery] = useState("");
+  const [contactOpen, setContactOpen] = useState(false);
   const [channel, setChannel] = useState<Channel>("whatsapp");
   const [channelId, setChannelId] = useState("");
   const [saving, setSaving] = useState(false);
+
+  const selectedContact = contacts.find((c) => c.id === contactId);
+  const cq = contactQuery.trim().toLowerCase();
+  const filteredContacts = (
+    cq
+      ? contacts.filter((c) =>
+          `${c.firstName} ${c.lastName} ${c.phone}`.toLowerCase().includes(cq),
+        )
+      : contacts
+  ).slice(0, 50);
 
   // Número padrão = o primeiro ativo; o usuário troca se quiser.
   useEffect(() => {
@@ -252,22 +264,44 @@ function NewConversationDialog({
         <div className="space-y-3">
           <div className="space-y-1">
             <Label className="text-xs">Contato *</Label>
-            <Select value={contactId} onValueChange={(v) => setContactId(v ?? "")}>
-              <SelectTrigger className="h-8 w-full text-xs">
-                <SelectValue>
-                  {contactId
-                    ? contactName(contacts.find((c) => c.id === contactId)!)
-                    : "Selecionar contato"}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {contacts.slice(0, 100).map((c) => (
-                  <SelectItem key={c.id} value={c.id} className="text-xs">
-                    {contactName(c)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="relative">
+              <Input
+                value={contactOpen ? contactQuery : selectedContact ? contactName(selectedContact) : ""}
+                onChange={(e) => {
+                  setContactQuery(e.target.value);
+                  setContactOpen(true);
+                  if (contactId) setContactId("");
+                }}
+                onFocus={() => setContactOpen(true)}
+                onBlur={() => setTimeout(() => setContactOpen(false), 150)}
+                placeholder="Buscar contato por nome ou número"
+                className="h-8 text-xs"
+              />
+              {contactOpen && (
+                <div className="absolute z-50 mt-1 max-h-56 w-full overflow-y-auto rounded-md border bg-white shadow-lg [scrollbar-width:thin]">
+                  {filteredContacts.length === 0 ? (
+                    <p className="p-2 text-xs text-slate-400">Nenhum contato encontrado.</p>
+                  ) : (
+                    filteredContacts.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          setContactId(c.id);
+                          setContactQuery("");
+                          setContactOpen(false);
+                        }}
+                        className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-xs hover:bg-slate-50"
+                      >
+                        <span className="min-w-0 truncate text-slate-700">{contactName(c)}</span>
+                        <span className="shrink-0 text-[10px] text-slate-400">{c.phone}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
             {contacts.length === 0 && (
               <p className="text-[11px] text-amber-600">
                 Você ainda não tem contatos — crie um no módulo Contatos primeiro.
