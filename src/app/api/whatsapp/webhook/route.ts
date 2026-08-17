@@ -249,11 +249,10 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
 async function applyStatus(db: any, st: any) {
   const { data: msg } = await db
     .from("messages")
-    .select("id, status")
+    .select("id, status, delivered_at")
     .eq("wa_message_id", st.id)
     .maybeSingle();
   if (!msg) return; // status de mensagem que não gravamos — ignora
-
   if (!isAdvance(msg.status, st.status)) return; // não rebaixa entregue/lido
 
   const patch: Record<string, unknown> = { status: st.status };
@@ -261,7 +260,12 @@ async function applyStatus(db: any, st: any) {
     ? new Date(Number(st.timestamp) * 1000).toISOString()
     : new Date().toISOString();
   if (st.status === "delivered") patch.delivered_at = nowIso;
-  if (st.status === "read") patch.read_at = nowIso;
+  if (st.status === "read") {
+    patch.read_at = nowIso;
+    // "Lido" implica "entregue": a Meta às vezes pula o evento de entrega e manda
+    // só o read. Sem isto, a coluna Entregue ficaria "—" numa mensagem já lida.
+    if (!msg.delivered_at) patch.delivered_at = nowIso;
+  }
   if (st.status === "failed") {
     patch.failed_at = nowIso;
     patch.error_detail = st.errors?.[0]?.title || st.errors?.[0]?.message || "Falha na entrega";

@@ -44,6 +44,8 @@ export function TemplatePicker({
   onOpenChange,
   channelId,
   onPick,
+  /** Nome do contato da conversa — pré-preenche a 1ª variável ({{1}} costuma ser o nome). */
+  contactName,
   /**
    * true quando o seletor abriu porque o envio bateu no 409 da janela de 24h.
    * Aberto pelo atalho do composer (dentro da janela), a explicação seria
@@ -55,6 +57,7 @@ export function TemplatePicker({
   onOpenChange: (v: boolean) => void;
   channelId: string | null;
   onPick: (t: { name: string; language: string; components?: unknown[] }) => void;
+  contactName?: string;
   outsideWindow?: boolean;
 }) {
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -86,8 +89,15 @@ export function TemplatePicker({
       return;
     }
     setSelected(t);
-    setParams(Array(count).fill(""));
+    // {{1}} quase sempre é o nome — já entra preenchido com o contato da conversa.
+    setParams(Array(count).fill("").map((_, i) => (i === 0 ? contactName ?? "" : "")));
   }
+
+  /** Prévia do texto final: troca {{n}} pelos valores digitados (mantém {{n}} se vazio). */
+  const preview = bodyText(selected?.components).replace(
+    /\{\{\s*(\d+)\s*\}\}/g,
+    (_m, n) => params[Number(n) - 1]?.trim() || `{{${n}}}`,
+  );
 
   function handleSend() {
     if (!selected) return;
@@ -145,18 +155,24 @@ export function TemplatePicker({
 
         {selected && (
           <>
-            <p className="rounded-md border bg-slate-50 p-2 text-xs text-slate-600">
-              {bodyText(selected.components)}
-            </p>
-            <div className="max-h-72 space-y-3 overflow-y-auto">
+            <div className="space-y-1">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                Prévia (como o cliente vê)
+              </p>
+              <p className="whitespace-pre-wrap rounded-md border border-emerald-200 bg-emerald-50 p-2 text-xs text-slate-700">
+                {preview}
+              </p>
+            </div>
+            <div className="max-h-60 space-y-3 overflow-y-auto">
               {params.map((value, i) => (
                 <div key={i} className="space-y-1">
                   <Label htmlFor={`tpl-var-${i}`} className="text-xs">
-                    Variável {i + 1}
+                    {i === 0 ? "Variável 1 (nome do contato)" : `Variável ${i + 1}`}
                   </Label>
                   <Input
                     id={`tpl-var-${i}`}
                     className="h-8 text-xs"
+                    placeholder={i === 0 ? "Ex.: nome do contato" : `Valor da variável ${i + 1}`}
                     value={value}
                     onChange={(e) => {
                       const next = [...params];
