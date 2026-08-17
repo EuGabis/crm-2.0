@@ -171,6 +171,15 @@ Projeto Supabase dedicado (supabase.com, ref `boykcuhxmndlkjhojxhl`). Credenciai
 - Novas migrações: criar `supabase/migrations/000N_nome.sql` e aplicar via SQL Editor
   (ou `scripts/apply-migration.mjs`, que exige o CA do projeto em
   `scripts/supabase-ca.crt` — TLS sempre verificado, nunca desabilitar).
+- ⚠️ **`supabase_migrations.schema_migrations` NÃO é a lista do que foi aplicado**:
+  ela só registra o que passou por CLI/MCP; migração colada no SQL Editor não
+  aparece lá. Para saber se o banco está em dia, **confira o OBJETO** de cada
+  migração (`to_regclass('public.<tabela>')`, `information_schema.columns`,
+  `pg_policies`, `pg_proc`), não o histórico. Foi assim que se descobriu, em
+  2026-08-17, que a **0036** (view `payment_integration_status`) nunca tinha sido
+  aplicada, embora o `AGENTS.md` a desse como pronta desde a criação — o app não
+  quebrava porque `db/payments.ts` tem a rede de segurança do `hasGuruData`.
+  Aplicada e conferida como usuário comum: vê o estado da integração, não vê token.
 - Multi-tenant: TODA tabela de domínio tem `location_id`; toda política nova segue o
   padrão membership. Campo `location_members.only_assigned` reservado para o modo
   "ver apenas dados atribuídos" (ainda não aplicado nas políticas).
@@ -679,8 +688,7 @@ os módulos ainda não migrados continuam importando dos repos mock em
 - ✅ Backend F2b: módulo **Contatos 100% funcional** com Supabase — lista/CRUD/edição,
   listas inteligentes, tarefas, empresas (derivadas), campos personalizados (aparecem
   no cadastro e detalhe), importação/exportação CSV, log real de ações em massa.
-- ✅ **Segmentação de pipelines** (migração **0039**, aplicação no SQL Editor é
-  passo manual pendente) — `pipelines.scope` (`empresa` | `department` | `user`)
+- ✅ **Segmentação de pipelines** (migração **0039**, aplicada) — `pipelines.scope` (`empresa` | `department` | `user`)
   + `department_id`/`owner_id`. Todo pipeline existente vira `empresa` (default
   da coluna), então nada muda nos dados de hoje. Usuário comum só cria funil
   `user` para si; admin cria em qualquer escopo e muda quem vê pelo botão
@@ -728,8 +736,7 @@ os módulos ainda não migrados continuam importando dos repos mock em
   integração de envio = publicar na conversa. Log completo na aba
   **Conversas → Agendadas** (quem agendou, para quando, status, motivo da falha,
   cancelar) e resumo dentro da própria bolha da mensagem.
-  **Excluir conversa é só de administrador** (migração **0040**, aplicação no
-  SQL Editor é passo manual pendente) — excluir apaga o histórico junto (as
+  **Excluir conversa é só de administrador** (migração **0040**, aplicada) — excluir apaga o histórico junto (as
   mensagens caem por cascade) e não tem desfazer; quem não é admin usa
   Arquivar. É RLS: as policies "membros excluem" de `conversations` E
   `messages` (nascidas do laço da 0001) viram admin-only — sem isso, esconder
@@ -760,8 +767,7 @@ os módulos ainda não migrados continuam importando dos repos mock em
   `docs/superpowers/specs/2026-08-14-conversas-template-lote-pipeline-design.md`.
 - ✅ Backend F2e: **Dashboard** com widgets calculando sobre dados reais
   (adapters `useDbPipelines/useDbOpportunities/useDbPipeline` em `db/pipeline.ts`).
-  **Painéis personalizados** (migração **0037**, aplicação no SQL Editor é passo
-  manual pendente) — `dashboard_views` guarda quais widgets aparecem, em que
+  **Painéis personalizados** (migração **0037**, aplicada) — `dashboard_views` guarda quais widgets aparecem, em que
   ordem e com qual pipeline cada um resume, em dois escopos na mesma tabela:
   `scope='user'` (pessoal, só o dono lê e edita) e `scope='department'` (o admin
   monta, o departamento inteiro lê, só admin edita — a RLS exige
@@ -776,13 +782,13 @@ os módulos ainda não migrados continuam importando dos repos mock em
   db/appointments.ts), grade semanal com navegação e "Hoje", criar/excluir
   compromisso (com contato vinculado), lista futuro/passado. Sync Google = futura.
   **Editar, criar pela grade, vincular a lead e arrastar** (migração **0041**,
-  aplicação no SQL Editor é passo manual pendente) — `appointments.opportunity_id`
+  aplicada) — `appointments.opportunity_id`
   (`on delete set null`: excluir o lead não apaga a reunião de ninguém); clicar
   numa célula cria naquele dia/hora, clicar no evento edita, arrastar muda de
   dia/hora com dnd-kit. `move()` **preserva os minutos e a duração** (a célula é
   de 1h; zerar minutos mudaria em silêncio um horário combinado) e é otimista
   com rollback. Escolher o lead preenche o contato só quando ele está vazio.
-  **Lembrete no CRM** (migração **0042**, também pendente) —
+  **Lembrete no CRM** (migração **0042**, aplicada) —
   `appointments.reminder_minutes` (null = sem lembrete) e o popup
   `components/calendar/appointment-reminders.tsx`, montado no **shell**
   (`(app)/layout.tsx`) para avisar em qualquer tela. O "já avisei" fica no
@@ -791,7 +797,7 @@ os módulos ainda não migrados continuam importando dos repos mock em
   (`início - lembrete` até `início + 15min`), senão abrir o CRM à tarde
   despejaria a manhã inteira de avisos; e a agenda é relida a cada 5 min,
   senão compromisso criado em outro dispositivo nunca avisaria aqui.
-  **Agenda por usuário** (migração **0043**, também pendente) —
+  **Agenda por usuário** (migração **0043**, aplicada) —
   `appointments.owner_id`; cada um vê a própria agenda, admin vê tudo e pode
   marcar na agenda de outra pessoa. `owner_id` NULO = agenda da empresa
   (visível a todos) — é o que os compromissos existentes viram, já que não dá
@@ -851,14 +857,9 @@ os módulos ainda não migrados continuam importando dos repos mock em
   Aba **Templates** funcional: criar/excluir templates via Graph API (sem tabela
   local; Meta é fonte da verdade). Rastreio de entrega **exclusivamente de
   templates** — colunas `template_name`, `delivered_at`, `read_at`, `failed_at`,
-  `error_detail` na tabela `messages` (migração **0031**, aplicação no banco é
-  passo manual pendente); webhook carimba horários sem rebaixar status (usa
+  `error_detail` na tabela `messages` (migração **0031**, aplicada); webhook carimba horários sem rebaixar status (usa
   `isAdvance`); aba **Logs** com Realtime. Criar/excluir templates exige token
   Meta com permissão `whatsapp_business_management`.
-  - **PENDENTE (rodar amanhã):** aplicar a migração `0031` no Supabase SQL Editor
-    (senão as colunas de rastreio não existem e a aba Logs / o webhook falham).
-    O CA `scripts/supabase-ca.crt` não está no repo, então `apply-migration.mjs`
-    não conecta — aplicação é manual pelo SQL Editor.
   - **Nota de sessão / observação de bug (não bloqueante):** ao abrir `/whatsapp`
     a aba Canais chegou a mostrar "Nenhum canal" mesmo com o canal existindo —
     é corrida em `useChannelsStore.load` (`db/whatsapp.ts`): ele faz
