@@ -146,14 +146,22 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
 
   if (m.type === "text") {
     body = m.text?.body ?? "";
-  } else if (m.type === "image" || m.type === "audio" || m.type === "video") {
-    msgType = m.type;
+  } else if (
+    m.type === "image" ||
+    m.type === "audio" ||
+    m.type === "video" ||
+    m.type === "document"
+  ) {
+    // Documento (PDF etc.) é guardado como `file` — o tipo `document` não existe
+    // no CHECK de messages. Os demais mantêm o próprio tipo.
+    const isDoc = m.type === "document";
+    msgType = isDoc ? "file" : m.type;
     const node = m[m.type] ?? {};
     body = node.caption ?? "";
     try {
       const info = await getMediaInfo(node.id);
       const dl = await downloadMedia(info.url);
-      const mime = dl.mime || info.mime || "application/octet-stream";
+      const mime = dl.mime || info.mime || node.mime_type || "application/octet-stream";
       const ext = (mime.split("/")[1] || "bin").split(";")[0];
       const path = `${channel.location_id}/${contact.id}/${crypto.randomUUID()}.${ext}`;
       const { error: upErr } = await db.storage
@@ -161,7 +169,8 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
         .upload(path, new Uint8Array(dl.bytes), { contentType: mime, upsert: false });
       if (upErr) throw upErr;
       media.media_path = path;
-      media.media_name = `${m.type}.${ext}`;
+      // Documento chega com o nome real do arquivo; mídia comum não tem nome útil.
+      media.media_name = isDoc ? node.filename ?? `documento.${ext}` : `${m.type}.${ext}`;
       media.media_mime = mime;
       media.media_size = dl.bytes.byteLength;
     } catch {
