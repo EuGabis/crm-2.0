@@ -107,7 +107,7 @@ begin
               when length(trim(coalesce(d.first_name,'') || ' ' || coalesce(d.last_name,'')))
                  > length(trim(coalesce(k.first_name,'') || ' ' || coalesce(k.last_name,'')))
               then d.last_name else k.last_name end,
-            email   = coalesce(nullif(k.email, ''), nullif(d.email, '')),
+            email   = coalesce(nullif(k.email, ''), nullif(d.email, ''), ''),
             company = coalesce(k.company, d.company),
             tags    = (select array(select distinct e
                                      from unnest(coalesce(k.tags,'{}') || coalesce(d.tags,'{}')) e))
