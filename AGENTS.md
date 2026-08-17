@@ -562,7 +562,8 @@ Cloud API → celular.
   0040 = só admin exclui conversa/mensagem,
   0041 = compromisso vinculado a lead, 0042 = lembrete do compromisso,
   0043 = agenda por usuário, 0044 = mídia drive (bucket + pastas/arquivos),
-  0045 = conexões de mídia (Canva), 0046 = arquivos do Drive via Picker,
+  0045 = conexões de mídia (tabela ainda existe; o OAuth saiu junto com o
+  Canva), 0046 = arquivos do Drive via Picker,
   0047 = deduplicação de contato por telefone (`private.phone_key`),
   0048 = detalhe do lead / cruzamento com a Guru (`private.doc_key`,
   `contacts.doc`, `public.lead_payment_profile`),
@@ -680,10 +681,11 @@ capturando lead como Contato real + tag, pronto pra e-mail marketing.
   `<script src="https://lito-crm.vercel.app/api/forms/{slug}/embed.js"></script>`
   no HTML da página.
 
-## Mídia Drive (arquivos reais + Google Drive e Canva)
+## Mídia Drive (arquivos reais + Google Drive pelo Picker)
 
-Módulo **`/midia`**: armazenamento próprio da empresa mais duas integrações de
-leitura. Spec: `docs/superpowers/specs/2026-08-17-midia-drive-design.md`.
+Módulo **`/midia`**: armazenamento próprio da empresa mais os arquivos que a
+pessoa escolhe no Google Drive. Spec:
+`docs/superpowers/specs/2026-08-17-midia-drive-design.md`.
 
 - Migração **0044** — bucket PRIVADO `media-drive` + `media_folders`/`media_files`
   (RLS padrão membership; policies de `storage.objects` pelo primeiro segmento
@@ -692,20 +694,24 @@ leitura. Spec: `docs/superpowers/specs/2026-08-17-midia-drive-design.md`.
   existiria). Excluir pasta **não** exclui arquivo (`on delete set null` → volta
   pra raiz). Upload que falha no metadado remove o binário (órfão contaria no
   espaço usado sem aparecer em tela).
-- Migração **0045** — `media_connections` (uma linha por provedor) é
-  **admin-only** como `payment_credentials`; quem lê o token nas rotas é a
-  **service role**, e as telas leem a view `media_integration_status` (sem
-  token). ⚠️ Ler a tabela com a sessão do usuário faria a tela dizer "não
-  conectado" pra todo não-admin — mesmo bug da Guru.
-- `src/lib/integrations/media-oauth.ts` — state HMAC + cookie httpOnly, PKCE
-  S256 no Canva (o `code_verifier` vai em cookie httpOnly, nunca localStorage),
-  e **renovação automática** pelo refresh token (sem ela a integração morreria
-  em 1h). O Canva rotaciona o refresh token a cada uso.
-- Env novas: `CANVA_CLIENT_ID`, `CANVA_CLIENT_SECRET`. O Drive reusa
-  `GOOGLE_OAUTH_CLIENT_ID/SECRET` do Google Ads (escopo `drive.readonly`).
-- **Passos manuais pendentes:** aplicar 0044/0045; ativar a Google Drive API +
-  escopo + redirect `/api/media/oauth/callback`; criar o app no Canva Developers
-  e pôr as duas envs na Vercel.
+- 🗑️ **Canva REMOVIDO** (2026-08-17, a pedido do Gabriel). Como o Google Drive
+  já tinha migrado para o **Picker** (0046) — a rota `/api/media/oauth/start`
+  respondia **410** para `google_drive` —, o Canva era o ÚNICO consumidor vivo
+  de toda a pilha de OAuth de mídia. Saíram junto, por serem código morto:
+  `/api/media/{oauth/start,oauth/callback,files,disconnect}`,
+  `src/lib/integrations/media-oauth.ts` e `src/lib/data/repos/db/media-connections.ts`,
+  mais as envs `CANVA_CLIENT_ID`/`CANVA_CLIENT_SECRET`. Tudo está no histórico
+  do git se algum dia voltar.
+  A tabela `media_connections` e a view `media_integration_status` (0045) **ficam
+  no banco**: dropar é irreversível e não há ganho. A migração também não foi
+  reescrita — já foi aplicada.
+  ⚠️ Se um dia entrar OUTRO provedor por OAuth, vale reler a 0045 antes: a
+  tabela é admin-only (como `payment_credentials`), então quem lê o token tem
+  que ser a **service role**, com a sessão só autorizando; ler com a sessão do
+  usuário faz a tela dizer "não conectado" para todo não-admin — o mesmo bug que
+  a Guru já teve duas vezes.
+- **Passo manual pendente:** ativar a Google Drive API e a Picker API no projeto
+  do Google Cloud (as migrações 0044/0045/0046 já estão aplicadas).
 
 ## Fundação de IA (OpenAI)
 
