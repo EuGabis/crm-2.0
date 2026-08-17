@@ -398,8 +398,20 @@ sugerir que o cliente nunca comprou.
   email, name, limit)` devolve `{match_key, guru_contact, sales, subscriptions,
   totals}` numa chamada. No client, cada passo seria uma ida e volta e o rótulo
   poderia sair de uma consulta com as vendas vindo de outra.
-- A função é `stable` e **sem** `security definer` de propósito: a RLS de
-  membership das tabelas de pagamento continua valendo para quem chama.
+- ⚠️ **A função é `security definer` (migração 0049) e a checagem de empresa é
+  a primeira linha dela** (`p_location not in (select private.user_locations())`
+  → devolve vazio). Ela NASCEU sem definer, para a RLS de cada tabela valer
+  sozinha — e a tela morria com `canceling statement due to statement timeout`.
+  Motivo: sob RLS, um `where` que chama função **não-leakproof**
+  (`private.phone_key`, `private.doc_key`, `lower`) não pode ser avaliado antes
+  das políticas, então sai de baixo do índice funcional e vira **Seq Scan** nas
+  ~25 mil vendas calculando jsonb + regexp linha a linha (medido como
+  `authenticated`: 7,7 s; como `postgres`, com RLS desligada, 0,2 ms — foi por
+  isso que passou no primeiro teste). Depois da 0049: 102 ms, e passar o
+  `location_id` de outra empresa devolve vazio (conferido como `authenticated`).
+  Mesmo padrão de `public.find_contact_by_phone` (0047). **Ao mexer nesta
+  função, mantenha a checagem de membership no topo** — sem ela, `security
+  definer` significa "qualquer autenticado lê o pagamento de qualquer empresa".
 - **Sem coluna nova em `payment_events`/`payment_subscriptions`**: documento e
   telefone do comprador não existem como coluna (0008/0012) mas estão em
   `raw->'contact'` em 100% das linhas — a migração indexa a EXPRESSÃO que lê do
@@ -467,8 +479,10 @@ Cloud API → celular.
   0045 = conexões de mídia (Canva), 0046 = arquivos do Drive via Picker,
   0047 = deduplicação de contato por telefone (`private.phone_key`),
   0048 = detalhe do lead / cruzamento com a Guru (`private.doc_key`,
-  `contacts.doc`, `public.lead_payment_profile`);
-  **próxima migração livre: 0049**.
+  `contacts.doc`, `public.lead_payment_profile`),
+  0049 = `lead_payment_profile` vira `security definer` (RLS + função
+  não-leakproof = Seq Scan, ver seção do detalhe do lead);
+  **próxima migração livre: 0050**.
 - Env (privadas, nunca `NEXT_PUBLIC_`): `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`,
   `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_GRAPH_VERSION` (default `v21.0`).
 - **Mídia real (imagem/áudio/vídeo)** — helpers em `src/lib/whatsapp/client.ts`

@@ -55,9 +55,25 @@ totals}` numa chamada. No client, cada passo seria uma ida e volta e o rótulo
 ("casou por telefone") poderia vir de uma consulta enquanto as vendas vinham de
 outra — chave inconsistente com os dados ao lado.
 
-**A função é `stable` e SEM `security definer`.** A RLS de membership de
-`payment_events`/`payment_subscriptions`/`payment_guru_contacts` continua valendo
-para quem chama; passar outro `p_location` não lê pagamento de outra empresa.
+**A função é `security definer`, com a checagem de empresa na primeira linha.**
+Ela nasceu SEM definer (migração 0048), justamente para a RLS de cada tabela de
+pagamento valer sozinha — e a tela morreu com `canceling statement due to
+statement timeout`. Sob RLS, um `where` que chama função **não-leakproof**
+(`private.phone_key`, `private.doc_key`, `lower`) não pode ser avaliado antes das
+políticas: o Postgres não arrisca vazar dado de outra linha por uma função que
+ele não sabe se é segura. O predicado então sai de baixo do índice funcional e
+vira **Seq Scan** nas ~25 mil vendas calculando jsonb + regexp linha a linha —
+7,7 s como `authenticated`, contra 0,2 ms como `postgres` (RLS desligada), que é
+o motivo de o primeiro teste ter passado.
+
+A correção (migração **0049**) é `security definer` + `p_location not in (select
+private.user_locations())` → devolve vazio; mesmo padrão de
+`public.find_contact_by_phone` (0047). A alternativa era colunas geradas
+(`generated always as ... stored`) nas duas tabelas de pagamento, para o
+predicado virar `coluna = parâmetro`; ficou de fora por reescrever tabela de 25
+mil linhas e criar mais um campo derivado para o mapeamento da Guru manter em
+dia. Depois da 0049: **102 ms**, e passar o `location_id` de outra empresa
+devolve vazio (conferido como `authenticated`, com RLS ligada).
 
 **Nada de coluna nova nas tabelas de pagamento.** Documento e telefone do
 comprador não existem como coluna (0008/0012), mas estão em `raw->'contact'` em

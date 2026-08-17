@@ -1,130 +1,37 @@
 -- ============================================================
--- Lito CRM — Detalhe do lead: cruzamento com os dados da Guru
+-- Lito CRM — Detalhe do lead: cruzamento sem estourar o tempo limite
 --
--- O card do funil abre uma tela com o contato, os comentários e — quando o
--- mesmo comprador existe na Guru — as vendas e assinaturas dele. O problema é
--- CASAR as duas pontas: o contato do CRM e o comprador da Guru são cadastros
--- independentes.
+-- A 0048 deixou `lead_payment_profile` como função NORMAL (security invoker),
+-- de propósito: a RLS de cada tabela de pagamento valeria para quem chama, sem
+-- eu ter que reimplementar a checagem de empresa. Bonito e errado.
 --
--- Ordem de casamento (definida pelo Gabriel, da mais forte para a mais fraca):
---   1. CPF/CNPJ  — documento é único por pessoa; é a chave principal
---   2. Telefone  — quando o documento não bate ou o contato não tem documento
---   3. E-mail    — complemento
---   4. Nome      — último recurso (homônimo existe; por isso é o fim da fila)
--- A PRIMEIRA chave que encontra algo ganha, e a tela mostra qual foi — sem
--- isso o usuário não teria como saber se "achou o cliente" ou "achou alguém
--- com nome parecido".
+-- Sob RLS, um `where` que chama função **não-leakproof** (`private.phone_key`,
+-- `private.doc_key`, `lower`) NÃO pode ser avaliado antes das políticas — o
+-- Postgres não arrisca vazar dado de outra linha por uma função que ele não
+-- sabe se é segura. Resultado: o predicado sai de baixo do índice funcional e
+-- vira filtro pós-RLS, ou seja, **Seq Scan** nas ~25 mil vendas calculando
+-- jsonb + regexp linha a linha. Medido como `authenticated`: 7,7 s por
+-- consulta, e a tela mostrava "canceling statement due to statement timeout".
+-- Como `postgres` (RLS desligada) a mesma consulta é Index Scan de 0,2 ms —
+-- por isso o teste original passou.
 --
--- Duas decisões que valem registro:
+-- Duas saídas possíveis:
+--   (a) colunas geradas (`generated always as ... stored`) nas duas tabelas de
+--       pagamento, para o predicado virar `coluna = parâmetro`;
+--   (b) `security definer` + checagem de empresa explícita.
+-- Fica a (b): é o padrão que este repo já usa em `public.find_contact_by_phone`
+-- (0047), não reescreve tabela de 25 mil linhas e não cria mais um campo
+-- derivado para o mapeamento da Guru manter em dia.
 --
--- * `payment_events`/`payment_subscriptions` NÃO têm coluna de documento nem de
---   telefone — só nome e e-mail (migração 0008/0012). Os dois campos existem
---   dentro de `raw->'contact'` em 100% das linhas (conferido: 24.832/24.832
---   vendas e 2.453/2.453 assinaturas). Em vez de criar colunas e fazer
---   backfill (reescrita de tabela + mais um lugar para o mapeamento da Guru
---   esquecer de preencher), este arquivo indexa a EXPRESSÃO que lê do `raw`.
---   O `raw` é a fonte de verdade declarada na 0008; ler dele não pode ficar
---   defasado.
+-- O preço da (b) é que a checagem de tenant passa a ser MINHA — e é a primeira
+-- coisa que a função faz. `private.user_locations()` continua enxergando o
+-- `auth.uid()` de quem chamou (definer troca o dono, não o JWT), então quem não
+-- é membro da empresa recebe o mesmo vazio de antes. Chamada com a service role
+-- (auth.uid() nulo) também recebe vazio; só `authenticated` tem execute.
 --
--- * A cascata roda no BANCO (`public.lead_payment_profile`), não no client. Se
---   rodasse no navegador, cada passo seria uma ida e volta e o "casou por
---   telefone" poderia sair de uma consulta enquanto as vendas vinham de outra
---   — chave inconsistente com os dados ao lado. A função é `stable` e SEM
---   security definer de propósito: a RLS de membership de cada tabela continua
---   valendo para quem chama, então não há como ler pagamento de outra empresa
---   passando outro `p_location`.
---   ⚠️ ISSO NÃO SOBREVIVEU: sob RLS, um `where` que chama função não-leakproof
---   (as duas *_key abaixo, e `lower`) não pode ser avaliado antes das políticas
---   e o índice funcional fica inútil — Seq Scan de 7,7 s e a tela morrendo com
---   "statement timeout". A **migração 0049** troca por `security definer` com a
---   checagem de empresa explícita na primeira linha. Leia a 0049 antes de mexer
---   nesta função.
---
--- `private.phone_key` (migração 0047, do trabalho de deduplicação) é reusada
--- como está — telefone normalizado tem que significar a mesma coisa nos dois
--- lugares.
---
--- Idempotente.
+-- Idempotente (create or replace).
 -- ============================================================
 
--- ---------- 1. Documento normalizado (espelha private.phone_key) ----------
--- Só dígitos: o CRM recebe o CPF digitado à mão ("123.456.789-00") e a Guru
--- devolve sem pontuação ("12345678900"). Comparar texto cru nunca casaria.
-create or replace function private.doc_key(raw text)
-returns text
-language sql
-immutable
-set search_path = ''
-as $$
-  select nullif(regexp_replace(coalesce(raw, ''), '\D', '', 'g'), '');
-$$;
-
-revoke all on function private.doc_key(text) from public, anon;
-grant execute on function private.doc_key(text) to authenticated, service_role;
-
--- ---------- 2. CPF/CNPJ no contato do CRM ----------
--- Coluna de primeira classe (não campo personalizado): é a chave principal do
--- cruzamento e precisa de índice.
-alter table public.contacts
-  add column if not exists doc text;
-
-create index if not exists contacts_doc_key_idx
-  on public.contacts (location_id, (private.doc_key(doc)));
-
--- ---------- 3. Índices do cruzamento ----------
--- Um por chave da cascata, nas duas tabelas de pagamento. Sem eles cada
--- abertura de lead varreria as ~25 mil vendas extraindo jsonb.
-
-create index if not exists payment_events_doc_idx
-  on public.payment_events (location_id, (private.doc_key(raw -> 'contact' ->> 'doc')));
-
-create index if not exists payment_events_phone_idx
-  on public.payment_events
-  (location_id, (private.phone_key(raw -> 'contact' ->> 'phone_number')));
-
-create index if not exists payment_events_email_lower_idx
-  on public.payment_events (location_id, (lower(trim(contact_email))));
-
-create index if not exists payment_events_name_lower_idx
-  on public.payment_events (location_id, (lower(trim(contact_name))));
-
-create index if not exists payment_subscriptions_doc_idx
-  on public.payment_subscriptions (location_id, (private.doc_key(raw -> 'contact' ->> 'doc')));
-
-create index if not exists payment_subscriptions_phone_idx
-  on public.payment_subscriptions
-  (location_id, (private.phone_key(raw -> 'contact' ->> 'phone_number')));
-
-create index if not exists payment_subscriptions_email_lower_idx
-  on public.payment_subscriptions (location_id, (lower(trim(contact_email))));
-
-create index if not exists payment_subscriptions_name_lower_idx
-  on public.payment_subscriptions (location_id, (lower(trim(contact_name))));
-
--- payment_guru_contacts (0018) já tem índice simples em doc e phone, mas em
--- TEXTO CRU — inútil para comparar com valor normalizado.
-create index if not exists payment_guru_contacts_doc_key_idx
-  on public.payment_guru_contacts (location_id, (private.doc_key(doc)));
-
-create index if not exists payment_guru_contacts_phone_key_idx
-  on public.payment_guru_contacts (location_id, (private.phone_key(phone)));
-
-create index if not exists payment_guru_contacts_email_lower_idx
-  on public.payment_guru_contacts (location_id, (lower(trim(email))));
-
-create index if not exists payment_guru_contacts_name_lower_idx
-  on public.payment_guru_contacts (location_id, (lower(trim(name))));
-
--- ---------- 4. O perfil de pagamento de um lead ----------
--- Uma chamada, uma chave, tudo consistente:
---   { match_key, guru_contact, sales[], subscriptions[], totals }
--- `match_key` nulo = nenhuma das quatro chaves achou nada (a tela mostra o
--- vazio explicando o que foi tentado, em vez de fingir que o cliente não
--- comprou).
---
--- Os vocabulários de status espelham classifyGuruStatus() em
--- src/lib/data/guru.ts, igual às views 0016/0020 — se aquele arquivo mudar,
--- mudar aqui junto.
 create or replace function public.lead_payment_profile(
   p_location uuid,
   p_doc text default null,
@@ -136,6 +43,7 @@ create or replace function public.lead_payment_profile(
 returns jsonb
 language plpgsql
 stable
+security definer
 set search_path = ''
 as $$
 declare
@@ -157,16 +65,23 @@ declare
   v_sales jsonb;
   v_subs  jsonb;
   v_totals jsonb;
+
+  v_empty jsonb := jsonb_build_object(
+    'match_key', null, 'guru_contact', null,
+    'sales', '[]'::jsonb, 'subscriptions', '[]'::jsonb, 'totals', null
+  );
 begin
-  if p_location is null then
-    return jsonb_build_object('match_key', null, 'guru_contact', null,
-                             'sales', '[]'::jsonb, 'subscriptions', '[]'::jsonb,
-                             'totals', null);
+  -- ----- a única coisa que separa uma empresa da outra aqui -----
+  -- Sem isto, `security definer` viraria "qualquer autenticado lê o pagamento
+  -- de qualquer empresa passando outro p_location".
+  if p_location is null
+     or p_location not in (select private.user_locations()) then
+    return v_empty;
   end if;
 
   -- ----- cascata: documento -> telefone -> e-mail -> nome -----
   -- Cada bloco pergunta "existe alguma coisa por esta chave?" com predicado
-  -- literal (uma chave só), para o planner poder usar o índice.
+  -- literal (uma chave só), para o planner poder usar o índice da 0048.
 
   if v_key is null and v_doc is not null then
     select
@@ -257,9 +172,7 @@ begin
   end if;
 
   if v_key is null then
-    return jsonb_build_object('match_key', null, 'guru_contact', null,
-                             'sales', '[]'::jsonb, 'subscriptions', '[]'::jsonb,
-                             'totals', null);
+    return v_empty;
   end if;
 
   -- ----- contato da Guru (nome/doc/telefone/e-mail que ELA tem) -----
