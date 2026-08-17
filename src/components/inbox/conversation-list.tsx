@@ -33,6 +33,7 @@ import {
   useRealtimeStatus,
 } from "@/lib/data/repos/db/conversations";
 import { useMyMembership } from "@/lib/data/repos/db/team";
+import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
 import { cn } from "@/lib/utils";
 import { SORT_OPTIONS, scopeLabel, statusLabel, useInboxUi } from "./inbox-filters";
 import { BulkTemplateDialog, type BulkTarget } from "./bulk-template-dialog";
@@ -74,6 +75,10 @@ export function ConversationList({
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [templateOpen, setTemplateOpen] = useState(false);
+  // Filtro por NÚMERO: separa as caixas dos dois números pra não colidirem.
+  // null = todos os números.
+  const [channelFilter, setChannelFilter] = useState<string | null>(null);
+  const { channels } = useWhatsappChannels();
   const all = useConversations(filter);
   const { contacts } = useDbContacts();
   const realtime = useRealtimeStatus();
@@ -109,10 +114,16 @@ export function ConversationList({
       if (status === "arquivadas") return !!c.archivedAt;
       return !c.closedAt && !c.archivedAt;
     });
-    if (scope === "mine") return byStatus.filter((c) => c.assignedTo === me?.userId);
-    if (scope === "bot") return byStatus.filter((c) => automatedIds.has(c.id));
-    return byStatus;
-  }, [all, status, scope, me?.userId, automatedIds]);
+    let list =
+      scope === "mine"
+        ? byStatus.filter((c) => c.assignedTo === me?.userId)
+        : scope === "bot"
+          ? byStatus.filter((c) => automatedIds.has(c.id))
+          : byStatus;
+    // Separa por número quando um está selecionado.
+    if (channelFilter) list = list.filter((c) => c.channelId === channelFilter);
+    return list;
+  }, [all, status, scope, me?.userId, automatedIds, channelFilter]);
 
   const sorted =
     sort === "Maior atraso de SLA"
@@ -281,6 +292,47 @@ export function ConversationList({
           </button>
         ))}
       </div>
+      {channels.length > 1 && (
+        <div className="flex items-center gap-1.5 border-b px-2 py-1.5">
+          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            Número
+          </span>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <button className="flex min-w-0 flex-1 items-center justify-between gap-1 rounded-md border px-2 py-1 text-[11px] hover:bg-slate-50" />
+              }
+            >
+              <span className="truncate text-slate-700">
+                {channelFilter
+                  ? channels.find((c) => c.id === channelFilter)?.name ?? "Número"
+                  : "Todos os números"}
+              </span>
+              <ChevronDown className="size-3 shrink-0 text-slate-400" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-60">
+              <DropdownMenuItem
+                className={cn("text-xs", !channelFilter && "font-bold text-indigo-600")}
+                onClick={() => setChannelFilter(null)}
+              >
+                Todos os números
+              </DropdownMenuItem>
+              {channels.map((c) => (
+                <DropdownMenuItem
+                  key={c.id}
+                  className={cn("text-xs", channelFilter === c.id && "font-bold text-indigo-600")}
+                  onClick={() => setChannelFilter(c.id)}
+                >
+                  <span className="truncate">
+                    {c.name}
+                    {c.phoneE164 ? ` · ${c.phoneE164}` : ""}
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
       {selecting && (
         <div className="flex items-center gap-2 border-b bg-slate-50 px-3 py-1.5">
           <Checkbox
