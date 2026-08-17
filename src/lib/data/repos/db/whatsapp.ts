@@ -182,8 +182,9 @@ export const whatsappActions = {
     messageId: string;
     mediaPath: string;
     mime?: string;
-    kind: "image" | "audio" | "video";
+    kind: "image" | "audio" | "video" | "document";
     caption?: string;
+    filename?: string;
   }): Promise<{ ok: boolean; needsTemplate?: boolean; error?: string }> {
     const res = await fetch("/api/whatsapp/send-media", {
       method: "POST",

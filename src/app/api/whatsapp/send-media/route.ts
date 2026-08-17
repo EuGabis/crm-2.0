@@ -19,9 +19,14 @@ export async function POST(request: Request) {
   } catch {
     return Response.json({ error: "payload inválido" }, { status: 400 });
   }
-  const { conversationId, channelId, messageId, mediaPath, mime, caption } = body ?? {};
-  const kind = body?.kind as "image" | "audio" | "video";
-  if (!conversationId || !messageId || !mediaPath || !["image", "audio", "video"].includes(kind)) {
+  const { conversationId, channelId, messageId, mediaPath, mime, caption, filename } = body ?? {};
+  const kind = body?.kind as "image" | "audio" | "video" | "document";
+  if (
+    !conversationId ||
+    !messageId ||
+    !mediaPath ||
+    !["image", "audio", "video", "document"].includes(kind)
+  ) {
     return Response.json({ error: "parâmetros ausentes" }, { status: 400 });
   }
 
@@ -99,8 +104,9 @@ export async function POST(request: Request) {
   let waResp: any;
   try {
     const ext = (String(sendMime || "application/octet-stream").split("/")[1] || "bin").split(";")[0];
-    const mediaId = await uploadMedia(channel.phone_number_id, sendBytes, sendMime, `media.${ext}`);
-    waResp = await sendMediaMessage(channel.phone_number_id, to, kind, mediaId, caption);
+    const uploadName = kind === "document" && filename ? String(filename) : `media.${ext}`;
+    const mediaId = await uploadMedia(channel.phone_number_id, sendBytes, sendMime, uploadName);
+    waResp = await sendMediaMessage(channel.phone_number_id, to, kind, mediaId, caption, filename);
   } catch (e) {
     await supabase.from("messages").update({ status: "failed" }).eq("id", messageId);
     return Response.json(

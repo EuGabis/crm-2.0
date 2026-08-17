@@ -187,12 +187,14 @@ export async function uploadMedia(
 export function sendMediaMessage(
   phoneNumberId: string,
   to: string,
-  kind: "image" | "audio" | "video",
+  kind: "image" | "audio" | "video" | "document",
   mediaId: string,
   caption?: string,
+  filename?: string,
 ) {
   const media: Record<string, unknown> = { id: mediaId };
   if (caption && kind !== "audio") media.caption = caption; // áudio não leva caption
+  if (kind === "document" && filename) media.filename = filename; // nome do arquivo p/ o cliente
   return graph(`${phoneNumberId}/messages`, {
     method: "POST",
     body: JSON.stringify({ messaging_product: "whatsapp", to, type: kind, [kind]: media }),

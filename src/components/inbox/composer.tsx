@@ -164,7 +164,7 @@ export function Composer({ conversationId }: { conversationId: string }) {
         isWhatsapp &&
         res.messageId &&
         res.mediaPath &&
-        (kind === "image" || kind === "video")
+        (kind === "image" || kind === "video" || kind === "file")
       ) {
         const wa = await whatsappActions.sendMedia({
           conversationId,
@@ -172,7 +172,9 @@ export function Composer({ conversationId }: { conversationId: string }) {
           messageId: res.messageId,
           mediaPath: res.mediaPath,
           mime: res.mime,
-          kind,
+          // "file" no CRM = "document" na Cloud API (com o nome do arquivo).
+          kind: kind === "file" ? "document" : kind,
+          filename: kind === "file" ? file.name : undefined,
         });
         if (!wa.ok) {
           toast.error(
