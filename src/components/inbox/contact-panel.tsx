@@ -5,14 +5,17 @@ import Link from "next/link";
 import {
   CalendarDays,
   CheckSquare,
+  ChevronDown,
   FileText,
   Pencil,
   Plus,
   Search,
   Target,
   User,
+  UserPlus,
 } from "lucide-react";
 import { toast } from "sonner";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
@@ -22,18 +25,159 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { SendToPipelineDialog } from "./send-to-pipeline-dialog";
 import { contactName } from "@/lib/data/repos/contacts";
-import { useDbContact } from "@/lib/data/repos/db/contacts";
-import { usePipelineDb } from "@/lib/data/repos/db/pipeline";
+import { useDbContact, useDbTeam } from "@/lib/data/repos/db/contacts";
+import { conversationActions } from "@/lib/data/repos/db/conversations";
+import { oppActions, usePipelineDb } from "@/lib/data/repos/db/pipeline";
+import { useMyMembership } from "@/lib/data/repos/db/team";
 import { formatBRL } from "@/lib/data/repos/opportunities";
+import type { Opportunity, Pipeline, Stage, User as TeamUser } from "@/lib/data/types";
 import { cn } from "@/lib/utils";
 
 type Panel = "campos" | "tarefas" | "notas" | "compromissos" | "arquivos";
+
+/**
+ * Editor da oportunidade do contato dentro do painel da conversa: dá pra MOVER
+ * a fase e trocar o RESPONSÁVEL sem sair pra tela de Leads. Cada ação vira um
+ * evento inline na conversa (log de quem fez o quê).
+ */
+function OppEditor({
+  opportunity,
+  pipeline,
+  team,
+  conversationId,
+}: {
+  opportunity: Opportunity;
+  pipeline?: Pipeline;
+  team: TeamUser[];
+  conversationId?: string;
+}) {
+  const stages = pipeline?.stages ?? [];
+  const stage = stages.find((s) => s.id === opportunity.stageId);
+  const owner = team.find((u) => u.id === opportunity.ownerId);
+  const { me } = useMyMembership();
+  const actor = team.find((u) => u.id === me?.userId)?.name ?? "Alguém";
+
+  const changeStage = async (s: Stage) => {
+    if (s.id === opportunity.stageId) return;
+    const ok = await oppActions.move(opportunity.id, s.id);
+    if (!ok) {
+      toast.error("Não foi possível mover a etapa");
+      return;
+    }
+    toast.success(`Movido para "${s.name}"`);
+    if (conversationId) {
+      void conversationActions.logEvent(
+        conversationId,
+        `${actor} moveu "${opportunity.name}" para ${s.name}`
+      );
+    }
+  };
+
+  const changeOwner = async (userId: string | null) => {
+    const ok = await oppActions.assign(opportunity.id, userId);
+    if (!ok) {
+      toast.error("Não foi possível alterar o responsável");
+      return;
+    }
+    const target = userId ? team.find((u) => u.id === userId)?.name ?? "usuário" : null;
+    toast.success(target ? `Responsável: ${target}` : "Responsável removido");
+    if (conversationId) {
+      void conversationActions.logEvent(
+        conversationId,
+        target
+          ? `${actor} definiu ${target} como responsável por "${opportunity.name}"`
+          : `${actor} removeu o responsável de "${opportunity.name}"`
+      );
+    }
+  };
+
+  const trigger =
+    "flex items-center justify-between gap-1 rounded border px-1.5 py-1 text-[11px] hover:bg-slate-50";
+
+  return (
+    <div className="rounded-md border bg-white p-2">
+      <div className="flex items-center justify-between gap-1">
+        <span className="min-w-0 truncate text-[11px] font-semibold text-slate-700">
+          {pipeline?.name ?? "Pipeline"}
+        </span>
+        <span className="shrink-0 text-[10px] font-bold text-slate-600">
+          {formatBRL(opportunity.value)}
+        </span>
+      </div>
+      <div className="mt-1.5 flex flex-col gap-1">
+        {/* Fase */}
+        <DropdownMenu>
+          <DropdownMenuTrigger render={<button title="Mover de fase" className={trigger} />}>
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span
+                className="size-1.5 shrink-0 rounded-full"
+                style={{ backgroundColor: stage?.color ?? "#94a3b8" }}
+              />
+              <span className="truncate text-slate-700">{stage?.name ?? "Escolher fase"}</span>
+            </span>
+            <ChevronDown className="size-3 shrink-0 text-slate-400" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="max-h-64 w-48 overflow-y-auto">
+            {stages.map((s) => (
+              <DropdownMenuItem key={s.id} className="gap-1.5 text-xs" onClick={() => void changeStage(s)}>
+                <span className="size-1.5 rounded-full" style={{ backgroundColor: s.color }} />
+                {s.name}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {/* Responsável */}
+        <DropdownMenu>
+          <DropdownMenuTrigger render={<button title="Definir responsável" className={trigger} />}>
+            <span className="flex min-w-0 items-center gap-1.5">
+              {owner ? (
+                <Avatar className="size-4">
+                  <AvatarFallback
+                    className="text-[7px] font-bold text-white"
+                    style={{ background: owner.color }}
+                  >
+                    {owner.name.slice(0, 2).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+              ) : (
+                <UserPlus className="size-3 text-slate-400" />
+              )}
+              <span className="truncate text-slate-700">{owner?.name ?? "Responsável"}</span>
+            </span>
+            <ChevronDown className="size-3 shrink-0 text-slate-400" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="max-h-64 w-48 overflow-y-auto">
+            {team.map((u) => (
+              <DropdownMenuItem key={u.id} className="text-xs" onClick={() => void changeOwner(u.id)}>
+                {u.name}
+              </DropdownMenuItem>
+            ))}
+            {opportunity.ownerId && (
+              <DropdownMenuItem
+                className="text-xs text-slate-500"
+                onClick={() => void changeOwner(null)}
+              >
+                Remover responsável
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+  );
+}
 
 const PANELS: { key: Panel; icon: typeof User; label: string }[] = [
   { key: "campos", icon: User, label: "Contato" },
@@ -88,12 +232,19 @@ function SmallEmpty({ icon, title, text }: { icon: typeof User; title: string; t
   );
 }
 
-export function ContactPanel({ contactId }: { contactId: string }) {
+export function ContactPanel({
+  contactId,
+  conversationId,
+}: {
+  contactId: string;
+  conversationId?: string;
+}) {
   const [panel, setPanel] = useState<Panel>("campos");
   const [tab, setTab] = useState<"todos" | "dnd" | "acoes">("todos");
   const [fileTab, setFileTab] = useState("Todos");
   const [pipelineOpen, setPipelineOpen] = useState(false);
   const { contact } = useDbContact(contactId);
+  const team = useDbTeam();
   const { pipelines, opportunities: allOpps } = usePipelineDb();
   const opportunities = allOpps.filter((o) => o.contactId === contactId);
 
@@ -123,43 +274,19 @@ export function ContactPanel({ contactId }: { contactId: string }) {
                 <Target className="size-3" /> Enviar para pipeline
               </button>
               {opportunities.length > 0 && (
-                <div className="mt-2 space-y-1">
+                <div className="mt-2 space-y-1.5">
                   <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
                     {opportunities.length === 1 ? "No pipeline" : "Nos pipelines"}
                   </p>
-                  {opportunities.map((o) => {
-                    const pipeline = pipelines.find((p) => p.id === o.pipelineId);
-                    const stage = pipeline?.stages.find((s) => s.id === o.stageId);
-                    return (
-                      <Link
-                        key={o.id}
-                        href={`/leads?pipeline=${o.pipelineId}`}
-                        title="Abrir no funil de Leads"
-                        className="flex items-center gap-1.5 rounded-md border bg-white px-2 py-1.5 hover:border-indigo-300 hover:bg-slate-50"
-                      >
-                        <span
-                          className="size-1.5 shrink-0 rounded-full"
-                          style={{ backgroundColor: stage?.color ?? "#94a3b8" }}
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[11px] font-semibold text-slate-700">
-                            {pipeline?.name ?? "Pipeline"}
-                          </span>
-                          <span className="block truncate text-[10px] text-slate-500">
-                            {stage?.name ?? "—"}
-                            {o.status === "won"
-                              ? " · Ganho"
-                              : o.status === "lost"
-                                ? " · Perdido"
-                                : ""}
-                          </span>
-                        </span>
-                        <span className="shrink-0 text-[10px] font-bold text-slate-600">
-                          {formatBRL(o.value)}
-                        </span>
-                      </Link>
-                    );
-                  })}
+                  {opportunities.map((o) => (
+                    <OppEditor
+                      key={o.id}
+                      opportunity={o}
+                      pipeline={pipelines.find((p) => p.id === o.pipelineId)}
+                      team={team}
+                      conversationId={conversationId}
+                    />
+                  ))}
                 </div>
               )}
             </div>

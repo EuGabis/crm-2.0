@@ -81,6 +81,9 @@ export interface Message {
   /** WhatsApp: id da mensagem na Meta (casa status) e estado de entrega. */
   waMessageId?: string;
   status?: "sent" | "delivered" | "read" | "failed";
+  /** Carimbos de entrega/leitura do WhatsApp (migração 0031) — para o rastreio. */
+  deliveredAt?: string;
+  readAt?: string;
   /** Escrita por automação/IA, não por uma pessoa (migração 0027). */
   automated?: boolean;
   /** Log do agendamento (migração 0028) — só preenchido se scheduledFor existe. */

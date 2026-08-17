@@ -17,6 +17,12 @@ import {
 import { toast } from "sonner";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
@@ -26,8 +32,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useWebphone } from "@/components/layout/webphone-store";
-import { dbContactActions, useDbContact } from "@/lib/data/repos/db/contacts";
+import { dbContactActions, useDbContact, useDbTeam } from "@/lib/data/repos/db/contacts";
 import { conversationActions } from "@/lib/data/repos/db/conversations";
+import { oppActions } from "@/lib/data/repos/db/pipeline";
 import { taskActions } from "@/lib/data/repos/db/contacts-module";
 import { appointmentActions } from "@/lib/data/repos/db/appointments";
 import { formatBRL } from "@/lib/data/repos/opportunities";
@@ -128,6 +135,7 @@ export function OpportunityCard({
   });
   const router = useRouter();
   const { contact } = useDbContact(opportunity.contactId);
+  const team = useDbTeam();
   const callContact = useWebphone((s) => s.callContact);
 
   const [openAction, setOpenAction] = useState<string | null>(null);
@@ -165,6 +173,16 @@ export function OpportunityCard({
       return;
     }
     router.push(`/conversas?c=${id}`);
+  };
+
+  const assignOwner = async (userId: string | null) => {
+    const ok = await oppActions.assign(opportunity.id, userId);
+    if (!ok) {
+      toast.error("Não foi possível alterar o responsável");
+      return;
+    }
+    const t = userId ? team.find((u) => u.id === userId)?.name ?? "usuário" : null;
+    toast.success(t ? `Responsável: ${t}` : "Responsável removido");
   };
 
   const addTag = async () => {
@@ -294,27 +312,61 @@ export function OpportunityCard({
           <p className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-800">
             {opportunity.name}
           </p>
-          {owner ? (
-            <Avatar className="size-5 shrink-0">
-              <AvatarFallback
-                className="text-[8px] font-bold text-white"
-                style={{ background: owner.color }}
+          {/* Fora do gesto de arrastar: abrir o menu não pode mover o card. */}
+          <span
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            className="shrink-0"
+          >
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <button
+                    title={owner ? `Responsável: ${owner.name}` : "Atribuir responsável"}
+                    className="rounded-full"
+                  />
+                }
               >
-                {owner.name
-                  .split(" ")
-                  .map((n) => n[0])
-                  .slice(0, 2)
-                  .join("")}
-              </AvatarFallback>
-            </Avatar>
-          ) : (
-            <span
-              title="Não atribuído"
-              className="flex size-5 shrink-0 items-center justify-center rounded-full border border-dashed text-slate-400"
-            >
-              <UserPlus className="size-3" />
-            </span>
-          )}
+                {owner ? (
+                  <Avatar className="size-5">
+                    <AvatarFallback
+                      className="text-[8px] font-bold text-white"
+                      style={{ background: owner.color }}
+                    >
+                      {owner.name
+                        .split(" ")
+                        .map((n) => n[0])
+                        .slice(0, 2)
+                        .join("")}
+                    </AvatarFallback>
+                  </Avatar>
+                ) : (
+                  <span className="flex size-5 items-center justify-center rounded-full border border-dashed text-slate-400 hover:border-indigo-300 hover:text-indigo-500">
+                    <UserPlus className="size-3" />
+                  </span>
+                )}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="max-h-64 w-48 overflow-y-auto">
+                {team.map((u) => (
+                  <DropdownMenuItem
+                    key={u.id}
+                    className="text-xs"
+                    onClick={() => void assignOwner(u.id)}
+                  >
+                    {u.name}
+                  </DropdownMenuItem>
+                ))}
+                {opportunity.ownerId && (
+                  <DropdownMenuItem
+                    className="text-xs text-slate-500"
+                    onClick={() => void assignOwner(null)}
+                  >
+                    Remover responsável
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </span>
         </div>
         <p className="mt-1 truncate text-[10px] text-slate-500">
           Fonte: <span className="text-slate-600">{opportunity.source}</span>

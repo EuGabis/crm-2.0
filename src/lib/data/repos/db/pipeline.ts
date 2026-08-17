@@ -139,6 +139,23 @@ export const oppActions = {
     return true;
   },
 
+  /** Define/troca o responsável (owner_id) de uma oportunidade. null = sem dono. */
+  async assign(id: string, ownerId: string | null): Promise<boolean> {
+    const s = state();
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("opportunities")
+      .update({ owner_id: ownerId })
+      .eq("id", id);
+    if (error) return false;
+    s.patch({
+      opportunities: s.opportunities.map((o) =>
+        o.id === id ? { ...o, ownerId: ownerId ?? undefined } : o
+      ),
+    });
+    return true;
+  },
+
   async moveMany(ids: string[], stageId: string): Promise<boolean> {
     const s = state();
     const stage = s.pipelines.flatMap((p) => p.stages).find((st) => st.id === stageId);

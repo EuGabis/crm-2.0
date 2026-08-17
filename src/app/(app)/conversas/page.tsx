@@ -127,7 +127,12 @@ function ConversasPageInner() {
               </Button>
             </div>
           )}
-          {selectedConversation && <ContactPanel contactId={selectedConversation.contactId} />}
+          {selectedConversation && (
+            <ContactPanel
+              contactId={selectedConversation.contactId}
+              conversationId={selectedConversation.id}
+            />
+          )}
         </div>
       )}
       <NewConversationDialog

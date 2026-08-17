@@ -56,6 +56,8 @@ const mapMessage = (r: any): Message => ({
   mediaSize: r.media_size ?? undefined,
   waMessageId: r.wa_message_id ?? undefined,
   status: r.status ?? undefined,
+  deliveredAt: r.delivered_at ?? undefined,
+  readAt: r.read_at ?? undefined,
   automated: r.automated || undefined,
   scheduledBy: r.scheduled_by ?? null,
   scheduleStatus: r.schedule_status ?? undefined,
@@ -476,6 +478,39 @@ export const conversationActions = {
       ),
     });
     return true;
+  },
+
+  /**
+   * Registra uma ação como evento inline (pílula cinza no meio da conversa):
+   * "Fulano transferiu para Beltrano", "mudou a fase para X", etc. Reaproveita
+   * o tipo `event` das mensagens — vira histórico de quem fez o quê, no contexto.
+   * O texto do corpo já vem montado (quem + ação) por quem chama.
+   */
+  async logEvent(conversationId: string, body: string): Promise<void> {
+    const location = loc();
+    if (!location) return;
+    const s = useConvStore.getState();
+    const conv = s.conversations.find((c) => c.id === conversationId);
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("messages")
+      .insert({
+        location_id: location,
+        conversation_id: conversationId,
+        direction: "out",
+        type: "event",
+        channel: conv?.channel ?? "whatsapp",
+        body,
+      })
+      .select()
+      .single();
+    // Inserção otimista; o Realtime (INSERT em messages) deduplica pelo id.
+    if (data) {
+      const s2 = useConvStore.getState();
+      if (!s2.messages.some((m) => m.id === data.id)) {
+        s2.patch({ messages: [...s2.messages, mapMessage(data)] });
+      }
+    }
   },
 
   /**
