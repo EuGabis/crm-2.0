@@ -138,6 +138,26 @@ export const whatsappActions = {
     return true;
   },
 
+  /** Edita os dados editáveis do canal (nome, setor, limite). Os ids da Meta ficam fixos. */
+  async updateChannel(
+    id: string,
+    patch: { name: string; sector: string; dailyLimit: number },
+  ): Promise<boolean> {
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("whatsapp_channels")
+      .update({ name: patch.name, sector: patch.sector, daily_limit: patch.dailyLimit })
+      .eq("id", id);
+    if (error) return false;
+    const s = useChannelsStore.getState();
+    s.set(
+      s.channels.map((c) =>
+        c.id === id ? { ...c, name: patch.name, sector: patch.sector, dailyLimit: patch.dailyLimit } : c,
+      ),
+    );
+    return true;
+  },
+
   async send(args: {
     conversationId: string;
     channelId?: string;
