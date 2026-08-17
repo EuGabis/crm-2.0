@@ -3,7 +3,6 @@
 import { useEffect } from "react";
 import { create } from "zustand";
 import { createClient } from "@/lib/supabase/client";
-import { useDbStore } from "./contacts";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -39,16 +38,21 @@ export const useAccountStore = create<AccountState>((set, get) => ({
   load: async () => {
     if (get().loaded || get().loading) return;
     set({ loading: true });
-    await useDbStore.getState().load();
-    const { locationId, userId } = useDbStore.getState();
-    if (!locationId || !userId) {
-      set({ loading: false, loaded: true });
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      // Sem sessão ainda — NÃO marca loaded pra tentar de novo no próximo mount.
+      set({ loading: false });
       return;
     }
-    const supabase = createClient();
+    // A RLS de `locations` já devolve SÓ a empresa do usuário — não depende do
+    // `locationId` do store (que podia não estar pronto por corrida de load e
+    // cacheava company=null pra sempre → "Empresa não encontrada").
     const [{ data: location }, { data: profile }] = await Promise.all([
-      supabase.from("locations").select("*").eq("id", locationId).maybeSingle(),
-      supabase.from("profiles").select("*").eq("id", userId).maybeSingle(),
+      supabase.from("locations").select("*").limit(1).maybeSingle(),
+      supabase.from("profiles").select("*").eq("id", user.id).maybeSingle(),
     ]);
     set({
       loaded: true,
