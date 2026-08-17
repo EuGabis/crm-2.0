@@ -83,14 +83,11 @@ export function TemplatePicker({
 
   function handlePick(t: Template) {
     const count = bodyVarCount(t.components);
-    if (count === 0) {
-      onPick({ name: t.name, language: t.language });
-      onOpenChange(false);
-      return;
-    }
+    // Mostra SEMPRE a tela de prévia/confirmação — mesmo sem variável — pra você
+    // ver o texto final antes de enviar. {{1}} quase sempre é o nome, então já
+    // entra preenchido com o contato da conversa.
     setSelected(t);
-    // {{1}} quase sempre é o nome — já entra preenchido com o contato da conversa.
-    setParams(Array(count).fill("").map((_, i) => (i === 0 ? contactName ?? "" : "")));
+    setParams(count === 0 ? [] : Array(count).fill("").map((_, i) => (i === 0 ? contactName ?? "" : "")));
   }
 
   /** Prévia do texto final: troca {{n}} pelos valores digitados (mantém {{n}} se vazio). */
@@ -104,20 +101,23 @@ export function TemplatePicker({
     onPick({
       name: selected.name,
       language: selected.language,
-      components: [
-        { type: "body", parameters: params.map((p) => ({ type: "text", text: p })) },
-      ],
+      // Sem variável = sem components; com variável, manda os valores preenchidos.
+      components:
+        params.length > 0
+          ? [{ type: "body", parameters: params.map((p) => ({ type: "text", text: p })) }]
+          : undefined,
     });
     onOpenChange(false);
   }
 
-  const allFilled = params.length > 0 && params.every((p) => p.trim().length > 0);
+  // [].every(...) === true, então template sem variável já pode enviar.
+  const allFilled = params.every((p) => p.trim().length > 0);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{selected ? `Variáveis — ${selected.name}` : "Escolher template"}</DialogTitle>
+          <DialogTitle>{selected ? `Enviar — ${selected.name}` : "Escolher template"}</DialogTitle>
         </DialogHeader>
 
         {!selected && (
