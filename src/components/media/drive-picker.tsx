@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { FolderOpen, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -74,11 +74,38 @@ function loadPicker(): Promise<void> {
   });
 }
 
+interface GoogleConfig {
+  clientId: string;
+  apiKey: string;
+  clientIdSource: string | null;
+  apiKeySource: string | null;
+}
+
 export function DrivePicker({ onPicked }: { onPicked: () => void }) {
   const [busy, setBusy] = useState(false);
   const [originError, setOriginError] = useState<string | null>(null);
-  const clientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID ?? "";
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_API_KEY ?? "";
+  // Vem do SERVIDOR, não de process.env.NEXT_PUBLIC_* aqui: variável
+  // `NEXT_PUBLIC_` é embutida no bundle durante o build, então defini-la na
+  // Vercel sem refazer o deploy não mudava nada e a tela seguia dizendo "falta
+  // configurar" — foi o que aconteceu em produção. Ver /api/media/google-config.
+  const [config, setConfig] = useState<GoogleConfig | null>(null);
+  const [configError, setConfigError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/media/google-config")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((c: GoogleConfig) => active && setConfig(c))
+      .catch((e: unknown) => {
+        if (active) setConfigError(e instanceof Error ? e.message : "falha ao consultar");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const clientId = config?.clientId ?? "";
+  const apiKey = config?.apiKey ?? "";
   // O appId do Picker é o NÚMERO DO PROJETO, que é justamente o prefixo do
   // client id (`281501150929-xxxx.apps.googleusercontent.com`). Derivar daqui
   // evita uma env a mais para errar.
@@ -149,16 +176,50 @@ export function DrivePicker({ onPicked }: { onPicked: () => void }) {
     }
   };
 
+  if (!config && !configError) {
+    return <p className="text-[11px] text-slate-400">Verificando configuração…</p>;
+  }
+
   if (missing) {
     return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-left">
+      <div className="max-w-md rounded-lg border border-amber-200 bg-amber-50 p-3 text-left">
         <p className="text-[11px] font-semibold text-amber-800">Falta configurar no servidor</p>
-        <p className="mt-1 text-[11px] text-amber-700">
-          Defina <code>NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID</code> e{" "}
-          <code>NEXT_PUBLIC_GOOGLE_API_KEY</code> (Vercel + .env.local). No client OAuth,
-          cadastre a <strong>origem JavaScript</strong> do CRM — o Picker não usa URI de
-          redirecionamento.
-        </p>
+        {configError ? (
+          <p className="mt-1 text-[11px] text-amber-700">
+            Não foi possível consultar a configuração ({configError}).
+          </p>
+        ) : (
+          <>
+            {/* Dizer O QUE falta, e não os dois nomes sempre: metade das vezes
+                só uma das duas está de fora. */}
+            <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11px] text-amber-700">
+              {!clientId && (
+                <li>
+                  Client id — defina <code>GOOGLE_PICKER_CLIENT_ID</code> (ou{" "}
+                  <code>NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID</code>)
+                </li>
+              )}
+              {!apiKey && (
+                <li>
+                  Chave de API — defina <code>GOOGLE_API_KEY</code> (ou{" "}
+                  <code>NEXT_PUBLIC_GOOGLE_API_KEY</code>)
+                </li>
+              )}
+            </ul>
+            <p className="mt-1.5 text-[11px] text-amber-700">
+              Na Vercel (production + preview + development) e no{" "}
+              <code>.env.local</code>. As variáveis <strong>sem</strong>{" "}
+              <code>NEXT_PUBLIC_</code> valem na requisição seguinte;{" "}
+              <strong>as com precisam de um novo deploy</strong>, porque ficam
+              embutidas no build.
+            </p>
+            <p className="mt-1.5 text-[11px] text-amber-700">
+              No client OAuth, cadastre a <strong>origem JavaScript</strong> do CRM
+              (<code>{typeof window === "undefined" ? "" : window.location.origin}</code>) — o
+              Picker não usa URI de redirecionamento.
+            </p>
+          </>
+        )}
       </div>
     );
   }
@@ -186,6 +247,12 @@ export function DrivePicker({ onPicked }: { onPicked: () => void }) {
           <p className="mt-1 text-[10px] text-amber-600">
             Sem barra no fim e sem caminho. Cada endereço é uma origem diferente — localhost,
             produção e cada preview da Vercel precisam estar na lista.
+          </p>
+          {/* Qual client está sendo usado: "origem não cadastrada" com o client
+              ERRADO é indistinguível de "origem não cadastrada" com o certo — e
+              já se perdeu uma sessão inteira nessa confusão. */}
+          <p className="mt-1.5 break-all text-[10px] text-amber-600">
+            Client em uso ({config?.clientIdSource ?? "?"}): <strong>{clientId}</strong>
           </p>
         </div>
       )}
