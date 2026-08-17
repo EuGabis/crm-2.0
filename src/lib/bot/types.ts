@@ -31,6 +31,8 @@ export type BotNode =
     }
   // Grava a resposta num campo do contato (ex.: first_name a partir de "name").
   | { id: string; type: "set_contact"; field: string; fromVar: string; next: string | null }
+  // Grava um NOME completo separando: 1ª palavra = first_name, resto = last_name.
+  | { id: string; type: "set_name"; fromVar: string; next: string | null }
   // Scoring com pesos: soma pesos das variáveis e classifica >= limiar.
   | {
       id: string;

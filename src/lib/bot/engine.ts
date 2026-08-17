@@ -125,6 +125,19 @@ async function advance(
         await ctx.db.from("contacts").update({ [node.field]: String(val).trim() }).eq("id", ctx.contact.id);
       }
       nodeId = node.next;
+    } else if (node.type === "set_name") {
+      // 1ª palavra = nome, resto = sobrenome (não estraga o sobrenome existente).
+      const full = String(vars[node.fromVar] ?? "").trim().replace(/\s+/g, " ");
+      if (full) {
+        const parts = full.split(" ");
+        const first = parts.shift() ?? full;
+        const last = parts.join(" ");
+        await ctx.db
+          .from("contacts")
+          .update({ first_name: first, last_name: last })
+          .eq("id", ctx.contact.id);
+      }
+      nodeId = node.next;
     } else if (node.type === "score") {
       let sum = 0;
       for (const [v, table] of Object.entries(node.weights)) {

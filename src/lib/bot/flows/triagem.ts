@@ -28,8 +28,7 @@ export const triagemFlow: BotFlow = {
     },
     salva_nome: {
       id: "salva_nome",
-      type: "set_contact",
-      field: "first_name",
+      type: "set_name",
       fromVar: "name",
       next: "pergunta_curso",
     },
