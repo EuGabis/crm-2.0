@@ -418,8 +418,8 @@ Cloud API → celular.
   0040 = só admin exclui conversa/mensagem,
   0041 = compromisso vinculado a lead, 0042 = lembrete do compromisso,
   0043 = agenda por usuário, 0044 = mídia drive (bucket + pastas/arquivos),
-  0045 = conexões de mídia (Google Drive/Canva);
-  **próxima migração livre: 0046**.
+  0045 = conexões de mídia (Canva), 0046 = arquivos do Drive via Picker;
+  **próxima migração livre: 0047**.
 - Env (privadas, nunca `NEXT_PUBLIC_`): `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`,
   `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_GRAPH_VERSION` (default `v21.0`).
 - **Mídia real (imagem/áudio/vídeo)** — helpers em `src/lib/whatsapp/client.ts`

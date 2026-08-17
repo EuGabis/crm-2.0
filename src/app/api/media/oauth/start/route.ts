@@ -16,7 +16,20 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: Request) {
   const provider = new URL(request.url).searchParams.get("provider") as MediaProvider | null;
-  if (provider !== "google_drive" && provider !== "canva") {
+  // O Google Drive deixou de passar por aqui: virou Google Picker no navegador
+  // (escopo `drive.file`), porque listar o Drive inteiro exigiria
+  // `drive.readonly` — escopo RESTRITO, que só funciona depois da verificação
+  // de segurança do Google. Ver 0046 e components/media/drive-picker.tsx.
+  if (provider === "google_drive") {
+    return Response.json(
+      {
+        error:
+          "O Google Drive não usa mais este fluxo: os arquivos são escolhidos pelo Google Picker, na aba Google Drive.",
+      },
+      { status: 410 }
+    );
+  }
+  if (provider !== "canva") {
     return Response.json({ error: "provider inválido" }, { status: 400 });
   }
 
@@ -65,20 +78,13 @@ export async function GET(request: Request) {
   const cookieBase = ["HttpOnly", "SameSite=Lax", "Path=/api/media/oauth", "Max-Age=600"];
   if (isHttps) cookieBase.push("Secure");
 
-  if (provider === "google_drive") {
-    // `offline` + `consent` para receber refresh token; sem ele a conexão morre
-    // em uma hora e o admin precisaria reconectar todo dia.
-    params.set("access_type", "offline");
-    params.set("prompt", "consent");
-  } else {
-    // O Canva exige PKCE (S256). O verifier vai num cookie httpOnly — guardar
-    // no localStorage entregaria o segredo a qualquer script da página.
-    const verifier = crypto.randomBytes(48).toString("base64url");
-    const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
-    params.set("code_challenge", challenge);
-    params.set("code_challenge_method", "S256");
-    cookies.push([`media_pkce=${verifier}`, ...cookieBase].join("; "));
-  }
+  // Daqui só passa o Canva, que exige PKCE (S256). O verifier vai num cookie
+  // httpOnly — no localStorage qualquer script da página leria o segredo.
+  const verifier = crypto.randomBytes(48).toString("base64url");
+  const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
+  params.set("code_challenge", challenge);
+  params.set("code_challenge_method", "S256");
+  cookies.push([`media_pkce=${verifier}`, ...cookieBase].join("; "));
 
   cookies.push([`media_oauth_state=${state}`, ...cookieBase].join("; "));
 

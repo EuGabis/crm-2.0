@@ -61,9 +61,36 @@ Google Ads.
 **Só admin conecta/desconecta.** A tela esconde o botão e as rotas conferem o
 papel; a RLS recusaria a gravação de qualquer forma.
 
-## Escopos pedidos
+## Escopos — e por que o Drive mudou de arquitetura (migração 0046)
 
-- Google Drive: `drive.readonly` — o CRM lista e abre, **nunca** altera nada.
+A primeira versão pedia `drive.readonly` e listava o Drive inteiro pelo
+servidor. A doc oficial
+([api-specific-auth](https://developers.google.com/workspace/drive/api/guides/api-specific-auth?hl=pt-br))
+classifica esse escopo como **RESTRITO**: só funciona fora dos "test users"
+depois de uma verificação de segurança do Google. Para app que apenas precisa
+que o usuário **escolha** arquivos, a recomendação da própria doc é
+**`drive.file` + Google Picker** — acesso somente ao que foi escolhido, sem
+verificação.
+
+Foi o que passou a valer:
+
+| | Antes (`drive.readonly`) | Agora (`drive.file` + Picker) |
+|---|---|---|
+| Alcance | todo o Drive | só o que o usuário escolheu |
+| Verificação Google | obrigatória | dispensada |
+| Onde roda o OAuth | servidor (callback) | navegador (Google Identity) |
+| O que o client OAuth precisa | URI de redirecionamento | **origem JavaScript** |
+| Token guardado | sim (`media_connections`) | **nenhum** — vive só durante a escolha |
+
+**Efeito colateral bem-vindo:** o `redirect_uri_mismatch` deixa de existir para
+o Drive — não há mais callback nesse fluxo. O Canva segue no OAuth de servidor
+(não tem picker), com PKCE.
+
+A tabela `media_drive_items` (0046) guarda o PONTEIRO do arquivo escolhido (id,
+nome, tipo, link) — sem ela a escolha valeria só até fechar a aba. O conteúdo
+nunca é copiado: o arquivo continua no Drive de quem escolheu, e "remover
+atalho" não apaga nada lá.
+
 - Canva: `design:meta:read asset:read profile:read`.
 
 ## Peças
@@ -81,12 +108,16 @@ papel; a RLS recusaria a gravação de qualquer forma.
 
 ## Passos manuais pendentes (Gabriel)
 
-1. Aplicar `0044_midia_drive.sql` e `0045_integracoes_midia.sql` no SQL Editor.
-2. **Google Drive**: no mesmo projeto do Google Cloud usado no Google Ads,
-   ativar a **Google Drive API**, adicionar o escopo `drive.readonly` na tela de
-   consentimento e cadastrar os redirects
-   `http://localhost:3000/api/media/oauth/callback` e
-   `https://lito-crm.vercel.app/api/media/oauth/callback`.
+1. Aplicar `0044_midia_drive.sql`, `0045_integracoes_midia.sql` e
+   `0046_midia_drive_picker.sql` no SQL Editor.
+2. **Google Drive (Picker)**: no mesmo projeto do Google Cloud do Google Ads —
+   ativar a **Google Drive API** *e* a **Google Picker API**; criar uma **chave
+   de API** restrita por referenciador (`lito-crm.vercel.app/*` e
+   `localhost:3000/*`); no client OAuth, cadastrar em **origens JavaScript
+   autorizadas** `https://lito-crm.vercel.app` e `http://localhost:3000`
+   (**não** é URI de redirecionamento); e definir
+   `NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID` e `NEXT_PUBLIC_GOOGLE_API_KEY` na Vercel
+   e no `.env.local`. O escopo é `drive.file`, que **não** precisa de verificação.
 3. **Canva**: criar um app no Canva Developers (Connect API), pedir os escopos
    acima, cadastrar o mesmo redirect e copiar Client ID/Secret para
    `CANVA_CLIENT_ID` / `CANVA_CLIENT_SECRET` no `.env.local` **e** na Vercel.
