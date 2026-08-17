@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Contact } from "@/lib/data/types";
-import { useDbStore } from "./contacts";
+import { dbContactActions, useDbStore } from "./contacts";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -173,6 +173,9 @@ export function useLeadPaymentProfile(contact: Contact | null | undefined, enabl
 
   useEffect(() => {
     if (!enabled || (!doc && !phone && !email && !name)) {
+      // Reset para uma constante — não há cascata a temer, e sem isto o perfil
+      // do contato anterior ficaria na tela do próximo.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setProfile(EMPTY);
       return;
     }
@@ -211,13 +214,88 @@ export function useLeadPaymentProfile(contact: Contact | null | undefined, enabl
         setLoading(false);
         return;
       }
-      setProfile(mapProfile(data));
+      const mapped = mapProfile(data);
+      setProfile(mapped);
       setLoading(false);
+      if (contact) void autoLinkDoc(contact, mapped);
     })();
     return () => {
       active = false;
     };
+    // `contact` inteiro fora das dependências de propósito: o objeto muda de
+    // identidade a cada render do chamador e refaria a consulta em loop. As
+    // quatro chaves abaixo são o que de fato muda o resultado.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, doc, phone, email, name]);
 
   return { profile, loading, error };
+}
+
+/* ------------------------- documento do comprador ------------------------- */
+
+/** Só dígitos; devolve null se não parecer CPF (11) nem CNPJ (14). */
+export function normalizeDoc(raw: string | null | undefined): string | null {
+  const d = (raw ?? "").replace(/\D/g, "");
+  return d.length === 11 || d.length === 14 ? d : null;
+}
+
+/**
+ * O documento que a Guru tem para este comprador. O cadastro de contatos da
+ * Guru é sincronizado à parte e pode estar atrasado, então a venda serve de
+ * segunda fonte — ela carrega o documento do comprador no mesmo payload.
+ */
+export function guruDoc(profile: LeadPaymentProfile): string | null {
+  return (
+    normalizeDoc(profile.guruContact?.doc) ??
+    normalizeDoc(profile.sales.find((s) => normalizeDoc(s.contactDoc))?.contactDoc)
+  );
+}
+
+/**
+ * Chaves em que o casamento é forte o bastante para gravar o documento no
+ * contato sem perguntar. `name` fica DE FORA: homônimo existe, e carimbar o CPF
+ * de outra pessoa no cadastro é um estrago silencioso — pior do que o campo
+ * vazio, porque a partir daí o cruzamento passaria a usar essa chave errada
+ * como se fosse a mais confiável. Nesse caso a tela oferece um botão.
+ */
+const STRONG_KEYS: LeadMatchKey[] = ["doc", "phone", "email"];
+
+export function isStrongMatch(profile: LeadPaymentProfile): boolean {
+  return !!profile.matchKey && STRONG_KEYS.includes(profile.matchKey);
+}
+
+/** Já tentado nesta sessão — evita repetir a escrita a cada remontagem. */
+const linkAttempted = new Set<string>();
+
+/** Grava o documento no contato do CRM. Devolve o que foi gravado, ou null. */
+export async function linkDocToContact(
+  contactId: string,
+  rawDoc: string | null | undefined,
+): Promise<string | null> {
+  const doc = normalizeDoc(rawDoc);
+  if (!doc) return null;
+  const ok = await dbContactActions.update(contactId, { doc });
+  return ok ? doc : null;
+}
+
+/**
+ * Preenche `contacts.doc` sozinho quando o cruzamento identificou o comprador
+ * por uma chave forte e o contato ainda não tinha documento.
+ *
+ * O ganho não é cosmético: o documento é a chave PRINCIPAL da cascata
+ * (migração 0048). Uma vez preso ao contato, os cruzamentos seguintes deixam de
+ * depender de telefone/e-mail, que mudam.
+ *
+ * Nunca sobrescreve documento já preenchido — o que está no cadastro foi
+ * decisão de alguém.
+ */
+async function autoLinkDoc(contact: Contact, profile: LeadPaymentProfile): Promise<void> {
+  if (contact.doc?.trim()) return;
+  if (!isStrongMatch(profile)) return;
+  const doc = guruDoc(profile);
+  if (!doc) return;
+  const key = `${contact.id}:${doc}`;
+  if (linkAttempted.has(key)) return;
+  linkAttempted.add(key);
+  await linkDocToContact(contact.id, doc);
 }

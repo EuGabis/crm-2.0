@@ -11,6 +11,7 @@ import {
   Repeat,
   ShieldQuestion,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -21,6 +22,9 @@ import {
 import { GuruStatusBadge } from "@/components/payments/status-badge";
 import {
   attemptedKeys,
+  guruDoc,
+  isStrongMatch,
+  linkDocToContact,
   MATCH_KEY_LABEL,
   useLeadPaymentProfile,
   type LeadPaymentProfile,
@@ -62,7 +66,7 @@ const fmtDate = (v: string | null | undefined, withTime = false) =>
     : "—";
 
 /** Documento só de dígitos vindo da Guru fica ilegível; formata CPF/CNPJ. */
-function formatDoc(raw: string | null | undefined): string {
+export function formatDoc(raw: string | null | undefined): string {
   const d = (raw ?? "").replace(/\D/g, "");
   if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
   if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
@@ -141,6 +145,44 @@ function SubDialog({ sub, onClose }: { sub: LeadSubscription | null; onClose: ()
   );
 }
 
+/**
+ * Casamento por NOME não grava o documento sozinho (homônimo existe) — aqui a
+ * pessoa confirma. Nas chaves fortes o vínculo já aconteceu sem perguntar, e
+ * este bloco nem aparece.
+ */
+function LinkDocButton({
+  contact,
+  profile,
+}: {
+  contact: Contact;
+  profile: LeadPaymentProfile;
+}) {
+  const [busy, setBusy] = useState(false);
+  const doc = guruDoc(profile);
+  if (contact.doc?.trim() || !doc || isStrongMatch(profile)) return null;
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5">
+      <p className="text-[11px] text-amber-900">
+        A Guru tem o documento <strong>{formatDoc(doc)}</strong> para este comprador. Como o
+        casamento saiu pelo nome, confirme que é a mesma pessoa antes de vincular.
+      </p>
+      <button
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          const saved = await linkDocToContact(contact.id, doc);
+          setBusy(false);
+          if (saved) toast.success("CPF/CNPJ vinculado ao contato");
+          else toast.error("Não foi possível vincular o documento");
+        }}
+        className="mt-1.5 rounded-md bg-amber-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
+      >
+        {busy ? "Vinculando..." : "Vincular ao contato"}
+      </button>
+    </div>
+  );
+}
+
 /** Rendering puro do perfil de pagamento (recebe o profile já carregado). */
 export function PaymentsProfileView({
   contact,
@@ -208,6 +250,8 @@ export function PaymentsProfileView({
           </span>
         )}
       </div>
+
+      <LinkDocButton contact={contact} profile={profile} />
 
       <div className="grid gap-2 sm:grid-cols-4">
         <Kpi
@@ -411,6 +455,8 @@ export function ContactPaymentsSummary({
           Casado por {MATCH_KEY_LABEL[profile.matchKey]}
         </Badge>
       </div>
+
+      <LinkDocButton contact={contact} profile={profile} />
 
       <div className="rounded-lg border bg-slate-50 p-2">
         <p className="text-[10px] text-slate-400">Total aprovado</p>
