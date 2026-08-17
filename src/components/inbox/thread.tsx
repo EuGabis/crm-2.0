@@ -59,11 +59,14 @@ function AssignPicker({ conversation }: { conversation: Conversation }) {
       toast.error("Não foi possível alterar o responsável");
       return;
     }
-    toast.success(
-      userId
-        ? `Atribuída a ${members.find((m) => m.userId === userId)?.name ?? "usuário"}`
-        : "Devolvida para a caixa do grupo"
+    // Registra quem transferiu para quem — vira evento inline na conversa (log).
+    const actor = members.find((m) => m.userId === me?.userId)?.name ?? "Alguém";
+    const target = userId ? members.find((m) => m.userId === userId)?.name ?? "usuário" : null;
+    void conversationActions.logEvent(
+      conversation.id,
+      target ? `${actor} transferiu a conversa para ${target}` : `${actor} removeu o responsável`
     );
+    toast.success(target ? `Atribuída a ${target}` : "Devolvida para a caixa do grupo");
   };
 
   return (
@@ -321,6 +324,18 @@ function ScheduleTag({ message }: { message: Message }) {
 function MessageBubble({ message }: { message: Message }) {
   if (message.type === "event") return <PipelineEvent message={message} />;
   const isOut = message.direction === "out";
+  // Rótulo explícito do rastreio (WhatsApp): aparece no hover do checkzinho, com
+  // a hora de entrega/leitura quando a Meta informou.
+  const at = (iso?: string) =>
+    iso ? " · " + format(new Date(iso), "dd/MM 'às' HH:mm", { locale: ptBR }) : "";
+  const statusLabel =
+    message.status === "read"
+      ? `Lido${at(message.readAt)}`
+      : message.status === "delivered"
+        ? `Entregue${at(message.deliveredAt)}`
+        : message.status === "failed"
+          ? "Falhou ao enviar"
+          : "Enviado";
   return (
     <div className={cn("flex", isOut ? "justify-end" : "justify-start")}>
       <div
@@ -355,7 +370,7 @@ function MessageBubble({ message }: { message: Message }) {
         >
           {format(new Date(message.at), "HH:mm")}
           {isOut && message.status && (
-            <span className="ml-1 inline-flex align-middle">
+            <span className="ml-1 inline-flex align-middle" title={statusLabel}>
               {message.status === "read" ? (
                 <CheckCheck className="size-3 text-sky-300" />
               ) : message.status === "delivered" ? (
