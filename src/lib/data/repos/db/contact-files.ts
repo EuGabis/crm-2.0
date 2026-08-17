@@ -7,27 +7,40 @@ import { useDbStore } from "./contacts";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
- * Comentários (notas internas) de um contato.
+ * Arquivos de um contato: as mensagens COM MÍDIA das conversas dele.
  *
- * O CRM nunca teve tabela de nota: o lugar onde a nota já é guardada é a
- * conversa, como mensagem com `internal = true` — é o que a ação `nota-interna`
- * das automações e o botão "Nota" do card do funil gravam. Criar uma segunda
- * casa para a mesma coisa faria a nota escrita num lugar não aparecer no outro.
+ * O CRM não tem tabela de "documento do contato" — arquivo aqui é anexo de
+ * conversa (bucket privado `conversation-media`, migração 0019). Inventar uma
+ * segunda casa faria o PDF enviado no atendimento não aparecer no painel de
+ * arquivos, que é justamente onde a pessoa vai procurar.
  *
- * A consulta aqui é PRÓPRIA e enxuta (as conversas do contato e só as mensagens
- * internas delas) em vez de reusar o store de Conversas, que carrega todas as
- * mensagens da empresa — caro demais para abrir um card.
+ * Consulta própria e enxuta, pelo mesmo motivo de `db/notes.ts`: o store de
+ * Conversas carrega todas as mensagens da empresa.
  */
 
-export interface ContactNote {
+export type FileOrigin = "interno" | "enviado" | "recebido";
+
+export interface ContactFile {
   id: string;
   conversationId: string;
-  body: string;
+  name: string;
+  mime: string | null;
+  size: number | null;
+  path: string;
+  type: string;
+  origin: FileOrigin;
   at: string;
 }
 
-export function useContactNotes(contactId: string | null | undefined, enabled = true) {
-  const [notes, setNotes] = useState<ContactNote[]>([]);
+export function formatFileSize(bytes: number | null): string {
+  if (!bytes || bytes <= 0) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function useContactFiles(contactId: string | null | undefined, enabled = true) {
+  const [files, setFiles] = useState<ContactFile[]>([]);
   const [loading, setLoading] = useState(false);
 
   const reload = useCallback(async () => {
@@ -37,13 +50,13 @@ export function useContactNotes(contactId: string | null | undefined, enabled = 
     // em continuacao de promise e a regra fica satisfeita.
     await useDbStore.getState().load();
     if (!contactId) {
-      setNotes([]);
+      setFiles([]);
       return;
     }
     setLoading(true);
     const loc = useDbStore.getState().locationId;
     if (!loc) {
-      setNotes([]);
+      setFiles([]);
       setLoading(false);
       return;
     }
@@ -55,22 +68,28 @@ export function useContactNotes(contactId: string | null | undefined, enabled = 
       .eq("contact_id", contactId);
     const ids = (convs ?? []).map((c: any) => c.id);
     if (ids.length === 0) {
-      setNotes([]);
+      setFiles([]);
       setLoading(false);
       return;
     }
     const { data } = await supabase
       .from("messages")
-      .select("id, conversation_id, body, created_at")
+      .select("id, conversation_id, type, body, internal, direction, media_path, media_name, media_mime, media_size, created_at")
       .in("conversation_id", ids)
-      .eq("internal", true)
+      .not("media_path", "is", null)
       .order("created_at", { ascending: false })
-      .limit(100);
-    setNotes(
+      .limit(200);
+    setFiles(
       (data ?? []).map((m: any) => ({
         id: m.id,
         conversationId: m.conversation_id,
-        body: m.body ?? "",
+        // Áudio gravado no navegador não tem nome de arquivo útil.
+        name: m.media_name || m.body || "Arquivo",
+        mime: m.media_mime ?? null,
+        size: m.media_size ?? null,
+        path: m.media_path,
+        type: m.type,
+        origin: m.internal ? "interno" : m.direction === "in" ? "recebido" : "enviado",
         at: m.created_at,
       })),
     );
@@ -86,5 +105,5 @@ export function useContactNotes(contactId: string | null | undefined, enabled = 
     void reload();
   }, [enabled, reload]);
 
-  return { notes, loading, reload };
+  return { files, loading, reload };
 }
