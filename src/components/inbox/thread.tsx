@@ -462,6 +462,9 @@ export function Thread({
   const callContact = useWebphone((s) => s.callContact);
   const { isAdmin } = useMyMembership();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const pinnedRef = useRef(true);
   const [confirmOpen, setConfirmOpen] = useState(false);
   /**
    * Confirmação de finalizar/arquivar. Só a ida pede confirmação: reabrir e
@@ -487,9 +490,41 @@ export function Thread({
     toast.success(confirmStatus === "finalizar" ? "Conversa finalizada" : "Conversa arquivada");
   };
 
+  const jumpToBottom = () => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  };
+
+  // Abrir/trocar de conversa: cai DIRETO no fim, sem animação. (Antes era
+  // scrollIntoView "smooth", que dava a impressão de a conversa "subir".)
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    pinnedRef.current = true;
+    requestAnimationFrame(() => {
+      jumpToBottom();
+      requestAnimationFrame(jumpToBottom);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId]);
+
+  // Mensagem nova: só puxa pro fim se o usuário já estava no fim (não atrapalha
+  // quem está lendo o histórico).
+  useEffect(() => {
+    if (pinnedRef.current) jumpToBottom();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length]);
+
+  // Conteúdo que cresce DEPOIS (imagem/vídeo/documento carregando) reancora no
+  // fim — antes a imagem carregava, empurrava tudo e a view ficava pra cima.
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      if (pinnedRef.current) jumpToBottom();
+    });
+    ro.observe(content);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (!conversation || !contact) return null;
 
@@ -702,7 +737,15 @@ export function Thread({
         </div>
       </div>
       <StatusBanner conversation={conversation} />
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-slate-50 p-4 [scrollbar-width:thin]">
+      <div
+        ref={scrollRef}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+        }}
+        className="min-h-0 flex-1 overflow-y-auto bg-slate-50 p-4 [scrollbar-width:thin]"
+      >
+        <div ref={contentRef} className="space-y-2">
         {messages.map((m) => {
           const day = format(new Date(m.at), "d 'de' MMMM", { locale: ptBR });
           const showDay = day !== lastDay;
@@ -720,7 +763,8 @@ export function Thread({
             </div>
           );
         })}
-        <div ref={bottomRef} />
+          <div ref={bottomRef} />
+        </div>
       </div>
     </div>
   );
