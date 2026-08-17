@@ -36,12 +36,6 @@ import {
   useMediaUsage,
   type MediaFile,
 } from "@/lib/data/repos/db/media";
-import {
-  mediaConnectionActions,
-  useMediaConnections,
-  type ExternalItem,
-  type MediaProvider,
-} from "@/lib/data/repos/db/media-connections";
 import { driveActions, useDriveItems } from "@/lib/data/repos/db/media-drive";
 import { DrivePicker } from "@/components/media/drive-picker";
 import { cn } from "@/lib/utils";
@@ -58,7 +52,7 @@ export default function MidiaPage() {
   );
 }
 
-type Tab = "arquivos" | "google_drive" | "canva";
+type Tab = "arquivos" | "google_drive";
 
 function iconFor(mime: string | null, name: string) {
   const m = mime ?? "";
@@ -72,29 +66,19 @@ function iconFor(mime: string | null, name: string) {
 
 function MidiaPageInner() {
   const params = useSearchParams();
-  const { isAdmin } = useMyMembership();
   const { folders, files, loading } = useMedia();
   const usage = useMediaUsage();
-  const { connections, reload: reloadConnections } = useMediaConnections();
   const [tab, setTab] = useState<Tab>("arquivos");
   const [folderId, setFolderId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const connected = (p: MediaProvider) => connections.some((c) => c.provider === p);
-
-  // Volta do OAuth: o callback redireciona para /midia?connected=... | error=...
+  // O Google Drive é escolhido pelo Picker, no navegador — não há mais volta de
+  // OAuth para tratar aqui. Fica só o erro, que a URL ainda pode trazer.
   useEffect(() => {
-    const ok = params.get("connected");
     const err = params.get("error");
-    if (ok) {
-      toast.success(ok === "canva" ? "Canva conectado" : "Google Drive conectado");
-      void reloadConnections();
-      setTab(ok === "canva" ? "canva" : "google_drive");
-    } else if (err) {
-      toast.error(`Não foi possível conectar: ${err}`);
-    }
+    if (err) toast.error(`Não foi possível conectar: ${err}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params]);
 
@@ -154,7 +138,7 @@ function MidiaPageInner() {
         <div>
           <h1 className="text-lg font-bold text-slate-900">Armazenamento de mídia</h1>
           <p className="text-xs text-slate-500">
-            Arquivos da empresa no CRM, mais Google Drive e Canva conectados
+            Arquivos da empresa no CRM, mais os arquivos do Google Drive
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -202,7 +186,6 @@ function MidiaPageInner() {
           [
             ["arquivos", `Meus arquivos${files.length ? ` (${files.length})` : ""}`],
             ["google_drive", "Google Drive"],
-            ["canva", "Canva"],
           ] as const
         ).map(([key, label]) => (
           <button
@@ -216,9 +199,6 @@ function MidiaPageInner() {
             )}
           >
             {label}
-            {key === "canva" && connected("canva") && (
-              <span className="ml-1.5 inline-block size-1.5 rounded-full bg-emerald-500" />
-            )}
           </button>
         ))}
       </div>
@@ -409,15 +389,8 @@ function MidiaPageInner() {
             os links de visualização expiram em 1 hora.
           </p>
         </>
-      ) : tab === "google_drive" ? (
-        <DriveTab />
       ) : (
-        <ExternalTab
-          provider="canva"
-          isAdmin={isAdmin}
-          connection={connections.find((c) => c.provider === "canva") ?? null}
-          onChanged={reloadConnections}
-        />
+        <DriveTab />
       )}
     </div>
   );
@@ -520,172 +493,6 @@ function DriveTab() {
                   </button>
                 </div>
               </div>
-            );
-          })}
-        </div>
-      )}
-    </>
-  );
-}
-
-const PROVIDER_LABEL: Record<MediaProvider, string> = {
-  google_drive: "Google Drive",
-  canva: "Canva",
-};
-
-function ExternalTab({
-  provider,
-  isAdmin,
-  connection,
-  onChanged,
-}: {
-  provider: MediaProvider;
-  isAdmin: boolean;
-  connection: { accountLabel: string | null; connectedAt: string } | null;
-  onChanged: () => void;
-}) {
-  const [items, setItems] = useState<ExternalItem[]>([]);
-  const [query, setQuery] = useState("");
-  const [state, setState] = useState<{ loading: boolean; error?: string }>({ loading: false });
-
-  useEffect(() => {
-    if (!connection) {
-      setItems([]);
-      return;
-    }
-    let active = true;
-    setState({ loading: true });
-    void mediaConnectionActions.list(provider, query).then((res) => {
-      if (!active) return;
-      setItems(res.items);
-      setState({ loading: false, error: res.error });
-    });
-    return () => {
-      active = false;
-    };
-    // Busca só quando o termo assenta (a lista vem da API do provedor).
-  }, [provider, connection, query]);
-
-  if (!connection) {
-    return (
-      <div className="rounded-xl border bg-white p-8 text-center">
-        <span className="mx-auto mb-3 flex size-10 items-center justify-center rounded-lg bg-slate-100">
-          {provider === "canva" ? (
-            <Palette className="size-5 text-slate-500" />
-          ) : (
-            <Plug className="size-5 text-slate-500" />
-          )}
-        </span>
-        <p className="text-sm font-semibold text-slate-800">
-          {PROVIDER_LABEL[provider]} não conectado
-        </p>
-        <p className="mx-auto mt-1 max-w-md text-xs text-slate-500">
-          {provider === "canva"
-            ? "Conecte para listar seus designs e abrir no editor do Canva sem sair do CRM."
-            : "Conecte para listar e abrir os arquivos do Drive da empresa. Somente leitura — o CRM nunca altera nada lá."}
-        </p>
-        {isAdmin ? (
-          <a href={mediaConnectionActions.startPath(provider)}>
-            <Button size="sm" className="mt-4 h-8 gap-1.5 text-xs">
-              <Plug className="size-3.5" /> Conectar {PROVIDER_LABEL[provider]}
-            </Button>
-          </a>
-        ) : (
-          <p className="mt-4 text-[11px] text-amber-600">
-            Apenas administradores conectam integrações.
-          </p>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-white px-3 py-2">
-        <p className="text-[11px] text-slate-500">
-          <span className="font-semibold text-slate-700">{PROVIDER_LABEL[provider]}</span> ·{" "}
-          {connection.accountLabel ?? "conta conectada"} · desde{" "}
-          {format(new Date(connection.connectedAt), "dd MMM yyyy", { locale: ptBR })}
-        </p>
-        <div className="flex items-center gap-2">
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar"
-            className="h-7 w-40 text-xs"
-          />
-          {isAdmin && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-[11px] text-red-600 hover:text-red-700"
-              onClick={async () => {
-                if (!window.confirm(`Desconectar o ${PROVIDER_LABEL[provider]}?`)) return;
-                const res = await mediaConnectionActions.disconnect(provider);
-                if (res.ok) {
-                  toast.success(`${PROVIDER_LABEL[provider]} desconectado`);
-                  onChanged();
-                } else {
-                  toast.error(res.error ?? "Não foi possível desconectar");
-                }
-              }}
-            >
-              Desconectar
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {state.loading ? (
-        <p className="rounded-xl border bg-white p-8 text-center text-xs text-slate-400">
-          Carregando de {PROVIDER_LABEL[provider]}...
-        </p>
-      ) : state.error ? (
-        <p className="rounded-xl border border-red-200 bg-red-50 p-8 text-center text-xs text-red-600">
-          {state.error}
-        </p>
-      ) : items.length === 0 ? (
-        <p className="rounded-xl border bg-white p-8 text-center text-xs text-slate-400">
-          Nada encontrado em {PROVIDER_LABEL[provider]}.
-        </p>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {items.map((item) => {
-            const Icon = iconFor(item.mime, item.name);
-            return (
-              <a
-                key={item.id}
-                href={item.url ?? "#"}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex flex-col rounded-xl border bg-white p-3 hover:border-indigo-300"
-              >
-                <span className="flex h-24 items-center justify-center overflow-hidden rounded-lg bg-slate-100">
-                  {item.thumbnail ? (
-                    // Miniatura vem do provedor (Drive/Canva). `img` cru em vez
-                    // de next/image: são hosts externos e variáveis, e a lista
-                    // muda a cada busca.
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={item.thumbnail}
-                      alt={item.name}
-                      className="size-full object-cover"
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <Icon className="size-8 text-slate-400" />
-                  )}
-                </span>
-                <span className="mt-2 flex items-center gap-1 truncate text-xs font-medium text-slate-700">
-                  <span className="truncate">{item.name}</span>
-                  <ExternalLink className="size-3 shrink-0 text-slate-300" />
-                </span>
-                {item.updatedAt && (
-                  <span className="text-[10px] text-slate-400">
-                    {format(new Date(item.updatedAt), "dd MMM yyyy", { locale: ptBR })}
-                  </span>
-                )}
-              </a>
             );
           })}
         </div>
