@@ -463,6 +463,29 @@ export function Thread({
   const { isAdmin } = useMyMembership();
   const bottomRef = useRef<HTMLDivElement>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  /**
+   * Confirmação de finalizar/arquivar. Só a ida pede confirmação: reabrir e
+   * desarquivar devolvem a conversa para a caixa, não custam nada a quem
+   * clicou sem querer — perguntar ali seria atrito puro.
+   */
+  const [confirmStatus, setConfirmStatus] = useState<"finalizar" | "arquivar" | null>(null);
+  const [statusBusy, setStatusBusy] = useState(false);
+
+  const applyStatus = async () => {
+    if (!conversation || !confirmStatus) return;
+    setStatusBusy(true);
+    const ok =
+      confirmStatus === "finalizar"
+        ? await conversationActions.close(conversation.id, true)
+        : await conversationActions.archive(conversation.id, true);
+    setStatusBusy(false);
+    setConfirmStatus(null);
+    if (!ok) {
+      toast.error("Não foi possível atualizar a conversa");
+      return;
+    }
+    toast.success(confirmStatus === "finalizar" ? "Conversa finalizada" : "Conversa arquivada");
+  };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -502,13 +525,17 @@ export function Thread({
           </button>
           <button
             onClick={async () => {
-              const done = !conversation.closedAt;
-              const ok = await conversationActions.close(conversation.id, done);
+              // Reabrir vai direto; finalizar passa pela confirmação.
+              if (!conversation.closedAt) {
+                setConfirmStatus("finalizar");
+                return;
+              }
+              const ok = await conversationActions.close(conversation.id, false);
               if (!ok) {
                 toast.error("Não foi possível atualizar a conversa");
                 return;
               }
-              toast.success(done ? "Conversa finalizada" : "Conversa reaberta");
+              toast.success("Conversa reaberta");
             }}
             title={
               conversation.closedAt
@@ -527,13 +554,16 @@ export function Thread({
           </button>
           <button
             onClick={async () => {
-              const archived = !conversation.archivedAt;
-              const ok = await conversationActions.archive(conversation.id, archived);
+              if (!conversation.archivedAt) {
+                setConfirmStatus("arquivar");
+                return;
+              }
+              const ok = await conversationActions.archive(conversation.id, false);
               if (!ok) {
                 toast.error("Não foi possível atualizar a conversa");
                 return;
               }
-              toast.success(archived ? "Conversa arquivada" : "Conversa desarquivada");
+              toast.success("Conversa desarquivada");
             }}
             title={
               conversation.archivedAt
@@ -583,6 +613,57 @@ export function Thread({
               <Trash2 className="size-4" />
             </button>
           )}
+          <Dialog
+            open={confirmStatus !== null}
+            onOpenChange={(o) => !o && setConfirmStatus(null)}
+          >
+            <DialogContent className="sm:max-w-sm">
+              <DialogHeader>
+                <DialogTitle>
+                  {confirmStatus === "arquivar" ? "Arquivar conversa?" : "Finalizar conversa?"}
+                </DialogTitle>
+              </DialogHeader>
+              <p className="text-xs leading-relaxed text-slate-500">
+                {confirmStatus === "arquivar" ? (
+                  <>
+                    A conversa com{" "}
+                    <strong className="text-slate-800">{contactName(contact)}</strong> sai da
+                    caixa de entrada. <strong className="text-slate-800">Nada é excluído</strong>{" "}
+                    — ela continua na aba Arquivadas, e volta sozinha se o cliente responder.
+                  </>
+                ) : (
+                  <>
+                    O atendimento de{" "}
+                    <strong className="text-slate-800">{contactName(contact)}</strong> passa a
+                    contar como resolvido e vai para a aba Finalizadas. Dá para reabrir a
+                    qualquer momento, e uma nova mensagem do cliente reabre sozinha.
+                  </>
+                )}
+              </p>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={() => setConfirmStatus(null)}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-8 text-xs"
+                  disabled={statusBusy}
+                  onClick={() => void applyStatus()}
+                >
+                  {statusBusy
+                    ? "Aguarde..."
+                    : confirmStatus === "arquivar"
+                      ? "Arquivar"
+                      : "Finalizar"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
           <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
             <DialogContent className="sm:max-w-sm">
               <DialogHeader>
