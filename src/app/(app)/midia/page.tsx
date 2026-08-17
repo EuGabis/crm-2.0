@@ -41,6 +41,7 @@ import {
   useMediaConnections,
   type ExternalItem,
   type MediaProvider,
+  type MediaSetup,
 } from "@/lib/data/repos/db/media-connections";
 import { cn } from "@/lib/utils";
 
@@ -438,6 +439,20 @@ function ExternalTab({
   const [items, setItems] = useState<ExternalItem[]>([]);
   const [query, setQuery] = useState("");
   const [state, setState] = useState<{ loading: boolean; error?: string }>({ loading: false });
+  const [setup, setSetup] = useState<MediaSetup | null>(null);
+
+  // Só para admin e só quando ainda não conectou: é aí que a informação de
+  // configuração (URI a cadastrar, env faltando) resolve alguma coisa.
+  useEffect(() => {
+    if (connection || !isAdmin) return;
+    let active = true;
+    void mediaConnectionActions.setup().then((s) => {
+      if (active) setSetup(s);
+    });
+    return () => {
+      active = false;
+    };
+  }, [connection, isAdmin]);
 
   useEffect(() => {
     if (!connection) {
@@ -476,11 +491,41 @@ function ExternalTab({
             : "Conecte para listar e abrir os arquivos do Drive da empresa. Somente leitura — o CRM nunca altera nada lá."}
         </p>
         {isAdmin ? (
-          <a href={mediaConnectionActions.startPath(provider)}>
-            <Button size="sm" className="mt-4 h-8 gap-1.5 text-xs">
-              <Plug className="size-3.5" /> Conectar {PROVIDER_LABEL[provider]}
-            </Button>
-          </a>
+          <>
+            {setup && !setup[provider].configured ? (
+              <div className="mx-auto mt-4 max-w-md rounded-lg border border-amber-200 bg-amber-50 p-3 text-left">
+                <p className="text-[11px] font-semibold text-amber-800">
+                  Falta configurar no servidor
+                </p>
+                <p className="mt-1 text-[11px] text-amber-700">
+                  {provider === "canva"
+                    ? "Defina CANVA_CLIENT_ID e CANVA_CLIENT_SECRET (Vercel + .env.local), criando o app no Canva Developers."
+                    : "Defina GOOGLE_OAUTH_CLIENT_ID e GOOGLE_OAUTH_CLIENT_SECRET e ative a Google Drive API no projeto."}
+                </p>
+              </div>
+            ) : (
+              <a href={mediaConnectionActions.startPath(provider)}>
+                <Button size="sm" className="mt-4 h-8 gap-1.5 text-xs">
+                  <Plug className="size-3.5" /> Conectar {PROVIDER_LABEL[provider]}
+                </Button>
+              </a>
+            )}
+            {setup && (
+              <div className="mx-auto mt-3 max-w-md rounded-lg border bg-slate-50 p-3 text-left">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  URI de redirecionamento a cadastrar no {PROVIDER_LABEL[provider]}
+                </p>
+                <code className="mt-1 block break-all text-[11px] text-slate-700">
+                  {setup.redirectUri}
+                </code>
+                <p className="mt-1 text-[10px] text-slate-400">
+                  Tem que ser idêntica — `redirect_uri_mismatch` é sempre divergência aqui. Ela
+                  vem de NEXT_PUBLIC_APP_URL ({setup.appUrl ?? "não definida"}), então cadastre
+                  também a de localhost se você testa local.
+                </p>
+              </div>
+            )}
+          </>
         ) : (
           <p className="mt-4 text-[11px] text-amber-600">
             Apenas administradores conectam integrações.
