@@ -32,7 +32,7 @@ import {
   useInboxViews,
   useRealtimeStatus,
 } from "@/lib/data/repos/db/conversations";
-import { useMyMembership } from "@/lib/data/repos/db/team";
+import { useMyMembership, useTeam } from "@/lib/data/repos/db/team";
 import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
 import { cn } from "@/lib/utils";
 import { SORT_OPTIONS, scopeLabel, statusLabel, useInboxUi } from "./inbox-filters";
@@ -78,11 +78,14 @@ export function ConversationList({
   // Filtro por NÚMERO: separa as caixas dos dois números pra não colidirem.
   // null = todos os números.
   const [channelFilter, setChannelFilter] = useState<string | null>(null);
+  // Filtro por RESPONSÁVEL (só admin): "__none__" = sem responsável.
+  const [userFilter, setUserFilter] = useState<string | null>(null);
   const { channels } = useWhatsappChannels();
   const all = useConversations(filter);
   const { contacts } = useDbContacts();
   const realtime = useRealtimeStatus();
-  const { me } = useMyMembership();
+  const { me, isAdmin } = useMyMembership();
+  const { members } = useTeam();
   // Não lidas que ainda pedem ação: finalizada ou arquivada não conta.
   const unreadCount = useConversations("unread").filter(
     (c) => !c.closedAt && !c.archivedAt
@@ -122,8 +125,11 @@ export function ConversationList({
           : byStatus;
     // Separa por número quando um está selecionado.
     if (channelFilter) list = list.filter((c) => c.channelId === channelFilter);
+    // Filtro por responsável (admin): "__none__" = sem responsável.
+    if (userFilter === "__none__") list = list.filter((c) => !c.assignedTo);
+    else if (userFilter) list = list.filter((c) => c.assignedTo === userFilter);
     return list;
-  }, [all, status, scope, me?.userId, automatedIds, channelFilter]);
+  }, [all, status, scope, me?.userId, automatedIds, channelFilter, userFilter]);
 
   const sorted =
     sort === "Maior atraso de SLA"
@@ -327,6 +333,52 @@ export function ConversationList({
                     {c.name}
                     {c.phoneE164 ? ` · ${c.phoneE164}` : ""}
                   </span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
+      {isAdmin && members.length > 0 && (
+        <div className="flex items-center gap-1.5 border-b px-2 py-1.5">
+          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            Responsável
+          </span>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <button className="flex min-w-0 flex-1 items-center justify-between gap-1 rounded-md border px-2 py-1 text-[11px] hover:bg-slate-50" />
+              }
+            >
+              <span className="truncate text-slate-700">
+                {userFilter === "__none__"
+                  ? "Sem responsável"
+                  : userFilter
+                    ? members.find((m) => m.userId === userFilter)?.name ?? "Responsável"
+                    : "Todos"}
+              </span>
+              <ChevronDown className="size-3 shrink-0 text-slate-400" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="max-h-72 w-60 overflow-y-auto">
+              <DropdownMenuItem
+                className={cn("text-xs", !userFilter && "font-bold text-indigo-600")}
+                onClick={() => setUserFilter(null)}
+              >
+                Todos
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className={cn("text-xs", userFilter === "__none__" && "font-bold text-indigo-600")}
+                onClick={() => setUserFilter("__none__")}
+              >
+                Sem responsável
+              </DropdownMenuItem>
+              {members.map((m) => (
+                <DropdownMenuItem
+                  key={m.userId}
+                  className={cn("text-xs", userFilter === m.userId && "font-bold text-indigo-600")}
+                  onClick={() => setUserFilter(m.userId)}
+                >
+                  {m.name}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
