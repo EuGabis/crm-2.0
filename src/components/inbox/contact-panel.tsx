@@ -35,6 +35,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { ContactPaymentsSummary } from "@/components/payments/lead-payments-panel";
 import { SendToPipelineDialog } from "./send-to-pipeline-dialog";
 import { contactName } from "@/lib/data/repos/contacts";
 import { useDbContact, useDbTeam } from "@/lib/data/repos/db/contacts";
@@ -243,6 +244,11 @@ export function ContactPanel({
   const [tab, setTab] = useState<"todos" | "dnd" | "acoes">("todos");
   const [fileTab, setFileTab] = useState("Todos");
   const [pipelineOpen, setPipelineOpen] = useState(false);
+  // Seções abertas do acordeão. Controlado (e não `defaultValue`) porque
+  // "Resumo pagamentos" só consulta a Guru quando o usuário abre a seção.
+  const [sections, setSections] = useState<string[]>(["contato", "custom"]);
+  const { can } = useMyMembership();
+  const canPayments = can("pagamentos");
   const { contact } = useDbContact(contactId);
   const team = useDbTeam();
   const { pipelines, opportunities: allOpps } = usePipelineDb();
@@ -312,7 +318,7 @@ export function ContactPanel({
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-3 [scrollbar-width:thin]">
               {tab === "todos" && (
-                <Accordion defaultValue={["contato", "custom"]}>
+                <Accordion value={sections} onValueChange={(v) => setSections(v as string[])}>
                   <AccordionItem value="contato">
                     <AccordionTrigger className="py-2 text-xs font-bold">Contato</AccordionTrigger>
                     <AccordionContent className="space-y-2">
@@ -321,6 +327,7 @@ export function ContactPanel({
                         ["Sobrenome", contact.lastName],
                         ["E-mail", contact.email],
                         ["Telefone", contact.phone],
+                        ["CPF/CNPJ", contact.doc || "—"],
                         ["Empresa", contact.company ?? "—"],
                       ].map(([k, v]) => (
                         <div key={k}>
@@ -343,6 +350,22 @@ export function ContactPanel({
                       ))}
                     </AccordionContent>
                   </AccordionItem>
+                  {/* Só existe para quem enxerga o módulo Pagamentos. */}
+                  {canPayments && (
+                    <AccordionItem value="pagamentos">
+                      <AccordionTrigger className="py-2 text-xs font-bold">
+                        Resumo pagamentos
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        {/* Montado só quando a seção está aberta: o cruzamento com
+                            a Guru é uma consulta, e ela não deve rodar a cada
+                            conversa que o atendente abre. */}
+                        {sections.includes("pagamentos") && (
+                          <ContactPaymentsSummary contact={contact} />
+                        )}
+                      </AccordionContent>
+                    </AccordionItem>
+                  )}
                 </Accordion>
               )}
               {tab === "dnd" && (

@@ -444,6 +444,23 @@ sugerir que o cliente nunca comprou.
 - `GuruStatusBadge`/`guruStatusBadgeClass` saíram de `pagamentos/page.tsx` para
   `src/components/payments/status-badge.tsx` (duas cópias da tabela de cores
   divergiriam).
+- **Onde o mesmo cruzamento aparece** (tudo em
+  `src/components/payments/lead-payments-panel.tsx`, um componente só para não
+  divergirem): `PaymentsProfileView` (visão larga) no detalhe do lead,
+  `ContactPaymentsPanel` no cadastro do contato e `ContactPaymentsSummary` na
+  **barra lateral das Conversas** (seção "Resumo pagamentos", abaixo de Campos
+  personalizados) — esta última é enxuta de propósito: a barra tem ~300 px, e a
+  grade de 4 KPIs com tabela de 4 colunas vira um amontoado ilegível ali.
+  Mostra assinaturas + as 3 compras mais recentes + "Ver detalhes completos".
+- O acordeão da barra lateral é **controlado**: "Resumo pagamentos" só monta (e
+  só consulta a Guru) quando o usuário abre a seção — senão seria uma consulta
+  por conversa aberta, o dia inteiro.
+- **`/pagamentos` aceita `?tab=<aba>&busca=<termo>`** (a aba só é aceita se
+  existir em `TABS`; URL torta não pode deixar a página em branco). É o destino
+  do "Ver detalhes completos", que manda o e-mail do comprador — sem isso o
+  atalho cairia numa lista de 7 mil contatos para o usuário procurar à mão.
+  `useSearchParams` obrigou o limite de `Suspense` na página (mesmo padrão de
+  `/leads`).
 - Sem env nova. Spec: `docs/superpowers/specs/2026-08-17-lead-detalhe-design.md`.
 
 ## WhatsApp — Meta Cloud API (número real, inbox de 2 vias)
