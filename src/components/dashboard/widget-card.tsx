@@ -72,10 +72,12 @@ export function WidgetCard({
       (selected?.name ?? pipelines[0]?.name ?? "Pipeline");
 
   return (
-    <div className="flex h-full flex-col rounded-xl border bg-white p-4 shadow-sm">
+    // rounded-2xl + borda mais clara + leve elevação no hover: o cartão deixa de
+    // ser uma caixa de contorno duro e ganha o ar de painel moderno.
+    <div className="flex h-full flex-col rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
       <div className="mb-3 flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="text-[13px] font-semibold text-slate-800">{title}</h3>
+          <h3 className="text-[13px] font-semibold tracking-tight text-slate-900">{title}</h3>
           {subtitle && <p className="mt-0.5 text-[10px] leading-tight text-slate-400">{subtitle}</p>}
         </div>
         {onPipelineChange && (
@@ -107,7 +109,7 @@ export function WidgetCard({
 /** Vazio de widget: dizer que não há dado NO PERÍODO evita ler gráfico vazio como bug. */
 export function WidgetEmpty({ text }: { text: string }) {
   return (
-    <div className="flex h-[150px] flex-col items-center justify-center gap-1 text-center">
+    <div className="flex h-[150px] flex-col items-center justify-center gap-1 rounded-xl bg-slate-50/70 text-center">
       <p className="text-xs font-medium text-slate-500">Nada no período</p>
       <p className="max-w-[220px] text-[11px] text-slate-400">{text}</p>
     </div>

@@ -889,6 +889,18 @@ os módulos ainda não migrados continuam importando dos repos mock em
   3. **O eixo de "Valor de Oportunidade" virava "R$0K" em todos os traços**
      (dividia por mil e arredondava). Agora usa `shortBRL`, que serve tanto
      R$ 4 quanto R$ 3,4 mi.
+  **Visual:** faixa de **KPIs** no topo (oportunidades, receita ganha, conversão
+  e ticket médio) com número grande e um fiapo de gráfico acumulado do próprio
+  indicador — gráfico responde "como está distribuído", nunca "como estamos", e
+  esses quatro números viviam espalhados em rodapé de card ou não existiam. A
+  faixa fica FORA do catálogo de widgets de propósito: é resumo do mesmo recorte
+  e vale para qualquer painel, inclusive os de departamento; no catálogo, cada
+  painel já salvo precisaria ser reconfigurado à mão para ganhá-la. Cartões com
+  `rounded-2xl`, borda mais clara e elevação no hover; barras do funil com
+  degradê da própria cor da fase. Mantido o TEMA CLARO — o exemplo de referência
+  era escuro, mas o CRM inteiro é claro (sidebar grafite + conteúdo claro) e uma
+  tela escura sozinha destoaria; dark mode segue no backlog como mudança
+  transversal.
   Mais: subtítulo em cada card dizendo o que o número é, centro das roscas com
   rótulo ("oportunidades", "no pipeline"), colunas do funil renomeadas para
   "% da 1ª fase" / "% da fase anterior", fases vazias aparecendo em cinza na

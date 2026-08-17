@@ -8,6 +8,7 @@ import { CustomizeDialog } from "@/components/dashboard/customize-dialog";
 import { DashboardSwitcher } from "@/components/dashboard/dashboard-switcher";
 import { DateFilter } from "@/components/dashboard/date-filter";
 import { DashboardRangeHint, DashboardRangeProvider } from "@/components/dashboard/date-range";
+import { KpiStrip } from "@/components/dashboard/kpi-strip";
 import { DashboardWidget } from "@/components/dashboard/widget-renderer";
 import {
   DEFAULT_WIDGETS,
@@ -105,6 +106,9 @@ export default function DashboardPage() {
           </div>
         </div>
         <DashboardRangeHint />
+        {/* Resumo em números antes dos gráficos: gráfico responde "como está
+            distribuído", nunca "como estamos". */}
+        <KpiStrip />
         {readOnly && (
           <p className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
             Painel do departamento — montado por um administrador. Para ter um seu, use
@@ -113,7 +117,7 @@ export default function DashboardPage() {
         )}
         {/* items-stretch + h-full nos cards: sem isso, cards da mesma linha
             ficavam com alturas diferentes conforme o gráfico de dentro. */}
-        <div className="grid items-stretch gap-4 md:grid-cols-6">
+        <div className="grid items-stretch gap-3 md:grid-cols-6">
           {widgets.map((w, i) => (
             <DashboardWidget
               key={`${w.key}-${i}`}

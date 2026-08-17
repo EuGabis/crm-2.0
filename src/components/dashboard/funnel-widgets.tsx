@@ -69,8 +69,13 @@ export function FunnelWidget(props: WidgetPipelineProps = {}) {
                     })
                   }
                   title={`Ver as ${r.count} oportunidade${r.count === 1 ? "" : "s"} desta fase`}
-                  className="flex h-9 min-w-[120px] cursor-pointer flex-col justify-center rounded px-2 text-left transition-opacity hover:opacity-85"
-                  style={{ width: `${Math.max(18, (r.count / max) * 100)}%`, background: r.stage.color }}
+                  className="flex h-10 min-w-[128px] cursor-pointer flex-col justify-center rounded-lg px-2.5 text-left shadow-sm transition-transform hover:scale-[1.01]"
+                  style={{
+                    width: `${Math.max(18, (r.count / max) * 100)}%`,
+                    // Degradê leve no sentido da barra: dá profundidade sem
+                    // inventar cor nova (a cor da fase continua sendo a base).
+                    backgroundImage: `linear-gradient(90deg, ${r.stage.color}, ${r.stage.color}cc)`,
+                  }}
                 >
                   <span className="truncate text-[10px] font-bold leading-tight text-white">
                     {r.stage.name}
