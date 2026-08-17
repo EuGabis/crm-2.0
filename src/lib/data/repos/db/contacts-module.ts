@@ -20,6 +20,8 @@ export interface DbTask {
   contactId: string | null;
   assigneeId: string | null;
   dueAt: string | null;
+  /** Minutos antes do prazo para o CRM avisar; null = sem lembrete (0050). */
+  reminderMinutes: number | null;
   status: "pending" | "done";
   createdAt: string;
 }
@@ -67,6 +69,7 @@ const mapTask = (r: any): DbTask => ({
   contactId: r.contact_id,
   assigneeId: r.assignee_id,
   dueAt: r.due_at,
+  reminderMinutes: r.reminder_minutes ?? null,
   status: r.status,
   createdAt: r.created_at,
 });
@@ -189,6 +192,7 @@ export const taskActions = {
     contactId: string | null;
     assigneeId: string | null;
     dueAt: string | null;
+    reminderMinutes?: number | null;
   }): Promise<boolean> {
     const loc = locationId();
     if (!loc) return false;
@@ -201,6 +205,7 @@ export const taskActions = {
         contact_id: input.contactId,
         assignee_id: input.assigneeId,
         due_at: input.dueAt,
+        reminder_minutes: input.reminderMinutes ?? null,
       })
       .select()
       .single();

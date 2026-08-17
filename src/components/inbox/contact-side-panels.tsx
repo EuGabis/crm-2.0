@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
+  Bell,
   CalendarDays,
   CheckSquare,
   Download,
@@ -19,6 +20,13 @@ import {
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { appointmentActions, useDbAppointments } from "@/lib/data/repos/db/appointments";
 import { useDbStore } from "@/lib/data/repos/db/contacts";
@@ -121,6 +129,22 @@ export function SmallEmpty({
   );
 }
 
+/**
+ * Antecedência do lembrete da tarefa (migração 0050). Espelha a lista dos
+ * compromissos em /calendarios — mesma cabeça, mesmas opções.
+ * `Select` do Base UI não aceita item com value vazio, daí o sentinela.
+ */
+const NO_REMINDER = "__none__";
+const TASK_REMINDERS: { value: string; label: string }[] = [
+  { value: NO_REMINDER, label: "Sem lembrete" },
+  { value: "0", label: "Na hora do prazo" },
+  { value: "15", label: "15 minutos antes" },
+  { value: "30", label: "30 minutos antes" },
+  { value: "60", label: "1 hora antes" },
+  { value: "120", label: "2 horas antes" },
+  { value: "1440", label: "1 dia antes" },
+];
+
 const primaryBtn =
   "rounded-md bg-indigo-500 px-2 py-1 text-[11px] font-semibold text-white hover:bg-indigo-600 disabled:opacity-60";
 
@@ -132,6 +156,7 @@ export function TasksPanel({ contactId }: { contactId: string }) {
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState("");
   const [due, setDue] = useState("");
+  const [reminder, setReminder] = useState(NO_REMINDER);
   const [busy, setBusy] = useState(false);
 
   const rows = useMemo(
@@ -156,6 +181,8 @@ export function TasksPanel({ contactId }: { contactId: string }) {
       contactId,
       assigneeId: useDbStore.getState().userId,
       dueAt: due ? new Date(`${due}T09:00:00`).toISOString() : null,
+      // Lembrete sem prazo não teria de quando contar.
+      reminderMinutes: due && reminder !== NO_REMINDER ? Number(reminder) : null,
     });
     setBusy(false);
     if (!ok) {
@@ -164,6 +191,7 @@ export function TasksPanel({ contactId }: { contactId: string }) {
     }
     setTitle("");
     setDue("");
+    setReminder(NO_REMINDER);
     setAdding(false);
     toast.success("Tarefa criada");
   };
@@ -193,6 +221,23 @@ export function TasksPanel({ contactId }: { contactId: string }) {
               onChange={(e) => setDue(e.target.value)}
               className="h-7 text-xs"
             />
+            {/* Só faz sentido com prazo definido: o lembrete conta a partir dele. */}
+            {due && (
+              <Select value={reminder} onValueChange={(v) => setReminder(v ?? NO_REMINDER)}>
+                <SelectTrigger className="h-7 w-full text-xs">
+                  <SelectValue>
+                    {TASK_REMINDERS.find((r) => r.value === reminder)?.label ?? "Sem lembrete"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {TASK_REMINDERS.map((r) => (
+                    <SelectItem key={r.value} value={r.value} className="text-xs">
+                      {r.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             <button onClick={() => void save()} disabled={busy || !title.trim()} className={primaryBtn}>
               {busy ? "Criando..." : "Criar tarefa"}
             </button>
@@ -232,8 +277,15 @@ export function TasksPanel({ contactId }: { contactId: string }) {
                 >
                   {t.title}
                 </p>
-                <p className="text-[10px] text-slate-400">
+                <p className="flex items-center gap-1 text-[10px] text-slate-400">
                   {t.dueAt ? `Prazo ${fmtDate(t.dueAt)}` : "Sem prazo"}
+                  {t.reminderMinutes !== null && t.reminderMinutes !== undefined && (
+                    <span title="Com lembrete" className="flex items-center gap-0.5 text-indigo-500">
+                      <Bell className="size-2.5" />
+                      {TASK_REMINDERS.find((r) => r.value === String(t.reminderMinutes))?.label ??
+                        "Com lembrete"}
+                    </span>
+                  )}
                 </p>
               </div>
               <button
