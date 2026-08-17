@@ -40,11 +40,26 @@ import { cn } from "@/lib/utils";
  * tela, por dispositivo, no mesmo espírito do lembrete de compromisso. É por
  * ITEM, e não um carimbo de "abri o sino às 14h" — com as duas abas, um
  * carimbo mandaria tudo para "Lidas" de uma vez só por ter aberto o painel.
+ *
+ * **O sino tem MEMÓRIA PRÓPRIA (`ARCHIVE_KEY`)**, e não é detalhe: derivar do
+ * banco significa que o aviso morre junto com a condição que o gerou. Abrir a
+ * conversa zera o `unread_count` — a notificação sumia das DUAS abas no mesmo
+ * instante, sem virar histórico. Agora todo aviso visto é gravado com o texto
+ * dele; a lista das abas sai do arquivo, e as consultas só ATUALIZAM o que já
+ * está lá e acrescentam o que é novo.
+ *
+ * Consequência assumida: um aviso não lido continua em "Não lidas" mesmo depois
+ * de a origem sumir (a conversa foi lida no inbox por outra pessoa, o
+ * compromisso passou). É o comportamento pedido — some só quando alguém marca
+ * como lido, ou pelo "Marcar todas como lidas".
  */
 
 const READ_KEY = "lito.notifications.read-ids";
+/** Memória do sino: o texto de cada aviso já visto, para o histórico. */
+const ARCHIVE_KEY = "lito.notifications.archive";
 /** Teto do histórico local: a lista cresceria para sempre sem isso. */
 const READ_LIMIT = 300;
+const ARCHIVE_LIMIT = 150;
 const REFRESH_MS = 60_000;
 const UPCOMING_HOURS = 24;
 
@@ -58,6 +73,49 @@ interface NotificationItem {
   /** Momento que ordena e define "novo". ISO. */
   at: string;
   href: string;
+}
+
+/** Item no arquivo local: o aviso + quando ele foi visto pela primeira vez. */
+interface ArchivedItem extends NotificationItem {
+  seenAt: string;
+}
+
+function loadArchive(): ArchivedItem[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(ARCHIVE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? (parsed as ArchivedItem[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveArchive(items: ArchivedItem[]) {
+  try {
+    // Mais recentes primeiro, com teto: o arquivo não pode crescer sem fim.
+    const trimmed = [...items]
+      .sort((a, b) => b.seenAt.localeCompare(a.seenAt))
+      .slice(0, ARCHIVE_LIMIT);
+    window.localStorage.setItem(ARCHIVE_KEY, JSON.stringify(trimmed));
+  } catch {
+    // localStorage bloqueado — o histórico some no F5, nada quebra.
+  }
+}
+
+/**
+ * Junta o que o banco acabou de devolver com o que já estava no arquivo:
+ * atualiza o texto do que continua existindo (ex.: "2 não lidas" vira "3"),
+ * mantém o que sumiu da origem e acrescenta o que é novo.
+ */
+function mergeArchive(archive: ArchivedItem[], fresh: NotificationItem[]): ArchivedItem[] {
+  const now = new Date().toISOString();
+  const byId = new Map(archive.map((a) => [a.id, a]));
+  for (const item of fresh) {
+    const old = byId.get(item.id);
+    byId.set(item.id, { ...item, seenAt: old?.seenAt ?? now });
+  }
+  return [...byId.values()];
 }
 
 const ICON: Record<NotificationKind, typeof Bell> = {
@@ -96,7 +154,7 @@ function saveRead(ids: string[]) {
 export function NotificationsPanel() {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"nao-lidas" | "lidas">("nao-lidas");
-  const [items, setItems] = useState<NotificationItem[]>([]);
+  const [items, setItems] = useState<ArchivedItem[]>([]);
   const [readIds, setReadIds] = useState<string[]>([]);
   const locationId = useDbStore((s) => s.locationId);
 
@@ -201,7 +259,10 @@ export function NotificationsPanel() {
       })),
     ].sort((x, y) => y.at.localeCompare(x.at));
 
-    setItems(next);
+    // O arquivo é a fonte da tela; a consulta só atualiza e acrescenta.
+    const merged = mergeArchive(loadArchive(), next);
+    saveArchive(merged);
+    setItems(merged);
   }, []);
 
   useEffect(() => {
@@ -222,11 +283,11 @@ export function NotificationsPanel() {
   }, [refresh, locationId]);
 
   const read = new Set(readIds);
-  const unread = items.filter((i) => !read.has(i.id));
-  // "Lidas" só mostra o que ainda EXISTE: conversa respondida ou compromisso
-  // que já passou some da origem, e a aba não vira um cemitério de avisos
-  // resolvidos.
-  const readItems = items.filter((i) => read.has(i.id));
+  // As duas abas saem do ARQUIVO, não da consulta: um aviso cuja origem sumiu
+  // (conversa aberta, compromisso que passou) continua tendo o que mostrar.
+  const sorted = [...items].sort((a, b) => b.at.localeCompare(a.at));
+  const unread = sorted.filter((i) => !read.has(i.id));
+  const readItems = sorted.filter((i) => read.has(i.id));
   const visible = tab === "nao-lidas" ? unread : readItems;
 
   const markRead = (ids: string[]) => {
@@ -240,6 +301,13 @@ export function NotificationsPanel() {
     const next = readIds.filter((x) => x !== id);
     saveRead(next);
     setReadIds(next);
+  };
+
+  /** Limpa o histórico de lidas (o arquivo cresce sozinho, some sozinho). */
+  const clearRead = () => {
+    const keep = items.filter((i) => !read.has(i.id));
+    saveArchive(keep);
+    setItems(keep);
   };
 
   return (
@@ -270,12 +338,20 @@ export function NotificationsPanel() {
       <PopoverContent align="end" className="w-80 p-0">
         <div className="flex items-center justify-between border-b px-3 py-2">
           <p className="text-xs font-bold text-slate-700">Notificações</p>
-          {unread.length > 0 && (
+          {tab === "nao-lidas" && unread.length > 0 && (
             <button
               onClick={() => markRead(unread.map((i) => i.id))}
               className="text-[10px] font-semibold text-indigo-600 hover:underline"
             >
               Marcar todas como lidas
+            </button>
+          )}
+          {tab === "lidas" && readItems.length > 0 && (
+            <button
+              onClick={clearRead}
+              className="text-[10px] font-semibold text-slate-400 hover:text-slate-600 hover:underline"
+            >
+              Limpar histórico
             </button>
           )}
         </div>
@@ -312,8 +388,8 @@ export function NotificationsPanel() {
           {visible.length === 0 && (
             <p className="px-3 py-8 text-center text-[11px] leading-relaxed text-slate-400">
               {tab === "lidas"
-                ? "Nenhuma notificação lida ainda."
-                : "Nada por aqui. Aparecem avisos de conversas não lidas, compromissos das próximas 24 horas e mensagens agendadas que falharam."}
+                ? "Nenhuma notificação lida ainda. O que você marcar como lido fica guardado aqui."
+                : "Nada por aqui. Aparecem avisos de conversas não lidas, tarefas vencendo, compromissos das próximas 24 horas e mensagens agendadas que falharam."}
             </p>
           )}
           {visible.map((item) => {
