@@ -17,6 +17,7 @@ import { CustomFieldsInputs } from "@/components/contacts/custom-fields-inputs";
 import { contactName } from "@/lib/data/repos/contacts";
 import { dbContactActions, useDbContact, useDbTeam } from "@/lib/data/repos/db/contacts";
 import { conversationActions } from "@/lib/data/repos/db/conversations";
+import { ContactPaymentsPanel } from "@/components/payments/lead-payments-panel";
 import { useContactsModule } from "@/lib/data/repos/db/contacts-module";
 import { usePipelineDb } from "@/lib/data/repos/db/pipeline";
 import { formatBRL } from "@/lib/data/repos/opportunities";
@@ -297,6 +298,10 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
             </ul>
           )}
         </div>
+      </div>
+
+      <div className="mt-4">
+        <ContactPaymentsPanel contact={contact} />
       </div>
     </div>
   );
