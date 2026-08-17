@@ -4,6 +4,7 @@ import {
   Bar,
   BarChart,
   Cell,
+  PolarAngleAxis,
   Pie,
   PieChart,
   RadialBar,
@@ -13,7 +14,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { WidgetCard, usePipelineSelection, type WidgetPipelineProps } from "./widget-card";
+import {
+  shortBRL,
+  usePipelineSelection,
+  WidgetCard,
+  WidgetEmpty,
+  type WidgetPipelineProps,
+} from "./widget-card";
 import { formatBRL } from "@/lib/data/repos/opportunities";
 import { useDashboardOps } from "./date-range";
 import { DrilldownDialog, useDrilldown } from "./drilldown";
@@ -60,8 +67,26 @@ export function StatusDonut(props: WidgetPipelineProps = {}) {
     });
   };
 
+  if (total === 0) {
+    return (
+      <WidgetCard
+        title="Status da Oportunidade"
+        subtitle="Oportunidades criadas no período"
+        pipelineId={pipe}
+        onPipelineChange={setPipe}
+      >
+        <WidgetEmpty text="Nenhuma oportunidade criada no período escolhido." />
+      </WidgetCard>
+    );
+  }
+
   return (
-    <WidgetCard title="Status da Oportunidade" pipelineId={pipe} onPipelineChange={setPipe}>
+    <WidgetCard
+      title="Status da Oportunidade"
+      subtitle="Oportunidades criadas no período"
+      pipelineId={pipe}
+      onPipelineChange={setPipe}
+    >
       <div className="flex items-center gap-4">
         <div className="relative h-[150px] w-[150px]">
           <ResponsiveContainer width="100%" height="100%">
@@ -91,9 +116,13 @@ export function StatusDonut(props: WidgetPipelineProps = {}) {
               />
             </PieChart>
           </ResponsiveContainer>
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <span className="text-xl font-bold text-slate-900">
-              {total >= 1000 ? `${(total / 1000).toFixed(2)}K` : total}
+          {/* Número sem rótulo não diz o que conta — "41" do quê? */}
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+            <span className="text-xl font-bold leading-none text-slate-900">
+              {total >= 1000 ? `${(total / 1000).toFixed(1)}K` : total}
+            </span>
+            <span className="text-[9px] uppercase tracking-wide text-slate-400">
+              oportunidades
             </span>
           </div>
         </div>
@@ -106,7 +135,10 @@ export function StatusDonut(props: WidgetPipelineProps = {}) {
               >
                 <span className="size-2.5 rounded-sm" style={{ background: d.color }} />
                 <span className="text-slate-600">
-                  {d.name} · {d.value}
+                  {d.name} · <span className="font-semibold text-slate-800">{d.value}</span>{" "}
+                  <span className="text-slate-400">
+                    ({total ? Math.round((d.value / total) * 100) : 0}%)
+                  </span>
                 </span>
               </button>
             </li>
@@ -132,17 +164,23 @@ export function ValueBars(props: WidgetPipelineProps = {}) {
   return (
     <WidgetCard
       title="Valor de Oportunidade"
+      subtitle="Soma dos valores por status, no período"
       pipelineId={pipe}
       onPipelineChange={setPipe}
       footer={
         <p className="mt-2 border-t pt-2 text-center text-xs text-slate-500">
-          Receita total <span className="font-bold text-slate-800">{formatBRL(total)}</span>
+          Somando tudo <span className="font-bold text-slate-800">{formatBRL(total)}</span>
         </p>
       }
     >
+      {total === 0 ? (
+        <WidgetEmpty text="Nenhuma oportunidade com valor no período. Preencha o valor ao criar o lead." />
+      ) : (
       <ResponsiveContainer width="100%" height={150}>
-        <BarChart data={data} layout="vertical" margin={{ left: 10, right: 20 }}>
-          <XAxis type="number" tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}K`} fontSize={10} />
+        <BarChart data={data} layout="vertical" margin={{ left: 10, right: 24 }}>
+          {/* O formatador antigo dividia por mil e arredondava: com valores
+              abaixo de R$ 1.000 todo o eixo virava "R$0K". */}
+          <XAxis type="number" tickFormatter={shortBRL} fontSize={10} allowDecimals={false} />
           <YAxis type="category" dataKey="name" width={70} fontSize={10} />
           <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => [formatBRL(Number(v)), "Valor"]} />
           <Bar
@@ -165,6 +203,7 @@ export function ValueBars(props: WidgetPipelineProps = {}) {
           </Bar>
         </BarChart>
       </ResponsiveContainer>
+      )}
       <DrilldownDialog state={drilldown} onClose={close} />
     </WidgetCard>
   );
@@ -181,6 +220,7 @@ export function ConversionGauge(props: WidgetPipelineProps = {}) {
   return (
     <WidgetCard
       title="Taxa de conversão"
+      subtitle="Ganhas ÷ total de oportunidades do período"
       pipelineId={pipe}
       onPipelineChange={setPipe}
       footer={
@@ -210,11 +250,24 @@ export function ConversionGauge(props: WidgetPipelineProps = {}) {
             startAngle={90}
             endAngle={-270}
           >
-            <RadialBar dataKey="value" cornerRadius={8} background={{ fill: "#eef2ff" }} />
+            {/* SEM este eixo com domínio fixo, o Recharts escala o arco pelo
+                MAIOR valor da série — que aqui é o próprio número. Resultado:
+                2% desenhava um anel praticamente cheio, dizendo o oposto do
+                número no meio. */}
+            <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
+            <RadialBar
+              dataKey="value"
+              angleAxisId={0}
+              cornerRadius={8}
+              background={{ fill: "#eef2ff" }}
+            />
           </RadialBarChart>
         </ResponsiveContainer>
-        <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <span className="text-2xl font-bold text-slate-900">{rate}%</span>
+        <span className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+          <span className="text-2xl font-bold leading-none text-slate-900">{rate}%</span>
+          <span className="mt-0.5 text-[10px] text-slate-400">
+            {won.length} de {ops.length}
+          </span>
         </span>
       </button>
       <DrilldownDialog state={drilldown} onClose={close} />

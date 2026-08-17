@@ -1,7 +1,12 @@
 "use client";
 
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
-import { WidgetCard, usePipelineSelection, type WidgetPipelineProps } from "./widget-card";
+import {
+  usePipelineSelection,
+  WidgetCard,
+  WidgetEmpty,
+  type WidgetPipelineProps,
+} from "./widget-card";
 import { formatBRL } from "@/lib/data/repos/opportunities";
 import { useDbPipeline } from "@/lib/data/repos/db/pipeline";
 import { useDashboardOps } from "./date-range";
@@ -27,12 +32,26 @@ export function FunnelWidget(props: WidgetPipelineProps = {}) {
   const max = Math.max(1, ...rows.map((r) => r.count));
   const first = rows[0]?.count || 1;
 
+  const totalOps = rows.reduce((sum, r) => sum + r.count, 0);
+
   return (
-    <WidgetCard title="Funil" pipelineId={pipeId} onPipelineChange={setPipeId}>
+    <WidgetCard
+      title="Funil"
+      subtitle={`${totalOps} oportunidade${totalOps === 1 ? "" : "s"} do período neste pipeline`}
+      pipelineId={pipeId}
+      onPipelineChange={setPipeId}
+      // Fase pertence a um pipeline: somar as de vários não significa nada.
+      allowAll={false}
+    >
       <div className="space-y-1">
         <div className="flex justify-end gap-6 pr-1 text-[10px] font-semibold text-slate-400">
-          <span className="w-16 text-right">Cumulativo</span>
-          <span className="w-20 text-right">Próx. etapa conv.</span>
+          {/* Os dois títulos eram siglas sem explicação; o title diz a conta. */}
+          <span className="w-16 text-right" title="Quantos, dos que entraram na primeira fase, chegaram até aqui">
+            % da 1ª fase
+          </span>
+          <span className="w-20 text-right" title="Quantos passaram da fase imediatamente anterior para esta">
+            % da fase anterior
+          </span>
         </div>
         {rows.map((r, i) => {
           const cumulative = first ? (r.count / first) * 100 : 0;
@@ -56,7 +75,9 @@ export function FunnelWidget(props: WidgetPipelineProps = {}) {
                   <span className="truncate text-[10px] font-bold leading-tight text-white">
                     {r.stage.name}
                   </span>
-                  <span className="text-[9px] leading-tight text-white/90">{formatBRL(r.value)}</span>
+                  <span className="text-[9px] leading-tight text-white/90">
+                    {r.count} · {formatBRL(r.value)}
+                  </span>
                 </button>
               </div>
               <span className="w-16 text-right text-[11px] font-medium text-slate-600">
@@ -81,18 +102,19 @@ export function StageDistribution(props: WidgetPipelineProps = {}) {
   const { drilldown, open, close } = useDrilldown();
   if (!pipeline) return null;
 
-  const data = pipeline.stages
-    .map((st) => {
-      const stageOps = ops.filter((o) => o.pipelineId === pipeline.id && o.stageId === st.id);
-      return {
-        name: st.name,
-        ops: stageOps,
-        value: stageOps.length,
-        money: stageOps.reduce((s, o) => s + o.value, 0),
-        color: st.color,
-      };
-    })
-    .filter((d) => d.value > 0);
+  // TODAS as fases entram na lista (a legenda mostra as vazias em cinza): antes
+  // as zeradas sumiam, e a legenda do donut não batia com o funil ao lado.
+  const all = pipeline.stages.map((st) => {
+    const stageOps = ops.filter((o) => o.pipelineId === pipeline.id && o.stageId === st.id);
+    return {
+      name: st.name,
+      ops: stageOps,
+      value: stageOps.length,
+      money: stageOps.reduce((s, o) => s + o.value, 0),
+      color: st.color,
+    };
+  });
+  const data = all.filter((d) => d.value > 0); // só o que tem fatia desenhável
   const total = data.reduce((s, d) => s + d.value, 0);
 
   const openStage = (i: number) => {
@@ -101,8 +123,28 @@ export function StageDistribution(props: WidgetPipelineProps = {}) {
     open({ title: `${pipeline.name} · ${d.name}`, ops: d.ops, pipelineId: pipeline.id });
   };
 
+  if (total === 0) {
+    return (
+      <WidgetCard
+        title="Distribuição de fases"
+        subtitle="Como as oportunidades do período se espalham pelas fases"
+        pipelineId={pipeId}
+        onPipelineChange={setPipeId}
+        allowAll={false}
+      >
+        <WidgetEmpty text="Nenhuma oportunidade neste pipeline no período escolhido." />
+      </WidgetCard>
+    );
+  }
+
   return (
-    <WidgetCard title="Distribuição de fases" pipelineId={pipeId} onPipelineChange={setPipeId}>
+    <WidgetCard
+      title="Distribuição de fases"
+      subtitle="Como as oportunidades do período se espalham pelas fases"
+      pipelineId={pipeId}
+      onPipelineChange={setPipeId}
+      allowAll={false}
+    >
       <div className="flex items-center gap-4">
         <div className="relative h-[190px] w-[190px] shrink-0">
           <ResponsiveContainer width="100%" height="100%">
@@ -125,25 +167,42 @@ export function StageDistribution(props: WidgetPipelineProps = {}) {
               <Tooltip contentStyle={TOOLTIP_STYLE} />
             </PieChart>
           </ResponsiveContainer>
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <span className="text-xl font-bold text-slate-900">{total.toLocaleString("pt-BR")}</span>
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+            <span className="text-xl font-bold leading-none text-slate-900">
+              {total.toLocaleString("pt-BR")}
+            </span>
+            <span className="text-[9px] uppercase tracking-wide text-slate-400">no pipeline</span>
           </div>
         </div>
         <ul className="min-w-0 flex-1 space-y-1 text-[11px]">
-          {data.map((d, i) => (
-            <li key={d.name}>
-              <button
-                onClick={() => openStage(i)}
-                className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left hover:bg-slate-50"
-              >
-                <span className="size-2 shrink-0 rounded-sm" style={{ background: d.color }} />
-                <span className="truncate text-slate-600">
-                  {d.name} · {formatBRL(d.money)} ({((d.value / total) * 100).toFixed(1)}%) ·{" "}
-                  {d.value}
-                </span>
-              </button>
-            </li>
-          ))}
+          {all.map((d) => {
+            const i = data.findIndex((x) => x.name === d.name);
+            const empty = d.value === 0;
+            return (
+              <li key={d.name}>
+                <button
+                  onClick={() => !empty && openStage(i)}
+                  disabled={empty}
+                  className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left hover:bg-slate-50 disabled:cursor-default disabled:hover:bg-transparent"
+                >
+                  <span
+                    className="size-2 shrink-0 rounded-sm"
+                    style={{ background: empty ? "#e2e8f0" : d.color }}
+                  />
+                  <span className={`truncate ${empty ? "text-slate-400" : "text-slate-600"}`}>
+                    <span className="font-medium">{d.name}</span> ·{" "}
+                    {d.value === 0 ? (
+                      "vazia"
+                    ) : (
+                      <>
+                        {d.value} ({Math.round((d.value / total) * 100)}%) · {formatBRL(d.money)}
+                      </>
+                    )}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
         </ul>
       </div>
       <DrilldownDialog state={drilldown} onClose={close} />

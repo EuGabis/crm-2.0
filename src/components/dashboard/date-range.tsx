@@ -131,3 +131,23 @@ export function useDashboardOps(pipelineId?: string): Opportunity[] {
     });
   }, [ops, pipelineId, range.from, range.to]);
 }
+
+/**
+ * Linha que diz, em datas, o período que os cards estão mostrando.
+ *
+ * O botão do filtro já diz "Últimos 30 dias", mas ninguém liga esse rótulo aos
+ * números: a dúvida "esse 41 é de sempre ou do mês?" era justamente o que
+ * fazia o painel parecer confuso. Aqui o intervalo aparece por extenso.
+ */
+export function DashboardRangeHint() {
+  const { range } = useDashboardRange();
+  const fmt = (d: Date) =>
+    d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }).replace(".", "");
+  return (
+    <p className="mb-3 text-[11px] text-slate-400">
+      Todos os cards abaixo contam apenas o que foi criado entre{" "}
+      <span className="font-medium text-slate-500">{fmt(range.from)}</span> e{" "}
+      <span className="font-medium text-slate-500">{fmt(range.to)}</span>.
+    </p>
+  );
+}
