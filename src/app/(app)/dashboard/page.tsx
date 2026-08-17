@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { CustomizeDialog } from "@/components/dashboard/customize-dialog";
 import { DashboardSwitcher } from "@/components/dashboard/dashboard-switcher";
 import { DateFilter } from "@/components/dashboard/date-filter";
-import { DashboardRangeProvider } from "@/components/dashboard/date-range";
+import { DashboardRangeHint, DashboardRangeProvider } from "@/components/dashboard/date-range";
 import { DashboardWidget } from "@/components/dashboard/widget-renderer";
 import {
   DEFAULT_WIDGETS,
@@ -104,13 +104,16 @@ export default function DashboardPage() {
             <DateFilter />
           </div>
         </div>
+        <DashboardRangeHint />
         {readOnly && (
           <p className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
             Painel do departamento — montado por um administrador. Para ter um seu, use
             “Adicionar painel”.
           </p>
         )}
-        <div className="grid gap-4 md:grid-cols-6">
+        {/* items-stretch + h-full nos cards: sem isso, cards da mesma linha
+            ficavam com alturas diferentes conforme o gráfico de dentro. */}
+        <div className="grid items-stretch gap-4 md:grid-cols-6">
           {widgets.map((w, i) => (
             <DashboardWidget
               key={`${w.key}-${i}`}

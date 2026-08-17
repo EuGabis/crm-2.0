@@ -26,8 +26,13 @@ export function LeadSourceTable() {
     lost: list.filter((o) => o.status === "lost").length,
   }));
 
+  const totalLeads = rows.reduce((sum, r) => sum + r.total, 0);
+
   return (
-    <WidgetCard title="Relatório de fonte de leads">
+    <WidgetCard
+      title="Relatório de fonte de leads"
+      subtitle={`De onde vieram as ${totalLeads} oportunidade${totalLeads === 1 ? "" : "s"} do período`}
+    >
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs">
           <thead>

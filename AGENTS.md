@@ -875,6 +875,26 @@ os módulos ainda não migrados continuam importando dos repos mock em
   quem nunca personalizou vê `DEFAULT_WIDGETS`, que é o painel fixo de antes.
   Widgets novos de Pagamentos (vendas recentes, receita por mês, assinaturas)
   só aparecem para quem enxerga o módulo.
+  **Repaginada de 2026-08-17** — o painel tinha três problemas que faziam os
+  números parecerem errados, além do visual:
+  1. **O seletor mentia** em Funil e Distribuição de fases: dizia "Todos os
+     pipelines" e `useDbPipeline("")` desenhava o PRIMEIRO. Era a origem do
+     "41 oportunidades num card e 4 no outro". Agora `WidgetCard` tem
+     `allowAll` — esses dois widgets não oferecem "todos" (fase pertence a um
+     pipeline; somar as de vários não significa nada) e o seletor mostra o
+     pipeline realmente desenhado.
+  2. **A rosca da taxa de conversão desenhava quase cheia com 2%**: sem
+     `PolarAngleAxis` de domínio fixo, o Recharts escala o arco pelo MAIOR valor
+     da série — que é o próprio número. O anel dizia o oposto do rótulo no meio.
+  3. **O eixo de "Valor de Oportunidade" virava "R$0K" em todos os traços**
+     (dividia por mil e arredondava). Agora usa `shortBRL`, que serve tanto
+     R$ 4 quanto R$ 3,4 mi.
+  Mais: subtítulo em cada card dizendo o que o número é, centro das roscas com
+  rótulo ("oportunidades", "no pipeline"), colunas do funil renomeadas para
+  "% da 1ª fase" / "% da fase anterior", fases vazias aparecendo em cinza na
+  legenda (antes sumiam e a legenda não batia com o funil ao lado), vazio
+  explicando "nada no período" e uma linha no topo dizendo, em datas, o período
+  que TODOS os cards estão contando.
   ⚠️ **Corrigido na 0052:** a policy de leitura da 0037 entregava ao admin TODOS
   os painéis da empresa, inclusive os de escopo `user` (pessoais) dos colegas —
   contra o que a própria 0037 escreveu ("user: só o dono lê e edita"). A tela
