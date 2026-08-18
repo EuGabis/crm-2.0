@@ -10,6 +10,8 @@ export interface BotOption {
   id: string;
   /** Texto do botão/linha (a Meta limita: lista 24, botão 20 chars). */
   title: string;
+  /** Texto secundário da linha da lista (a Meta limita a 72 chars). */
+  description?: string;
   /** Valor guardado na variável (default = title). Usado no score/condição. */
   value?: string;
 }

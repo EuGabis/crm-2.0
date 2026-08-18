@@ -181,7 +181,7 @@ async function botSendList(
   ctx: Ctx,
   text: string,
   buttonLabel: string | undefined,
-  options: { id: string; title: string }[],
+  options: { id: string; title: string; description?: string }[],
 ) {
   let waId: string | null = null;
   try {

@@ -5,7 +5,7 @@ import { Plus, Trash2, RotateCcw, Save, GripVertical } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useBotFlow } from "@/lib/data/repos/db/bot-flows";
-import { normalize, type BotFlow, type BotNode } from "@/lib/bot/types";
+import { normalize, type BotFlow, type BotNode, type BotOption } from "@/lib/bot/types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -244,35 +244,46 @@ function OptionsEditor({
   onPatch: (id: string, patch: Partial<any>) => void;
 }) {
   const options = node.options ?? [];
-  function setOptions(next: { id: string; title: string }[]) {
+  function setOptions(next: BotOption[]) {
     onPatch(node.id, { options: next });
   }
+  const update = (idx: number, patch: Partial<BotOption>) => {
+    const next = options.slice();
+    next[idx] = { ...options[idx], ...patch };
+    setOptions(next);
+  };
   return (
-    <div className="space-y-1.5 rounded-lg bg-slate-50 p-2">
+    <div className="space-y-2 rounded-lg bg-slate-50 p-2">
       <div className="flex items-center justify-between">
         <span className="text-[10px] font-semibold uppercase text-slate-400">Opções da lista</span>
-        <span className="text-[10px] text-slate-400">máx. 24 caracteres cada</span>
+        <span className="text-[10px] text-slate-400">título máx. 24 · descrição máx. 72</span>
       </div>
       {options.map((opt, idx) => (
-        <div key={opt.id} className="flex items-center gap-1.5">
-          <GripVertical className="h-3.5 w-3.5 shrink-0 text-slate-300" />
+        <div key={opt.id} className="space-y-1 rounded-md border bg-white p-1.5">
+          <div className="flex items-center gap-1.5">
+            <GripVertical className="h-3.5 w-3.5 shrink-0 text-slate-300" />
+            <input
+              className="h-8 flex-1 rounded-lg border px-2 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-indigo-400"
+              maxLength={24}
+              value={opt.title}
+              onChange={(e) => update(idx, { title: e.target.value })}
+              placeholder="Título da opção"
+            />
+            <button
+              className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-rose-600"
+              onClick={() => setOptions(options.filter((_, i) => i !== idx))}
+              title="Remover"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
           <input
-            className="h-8 flex-1 rounded-lg border px-2 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400"
-            maxLength={24}
-            value={opt.title}
-            onChange={(e) => {
-              const next = options.slice();
-              next[idx] = { ...opt, title: e.target.value };
-              setOptions(next);
-            }}
+            className="ml-5 h-7 w-[calc(100%-2.75rem)] rounded-lg border px-2 text-[11px] text-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            maxLength={72}
+            value={opt.description ?? ""}
+            onChange={(e) => update(idx, { description: e.target.value })}
+            placeholder="Descrição (texto secundário — opcional)"
           />
-          <button
-            className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-rose-600"
-            onClick={() => setOptions(options.filter((_, i) => i !== idx))}
-            title="Remover"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
         </div>
       ))}
       {options.length < 10 && (
