@@ -37,7 +37,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { brand } from "@/lib/config/brand";
 import { PERMISSION_MODULES } from "@/lib/config/nav";
@@ -920,20 +919,28 @@ function InviteDialog({
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Visibilidade de dados</Label>
-            <div className="flex h-8 items-center gap-2">
-              <Switch
-                checked={onlyAssigned}
-                disabled={role === "admin"}
-                onCheckedChange={(v) => setOnlyAssigned(Boolean(v))}
-              />
-              <span className="text-[11px] text-slate-500">
-                {role === "admin"
-                  ? "Todos os dados"
-                  : onlyAssigned
-                    ? "Apenas atribuídos"
-                    : "Todos os dados"}
-              </span>
-            </div>
+            <Select
+              value={role === "admin" ? "all" : onlyAssigned ? "assigned" : "all"}
+              onValueChange={(v) => v && setOnlyAssigned(v === "assigned")}
+            >
+              <SelectTrigger className="h-8 w-full text-xs" disabled={role === "admin"}>
+                <SelectValue>
+                  {role === "admin"
+                    ? "Todos os dados"
+                    : onlyAssigned
+                      ? "Apenas atribuídos a ele"
+                      : "Todos os dados (vê o setor todo)"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all" className="text-xs">
+                  Todos os dados (vê o setor todo)
+                </SelectItem>
+                <SelectItem value="assigned" className="text-xs">
+                  Apenas atribuídos a ele
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <ModuleGrid
             disabled={role === "admin"}
@@ -1082,20 +1089,28 @@ function PermissionsDialog({
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Visibilidade de dados</Label>
-            <div className="flex h-8 items-center gap-2">
-              <Switch
-                checked={onlyAssigned}
-                disabled={role === "admin"}
-                onCheckedChange={(v) => setOnlyAssigned(Boolean(v))}
-              />
-              <span className="text-[11px] text-slate-500">
-                {role === "admin"
-                  ? "Todos os dados"
-                  : onlyAssigned
-                    ? "Apenas atribuídos"
-                    : "Todos os dados"}
-              </span>
-            </div>
+            <Select
+              value={role === "admin" ? "all" : onlyAssigned ? "assigned" : "all"}
+              onValueChange={(v) => v && setOnlyAssigned(v === "assigned")}
+            >
+              <SelectTrigger className="h-8 w-full text-xs" disabled={role === "admin"}>
+                <SelectValue>
+                  {role === "admin"
+                    ? "Todos os dados"
+                    : onlyAssigned
+                      ? "Apenas atribuídos a ele"
+                      : "Todos os dados (vê o setor todo)"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all" className="text-xs">
+                  Todos os dados (vê o setor todo)
+                </SelectItem>
+                <SelectItem value="assigned" className="text-xs">
+                  Apenas atribuídos a ele
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <ModuleGrid
             disabled={role === "admin"}
