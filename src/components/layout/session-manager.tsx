@@ -42,6 +42,26 @@ export function SessionManager() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Parte 3 — presença: carimba last_seen_at enquanto o usuário está ativo. É o que
+  // define quem está "online" para receber leads no rodízio (visto ≤ 5 min).
+  useEffect(() => {
+    const supabase = createClient();
+    let lastAct = Date.now();
+    const bump = () => {
+      lastAct = Date.now();
+    };
+    ACTIVITY.forEach((e) => window.addEventListener(e, bump, { passive: true }));
+    const ping = () => {
+      if (Date.now() - lastAct <= IDLE_MS) void supabase.rpc("touch_presence");
+    };
+    ping(); // marca presença já ao abrir
+    const interval = window.setInterval(ping, 60000);
+    return () => {
+      ACTIVITY.forEach((e) => window.removeEventListener(e, bump));
+      window.clearInterval(interval);
+    };
+  }, []);
+
   // Parte 1 — idle timeout (só papel "user")
   useEffect(() => {
     if (me?.role !== "user") return; // admin / desconhecido → não arma o timer

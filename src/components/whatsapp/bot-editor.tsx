@@ -34,6 +34,8 @@ function nodeLabel(node: BotNode): string {
       return node.to === "ia"
         ? "Encerramento — Agente de IA assume"
         : "Encerramento — passa pro atendente";
+    case "distribute":
+      return "Encerramento — distribui por rodízio";
     case "end":
       return "Encerramento — envia mensagem e finaliza";
   }
@@ -153,7 +155,7 @@ function NodeEditor({
     );
   }
 
-  if (node.type === "handoff" || node.type === "end") {
+  if (node.type === "handoff" || node.type === "end" || node.type === "distribute") {
     return (
       <div className="space-y-2">
         <textarea
@@ -357,10 +359,17 @@ function TerminalSelect({
   node,
   onPatch,
 }: {
-  node: Extract<BotNode, { type: "handoff" | "end" }>;
+  node: Extract<BotNode, { type: "handoff" | "end" | "distribute" }>;
   onPatch: (id: string, patch: Partial<any>) => void;
 }) {
-  const value = node.type === "end" ? "encerrar" : node.to === "ia" ? "ia" : "humano";
+  const value =
+    node.type === "end"
+      ? "encerrar"
+      : node.type === "distribute"
+        ? "distribuir"
+        : node.to === "ia"
+          ? "ia"
+          : "humano";
   return (
     <label className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
       Ao terminar:
@@ -371,10 +380,12 @@ function TerminalSelect({
           const v = e.target.value;
           if (v === "humano") onPatch(node.id, { type: "handoff", to: "humano" });
           else if (v === "ia") onPatch(node.id, { type: "handoff", to: "ia" });
+          else if (v === "distribuir") onPatch(node.id, { type: "distribute" });
           else onPatch(node.id, { type: "end" });
         }}
       >
         <option value="humano">Passar pro atendente humano</option>
+        <option value="distribuir">Distribuir por rodízio (atendentes online)</option>
         <option value="ia">Deixar o Agente de IA responder</option>
         <option value="encerrar">Só enviar a mensagem e encerrar</option>
       </select>

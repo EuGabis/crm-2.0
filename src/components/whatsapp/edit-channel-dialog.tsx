@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { whatsappActions } from "@/lib/data/repos/db/whatsapp";
+import { useTeam } from "@/lib/data/repos/db/team";
 
 interface Channel {
   id: string;
@@ -20,6 +21,7 @@ interface Channel {
   sector: string;
   dailyLimit: number;
   botFlow?: string;
+  leadPool?: string[];
   phoneE164?: string;
 }
 
@@ -44,7 +46,9 @@ export function EditChannelDialog({
   onOpenChange: (v: boolean) => void;
 }) {
   const [saving, setSaving] = useState(false);
+  const { members } = useTeam();
   const [form, setForm] = useState({ name: "", sector: "", dailyLimit: "1000", botFlow: "" });
+  const [leadPool, setLeadPool] = useState<string[]>([]);
 
   useEffect(() => {
     if (channel) {
@@ -54,8 +58,14 @@ export function EditChannelDialog({
         dailyLimit: String(channel.dailyLimit),
         botFlow: channel.botFlow ?? "",
       });
+      setLeadPool(channel.leadPool ?? []);
     }
   }, [channel]);
+
+  const togglePool = (userId: string) =>
+    setLeadPool((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId],
+    );
 
   const submit = async () => {
     if (!channel) return;
@@ -69,6 +79,7 @@ export function EditChannelDialog({
       sector: form.sector.trim(),
       dailyLimit: Number(form.dailyLimit) || 1000,
       botFlow: form.botFlow,
+      leadPool,
     });
     setSaving(false);
     if (ok) {
@@ -128,6 +139,38 @@ export function EditChannelDialog({
             </select>
             <p className="text-[10px] text-slate-400">
               Quando ativo, o bot responde a 1ª mensagem deste número e conduz o fluxo até passar pra um humano.
+            </p>
+          </div>
+          <div className="grid gap-1">
+            <Label className="text-xs">Distribuição de leads (rodízio)</Label>
+            <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border p-2">
+              {members.length === 0 ? (
+                <p className="text-[11px] text-slate-400">Nenhum membro na equipe ainda.</p>
+              ) : (
+                members.map((m) => (
+                  <label
+                    key={m.userId}
+                    className="flex cursor-pointer items-center gap-2 text-xs text-slate-700"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={leadPool.includes(m.userId)}
+                      onChange={() => togglePool(m.userId)}
+                      className="h-3.5 w-3.5 accent-indigo-600"
+                    />
+                    <span>{m.name || m.email}</span>
+                    {m.role === "admin" && (
+                      <span className="rounded bg-slate-100 px-1 text-[9px] font-semibold text-slate-500">
+                        admin
+                      </span>
+                    )}
+                  </label>
+                ))
+              )}
+            </div>
+            <p className="text-[10px] text-slate-400">
+              Marque quem entra no rodízio deste número. Leads quentes vão, em rodízio, para
+              quem estiver <strong>online</strong> (ativo nos últimos 5 min).
             </p>
           </div>
         </div>

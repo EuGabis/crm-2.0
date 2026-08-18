@@ -342,6 +342,71 @@ async function syncCard(
   }
 }
 
+const PRESENCE_MS = 5 * 60 * 1000; // online = visto nos últimos 5 min
+
+/** Atribui o lead ao atendente: conversa + dono do card no funil de leads. */
+async function assignLead(ctx: Ctx, node: { pipeline?: string }, userId: string) {
+  await ctx.db
+    .from("conversations")
+    .update({ assigned_to: userId, bot_paused: true, awaiting_distribution: false })
+    .eq("id", ctx.conversationId);
+  const { pipelines, allStages } = await loadPipelines(ctx);
+  if (!pipelines.length) return;
+  const pick = resolvePipeline(pipelines, allStages, node.pipeline, ["QUENTE", "NOVO LEAD"]);
+  const { data: opp } = await ctx.db
+    .from("opportunities")
+    .select("id")
+    .eq("contact_id", ctx.contact.id)
+    .eq("pipeline_id", pick.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (opp) await ctx.db.from("opportunities").update({ owner_id: userId }).eq("id", opp.id);
+}
+
+/**
+ * Distribui o lead quente por rodízio entre o pool do número que está online.
+ * Cursor por canal garante que gira a fila. Sem ninguém online → aguardando.
+ */
+async function distributeLead(ctx: Ctx, node: { pipeline?: string }) {
+  const { data: ch } = await ctx.db
+    .from("whatsapp_channels")
+    .select("lead_pool, rr_cursor")
+    .eq("id", ctx.channel.id)
+    .maybeSingle();
+  const pool: string[] = ch?.lead_pool ?? [];
+
+  if (pool.length) {
+    const since = new Date(Date.now() - PRESENCE_MS).toISOString();
+    const { data: onlineRows } = await ctx.db
+      .from("location_members")
+      .select("user_id")
+      .eq("location_id", ctx.channel.location_id)
+      .in("user_id", pool)
+      .gte("last_seen_at", since);
+    const online = new Set((onlineRows ?? []).map((m: any) => m.user_id));
+
+    const cursor = ch?.rr_cursor ?? 0;
+    for (let i = 0; i < pool.length; i++) {
+      const idx = (cursor + i) % pool.length;
+      if (online.has(pool[idx])) {
+        await ctx.db
+          .from("whatsapp_channels")
+          .update({ rr_cursor: (idx + 1) % pool.length })
+          .eq("id", ctx.channel.id);
+        await assignLead(ctx, node, pool[idx]);
+        return;
+      }
+    }
+  }
+
+  // Ninguém do pool online → segura para o admin distribuir depois (Etapa B).
+  await ctx.db
+    .from("conversations")
+    .update({ awaiting_distribution: true })
+    .eq("id", ctx.conversationId);
+}
+
 /** Caminha pelos nós até uma pergunta (para e espera) ou o fim. */
 async function advance(
   ctx: Ctx,
@@ -401,6 +466,11 @@ async function advance(
         await botSend(ctx, render(node.text, vars));
       }
       await saveSession(ctx, nodeId, "aguardando", vars);
+      return;
+    } else if (node.type === "distribute") {
+      if (node.text) await botSend(ctx, render(node.text, vars));
+      await distributeLead(ctx, node);
+      await saveSession(ctx, nodeId, "concluido", vars);
       return;
     } else if (node.type === "handoff") {
       if (node.text) await botSend(ctx, render(node.text, vars));

@@ -153,11 +153,12 @@ export const triagemFlow: BotFlow = {
         { id: "pref_ligacao", title: "Ligação" },
         { id: "pref_mensagem", title: "Mensagem" },
       ],
-      next: "handoff_consultor",
+      next: "distribuir_lead",
     },
-    handoff_consultor: {
-      id: "handoff_consultor",
-      type: "handoff",
+    distribuir_lead: {
+      id: "distribuir_lead",
+      type: "distribute",
+      pipeline: "Controle de Leads",
       text: "Perfeito, {{first_name}}! Já estou passando você para um consultor. Em breve alguém da nossa tripulação fala com você por aqui. ✈️",
     },
     // FRIO: manda o link e deixa o agente de IA seguir tirando dúvidas.
