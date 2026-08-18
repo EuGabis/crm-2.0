@@ -134,7 +134,7 @@ export async function assignLeadTo(
     direction: "out",
     type: "event",
     channel: "whatsapp",
-    body: `Lead distribuído para ${nome}${offline ? " (estava offline)" : ""} pelo rodízio`,
+    body: `Conversa transferida de Bot para ${nome}${offline ? " (estava offline)" : ""}`,
   });
 
   const pid = await leadsPipelineId(db, p.locationId, p.pipelineName);

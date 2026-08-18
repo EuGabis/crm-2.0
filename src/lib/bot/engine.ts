@@ -480,7 +480,7 @@ async function advance(
       if (node.text) await botSend(ctx, render(node.text, vars));
       if ((node.to ?? "humano") === "ia") {
         // IA principal responde as próximas mensagens (auto-reply).
-        await botLogEvent(ctx, "Bot passou a conversa para o Agente de IA");
+        await botLogEvent(ctx, "Conversa transferida de Bot para o Agente de IA");
       } else {
         // "humano" = passar pro atendimento: distribui por rodízio (escolhe UM
         // atendente e registra pra quem foi), igual ao nó "distribuir". Assim o

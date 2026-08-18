@@ -66,7 +66,7 @@ function AssignPicker({ conversation }: { conversation: Conversation }) {
     const target = userId ? members.find((m) => m.userId === userId)?.name ?? "usuário" : null;
     void conversationActions.logEvent(
       conversation.id,
-      target ? `${actor} transferiu a conversa para ${target}` : `${actor} removeu o responsável`
+      target ? `Conversa transferida de ${actor} para ${target}` : `${actor} removeu o responsável`
     );
     toast.success(target ? `Atribuída a ${target}` : "Devolvida para a caixa do grupo");
   };
