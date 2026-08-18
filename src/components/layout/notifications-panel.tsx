@@ -30,6 +30,7 @@ import {
   type SoundId,
 } from "@/lib/notifications/sounds";
 import {
+  desktopDiagnostics,
   desktopEnabled,
   desktopPermission,
   requestDesktop,
@@ -639,6 +640,21 @@ export function NotificationsPanel() {
                   </p>
                 </>
               )}
+              {/* Estado de cada peça do caminho: transforma "não apareceu" numa
+                  resposta legível em vez de tentativa e erro. */}
+              <ul className="mt-2 space-y-0.5 border-t pt-1.5">
+                {desktopDiagnostics().map((d) => (
+                  <li key={d.label} className="flex items-baseline gap-1.5 text-[10px]">
+                    <span className={d.ok ? "text-emerald-500" : "text-rose-500"}>
+                      {d.ok ? "✓" : "✕"}
+                    </span>
+                    <span className="text-slate-400">{d.label}:</span>
+                    <span className="min-w-0 flex-1 truncate font-medium text-slate-600">
+                      {d.value}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
         )}

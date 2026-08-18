@@ -89,6 +89,16 @@ export function showDesktop(item: {
       body: item.body,
       tag: item.id,
       icon: "/favicon.ico",
+      /**
+       * FICA NA TELA até a pessoa fechar.
+       *
+       * Sem isto, o Chrome no Windows desenha o próprio balãozinho por ~5
+       * segundos e ele NÃO é arquivado na Central de Notificações do Windows —
+       * quem estava com a cabeça em outra janela nunca vê e, ao abrir a central
+       * depois, encontra "não há notificações novas". Era exatamente o sintoma
+       * relatado. Com `requireInteraction`, o aviso espera.
+       */
+      requireInteraction: true,
     });
     n.onclick = () => {
       window.focus();
@@ -100,4 +110,42 @@ export function showDesktop(item: {
     // Android/Chrome exige Service Worker para notificação; no desktop não.
     return e instanceof Error ? `O navegador recusou o aviso: ${e.message}` : "O navegador recusou o aviso.";
   }
+}
+
+/**
+ * Estado real de cada peça do caminho, para a tela poder MOSTRAR em vez de o
+ * usuário adivinhar. "Não apareceu" tem cinco explicações possíveis e quatro
+ * delas o navegador sabe responder — a quinta (o Windows engolindo) é a que
+ * sobra quando todas as linhas abaixo estão verdes.
+ */
+export function desktopDiagnostics(): { label: string; value: string; ok: boolean }[] {
+  if (typeof window === "undefined") return [];
+  const perm = desktopPermission();
+  const secure = window.isSecureContext;
+  return [
+    {
+      label: "Navegador suporta",
+      value: perm === "unsupported" ? "não" : "sim",
+      ok: perm !== "unsupported",
+    },
+    {
+      // A pegadinha silenciosa: fora de HTTPS (ou localhost) o Chrome nem
+      // pergunta — acessar o CRM pelo IP da rede local cai aqui.
+      label: "Conexão segura",
+      value: secure ? "sim" : "não (precisa de HTTPS ou localhost)",
+      ok: secure,
+    },
+    {
+      label: "Permissão do site",
+      value:
+        perm === "granted" ? "concedida" : perm === "denied" ? "negada" : "ainda não pedida",
+      ok: perm === "granted",
+    },
+    {
+      label: "Ligado aqui",
+      value: window.localStorage.getItem(ENABLED_KEY) === "off" ? "não" : "sim",
+      ok: window.localStorage.getItem(ENABLED_KEY) !== "off",
+    },
+    { label: "Endereço", value: window.location.origin, ok: true },
+  ];
 }
