@@ -119,3 +119,36 @@ export function playSound(id: SoundId) {
       break;
   }
 }
+
+/**
+ * Destrava o áudio no primeiro toque/tecla da página.
+ *
+ * ESTE é o motivo de o som só sair quando a pessoa clicava no sino: o navegador
+ * cria o `AudioContext` SUSPENSO e só deixa retomar dentro de um gesto do
+ * usuário. A varredura de um minuto tentava tocar sem gesto nenhum e era
+ * descartada em silêncio; o clique no sino, por ser gesto, funcionava — e dava
+ * a impressão de que só a ação manual atualizava as notificações.
+ *
+ * Com o ouvinte abaixo, qualquer clique na página (abrir um menu, digitar numa
+ * conversa) já libera o áudio para o resto da sessão.
+ */
+export function installAudioUnlock(): () => void {
+  if (typeof window === "undefined") return () => {};
+  const unlock = () => {
+    const c = audioContext();
+    // `resume()` só vale se chamado DENTRO do gesto — daí ser aqui, e não depois.
+    if (c && c.state === "suspended") void c.resume();
+  };
+  const opts = { once: true, passive: true } as const;
+  window.addEventListener("pointerdown", unlock, opts);
+  window.addEventListener("keydown", unlock, opts);
+  return () => {
+    window.removeEventListener("pointerdown", unlock);
+    window.removeEventListener("keydown", unlock);
+  };
+}
+
+/** O áudio já está liberado nesta aba? (a tela avisa quando não está) */
+export function audioReady(): boolean {
+  return !!ctx && ctx.state === "running";
+}

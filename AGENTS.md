@@ -1074,9 +1074,27 @@ os módulos ainda não migrados continuam importando dos repos mock em
     (`owner_id`), tarefa (`assignee_id`). O "de ninguém" PRECISA entrar — caixa
     do grupo, compromisso da empresa e tarefa sem responsável não podem virar
     aviso que ninguém recebe.
-  * Há um **"Testar som e pop-up agora"** nas preferências: separa "o CRM não
-    disparou" de "o Windows não mostrou" (Foco Assistido, notificação do
-    navegador desligada no sistema).
+  * ⚠️ **O áudio precisa de um gesto do usuário POR ABA.** Era o motivo de o som
+    só sair ao clicar no sino: o `AudioContext` nasce suspenso, a varredura
+    automática tentava tocar sem gesto e o navegador descartava calado — o
+    clique, por ser gesto, funcionava, e parecia que só a ação manual
+    atualizava. `installAudioUnlock()` (chamado na montagem do sino) libera no
+    primeiro clique/tecla em QUALQUER lugar da página.
+  * **Realtime, não só a varredura de 1 minuto**: o sino assina
+    `postgres_changes` de `conversations` e `messages` (as duas já estão na
+    publicação desde a 0003) com debounce de 600 ms — uma mensagem mexe nas duas
+    tabelas e sem isso seriam duas varreduras para o mesmo evento. O intervalo de
+    60 s fica como rede de segurança.
+  * ⚠️ **Sem aba aberta não há pop-up.** É `Notification` de página, não Web
+    Push: não existe service worker nem servidor de push aqui. Fechou o CRM,
+    para de avisar.
+  * `showDesktop` **devolve o motivo** quando não consegue disparar (sem
+    suporte, permissão negada, permissão não pedida, caixinha desligada) e o
+    botão **"Testar som e pop-up agora"** mostra isso na tela. Um pop-up que não
+    aparece tem quatro explicações indistinguíveis; as três primeiras o CRM
+    responde, e a quarta (Windows engolindo — Foco Assistido, notificação do
+    navegador desligada em Configurações → Sistema → Notificações) é a que sobra
+    quando a função devolve null e nada aparece.
   Spec:
   `docs/superpowers/specs/2026-08-14-central-notificacoes-design.md`.
 - ⏳ Próximo: Automações reais (Edge Functions) tarefas 5–8, Agentes de IA.
