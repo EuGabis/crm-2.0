@@ -49,7 +49,23 @@ interface Ctx {
 }
 
 function render(text: string, vars: Record<string, any>): string {
-  return text.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, k) => (vars[k] != null ? String(vars[k]) : ""));
+  // first_name é o único nome opcional. Quando vazio (a pessoa recusou/não deu o
+  // nome), remove o placeholder E a pontuação órfã ao redor pra não sair
+  // "Perfeito, !" nem ", clique...".
+  const firstName = vars.first_name != null ? String(vars.first_name).trim() : "";
+  let out = text;
+  if (!firstName) {
+    out = out
+      // "{{first_name}}, " (nome + pontuação logo depois)
+      .replace(/\{\{\s*first_name\s*\}\}\s*[,:;–-]\s*/g, "")
+      // ", {{first_name}}" (pontuação antes) ou o placeholder sozinho
+      .replace(/\s*[,:;–-]?\s*\{\{\s*first_name\s*\}\}/g, "");
+  }
+  out = out.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, k) => (vars[k] != null ? String(vars[k]) : ""));
+  out = out.replace(/\s+([,.!?;:])/g, "$1").replace(/\s{2,}/g, " ").trim();
+  // Se removemos o nome do começo, recapitaliza a 1ª letra.
+  if (!firstName && out) out = out[0].toUpperCase() + out.slice(1);
+  return out;
 }
 
 const NOT_A_NAME = new Set([
@@ -538,15 +554,10 @@ export async function maybeRunBot(
             await saveSession(ctx, session.node_id ?? null, "aguardando", vars);
             return true;
           }
-          // Recusou ou já tentou demais → NÃO trava: segue sem o nome digitado,
-          // aproveitando o nome do perfil do WhatsApp (se houver) nas próximas falas.
+          // Recusou ou já tentou demais → NÃO trava e NÃO chama por nome nenhum:
+          // segue sem `first_name` (o render omite o nome e ajusta a pontuação).
           delete vars._nameAttempts;
-          const { data: c } = await db
-            .from("contacts")
-            .select("first_name")
-            .eq("id", contact.id)
-            .maybeSingle();
-          if (c?.first_name) vars.first_name = c.first_name;
+          vars.first_name = "";
         }
       } else {
         vars[node.var] = args.text;
