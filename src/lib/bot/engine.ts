@@ -101,6 +101,20 @@ async function extractName(text: string): Promise<string | null> {
   }
 }
 
+const REFUSAL = [
+  "nao quero", "prefiro nao", "nao vou", "nao informar", "nao direi", "nao falo",
+  "nao quero dizer", "nao quero falar", "nao respondo", "segredo", "sigilo",
+  "pula", "pular", "proxima", "proximo", "skip", "deixa", "tanto faz", "next",
+];
+
+/** A pessoa recusou responder (segue pra próxima pergunta sem travar). */
+function looksLikeRefusal(text: string): boolean {
+  const t = normalize(text);
+  if (!t) return false;
+  if (t === "nao" || t === "n" || t === "no") return true;
+  return REFUSAL.some((r) => t.includes(r));
+}
+
 /** Casa a resposta com uma opção: pelo clique (replyId) ou pelo texto digitado. */
 function matchOption(options: BotOption[], replyId: string | null, text: string): BotOption | null {
   if (replyId) {
@@ -509,12 +523,31 @@ export async function maybeRunBot(
         vars[node.var] = opt.value ?? opt.title;
       } else if (node.validate === "name") {
         const name = await extractName(args.text);
-        if (!name) {
-          // Não parece um nome de verdade → repergunta mantendo a sessão neste nó.
-          await botSend(ctx, "Não consegui identificar seu nome 😅. Pode me dizer só o seu nome, por favor?");
-          return true;
+        if (name) {
+          vars[node.var] = name;
+          delete vars._nameAttempts;
+        } else {
+          const attempts = Number(vars._nameAttempts ?? 0) + 1;
+          // 1ª falha "de interpretação" (sem recusa) → pede de novo, uma vez só.
+          if (!looksLikeRefusal(args.text) && attempts < 2) {
+            vars._nameAttempts = attempts;
+            await botSend(
+              ctx,
+              'Não consegui identificar seu nome 😅. Pode me dizer só o seu nome? (ou responda "pular")',
+            );
+            await saveSession(ctx, session.node_id ?? null, "aguardando", vars);
+            return true;
+          }
+          // Recusou ou já tentou demais → NÃO trava: segue sem o nome digitado,
+          // aproveitando o nome do perfil do WhatsApp (se houver) nas próximas falas.
+          delete vars._nameAttempts;
+          const { data: c } = await db
+            .from("contacts")
+            .select("first_name")
+            .eq("id", contact.id)
+            .maybeSingle();
+          if (c?.first_name) vars.first_name = c.first_name;
         }
-        vars[node.var] = name;
       } else {
         vars[node.var] = args.text;
       }
