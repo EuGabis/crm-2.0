@@ -137,6 +137,24 @@ src/
 6. Páginas são client components (`"use client"`) — ícones Lucide não podem ser
    passados de Server para Client component como prop.
 
+## Sidebar minimizável
+
+Botão **"Minimizar menu"** no pé da barra (junto de Configurações — é ajuste de
+tela, não navegação; no topo competiria com o bloco da empresa). Fechada fica com
+64 px: só os ícones, com o rótulo no tooltip. **Não é `w-0`** de propósito —
+sumir com a navegação obrigaria a reabrir para trocar de módulo, o oposto do
+ganho.
+
+- A preferência é por DISPOSITIVO (`localStorage`, chave
+  `lito.sidebar.collapsed`): num notebook de 13" se quer fechada, no monitor
+  grande aberta; guardar "na conta" imporia a mesma decisão nos dois.
+- Lida com **`useSyncExternalStore`**, não `useState` + efeito: o servidor não
+  tem localStorage (o snapshot do servidor é "aberta" e o React reconcilia na
+  hidratação, sem mismatch), `setState` dentro de efeito dispara renderização em
+  cascata, e de graça o evento `storage` **sincroniza duas abas** do CRM. O
+  evento nativo não dispara na aba que escreveu — daí o conjunto de ouvintes no
+  módulo.
+
 ## Confirmação de ação (nunca `window.confirm`)
 
 Toda ação que pede confirmação usa o diálogo DO CRM:
