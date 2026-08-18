@@ -167,8 +167,8 @@ export const triagemFlow: BotFlow = {
       type: "handoff",
       to: "ia",
       text:
-        "Obrigado pelas respostas, {{first_name}}! Você pode ver tudo sobre os nossos cursos neste link: " +
-        "https://litoaviationacademy.com.br/\n\nFicou com alguma dúvida? Pode me perguntar por aqui que eu te ajudo. ✈️",
+        "Obrigado pelas respostas, você pode verificar todas as informações do nosso curso nesse link, " +
+        "caso ainda tenha dúvidas, é só voltar aqui que eu te atendo: https://litoaviationacademy.com.br/",
     },
   },
 };
