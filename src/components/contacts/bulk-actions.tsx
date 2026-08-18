@@ -27,7 +27,9 @@ import {
 import { dbContactActions } from "@/lib/data/repos/db/contacts";
 import { logBulk } from "@/lib/data/repos/db/contacts-module";
 
+import { useConfirm } from "@/components/shared/confirm";
 export function BulkActions({ ids, clear }: { ids: string[]; clear: () => void }) {
+  const confirm = useConfirm();
   const simulated = (label: string) => () =>
     toast.info(`${label} — ação simulada (chega em fase futura)`);
 
@@ -58,7 +60,9 @@ export function BulkActions({ ids, clear }: { ids: string[]; clear: () => void }
   };
 
   const remove = async () => {
-    if (!window.confirm(`Excluir ${ids.length} contato(s)? Essa ação não pode ser desfeita.`)) {
+    if (!(await confirm({ title: `Excluir ${ids.length} contato(s)?`,
+      description:
+        "O histórico de conversas e as oportunidades desses contatos vão junto. Não tem desfazer.", confirmLabel: "Excluir", destructive: true }))) {
       return;
     }
     const ok = await dbContactActions.remove(ids);

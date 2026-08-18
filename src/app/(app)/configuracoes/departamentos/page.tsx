@@ -55,6 +55,7 @@ import {
 import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
 import { cn } from "@/lib/utils";
 
+import { useConfirm } from "@/components/shared/confirm";
 const ROLE_LABEL: Record<MemberRole, string> = {
   admin: "Administrador",
   user: "Usuário",
@@ -78,6 +79,7 @@ function allowedCount(p: ModulePermissions) {
 }
 
 export default function DepartamentosPage() {
+  const confirm = useConfirm();
   const { members, invitations, departments, loaded, loading } = useTeam();
   const { isAdmin, me, loaded: meLoaded } = useMyMembership();
   const { channels } = useWhatsappChannels();
@@ -178,11 +180,9 @@ export default function DepartamentosPage() {
                     <button
                       onClick={async () => {
                         if (
-                          !window.confirm(
-                            people.length > 0
+                          !(await confirm({ title: people.length > 0
                               ? `Excluir "${d.name}"? Os ${people.length} usuário(s) ficam sem departamento e voltam a enxergar tudo que não estiver bloqueado individualmente.`
-                              : `Excluir o departamento "${d.name}"?`
-                          )
+                              : `Excluir o departamento "${d.name}"?`, confirmLabel: "Excluir", destructive: true }))
                         )
                           return;
                         const res = await departmentActions.remove(d.id);
@@ -381,9 +381,7 @@ export default function DepartamentosPage() {
                       <button
                         onClick={async () => {
                           if (
-                            !window.confirm(
-                              `Remover ${m.name} da equipe? A pessoa perde o acesso a esta empresa.`
-                            )
+                            !(await confirm({ title: `Remover ${m.name} da equipe? A pessoa perde o acesso a esta empresa.`, confirmLabel: "Remover", destructive: true }))
                           )
                             return;
                           const res = await teamActions.removeMember(m.userId);
@@ -442,7 +440,7 @@ export default function DepartamentosPage() {
                         </button>
                         <button
                           onClick={async () => {
-                            if (!window.confirm(`Cancelar o convite de ${i.email}?`)) return;
+                            if (!(await confirm({ title: `Cancelar o convite de ${i.email}?`, confirmLabel: "Sim, cancelar", destructive: true }))) return;
                             (await teamActions.deleteInvite(i.id))
                               ? toast.success("Convite cancelado")
                               : toast.error("Não foi possível cancelar");

@@ -19,9 +19,11 @@ import { useDbTeam } from "@/lib/data/repos/db/contacts";
 import { useDepartments, useMyMembership } from "@/lib/data/repos/db/team";
 import { PipelineScopeDialog, scopeBadge } from "./pipeline-scope-dialog";
 
+import { useConfirm } from "@/components/shared/confirm";
 const STAGE_COLORS = ["#94a3b8", "#3b82f6", "#f43f5e", "#f59e0b", "#ec4899", "#22c55e", "#64748b", "#ef4444", "#8b5cf6"];
 
 export function PipelinesManageTab() {
+  const confirm = useConfirm();
   const { pipelines, opportunities, loaded } = usePipelineDb();
   const { isAdmin, me } = useMyMembership();
   const departments = useDepartments();
@@ -43,7 +45,7 @@ export function PipelinesManageTab() {
   };
 
   const removePipeline = async (id: string, name: string) => {
-    if (!window.confirm(`Excluir o pipeline "${name}"?`)) return;
+    if (!(await confirm({ title: `Excluir o pipeline "${name}"?`, confirmLabel: "Excluir", destructive: true }))) return;
     const result = await pipelineActions.removePipeline(id);
     if (result === "ok") toast.success("Pipeline excluído");
     else if (result === "has-opps")
@@ -60,7 +62,7 @@ export function PipelinesManageTab() {
   };
 
   const removeStage = async (id: string, name: string) => {
-    if (!window.confirm(`Excluir a fase "${name}"?`)) return;
+    if (!(await confirm({ title: `Excluir a fase "${name}"?`, confirmLabel: "Excluir", destructive: true }))) return;
     const result = await pipelineActions.removeStage(id);
     if (result === "ok") toast.success("Fase excluída");
     else if (result === "has-opps")
