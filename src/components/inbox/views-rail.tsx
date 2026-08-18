@@ -383,7 +383,11 @@ export function ViewsRail({
   const conversations = useConversations();
   const { me } = useMyMembership();
   const offlineCount = useMemo(
-    () => conversations.filter((c) => c.assignedOffline && c.assignedTo === me?.userId).length,
+    () =>
+      conversations.filter(
+        (c) =>
+          c.assignedOffline && c.assignedTo === me?.userId && !c.closedAt && !c.archivedAt,
+      ).length,
     [conversations, me?.userId],
   );
 

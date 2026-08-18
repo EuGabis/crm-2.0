@@ -121,9 +121,16 @@ export function ConversationList({
       scope === "mine"
         ? byStatus.filter((c) => c.assignedTo === me?.userId)
         : scope === "offline"
-          ? // Aba Offline = revisar TODOS os leads recebidos offline (mesmo conjunto
-            // do badge): não aplica status/aba, senão some da lista com o badge cheio.
-            todas.filter((c) => c.assignedOffline && c.assignedTo === me?.userId)
+          ? // Aba Offline = leads recebidos offline AINDA em aberto (não aplica a
+            // aba Não lidos/Recentes, mas exclui finalizada/arquivada — lead fechado
+            // já foi tratado, não é "fantasma" no badge).
+            todas.filter(
+              (c) =>
+                c.assignedOffline &&
+                c.assignedTo === me?.userId &&
+                !c.closedAt &&
+                !c.archivedAt
+            )
           : scope === "bot"
             ? byStatus.filter((c) => automatedIds.has(c.id))
             : byStatus;
