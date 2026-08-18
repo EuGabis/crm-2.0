@@ -3,7 +3,8 @@
 import { useMemo, useState } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Bot, Eye, Plus, Search, Trash2, User, Users } from "lucide-react";
+import { Bot, Eye, Plus, Search, Trash2, User, Users, WifiOff } from "lucide-react";
+import { useMyMembership } from "@/lib/data/repos/db/team";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -33,32 +34,41 @@ function RailButton({
   label,
   onClick,
   active,
+  badge,
 }: {
   icon: typeof User;
   label: string;
   onClick?: () => void;
   active?: boolean;
+  badge?: number;
 }) {
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            onClick={onClick}
-            aria-pressed={active}
-            className={cn(
-              "flex size-8 items-center justify-center rounded-md",
-              active ? "bg-indigo-100 text-indigo-600" : "text-slate-400 hover:bg-slate-100"
-            )}
-          />
-        }
-      >
-        <Icon className="size-4" />
-      </TooltipTrigger>
-      <TooltipContent side="right" className="text-[11px]">
-        {label}
-      </TooltipContent>
-    </Tooltip>
+    <div className="relative">
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              onClick={onClick}
+              aria-pressed={active}
+              className={cn(
+                "flex size-8 items-center justify-center rounded-md",
+                active ? "bg-indigo-100 text-indigo-600" : "text-slate-400 hover:bg-slate-100"
+              )}
+            />
+          }
+        >
+          <Icon className="size-4" />
+        </TooltipTrigger>
+        <TooltipContent side="right" className="text-[11px]">
+          {label}
+        </TooltipContent>
+      </Tooltip>
+      {badge ? (
+        <span className="pointer-events-none absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold text-white">
+          {badge > 9 ? "9+" : badge}
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -370,6 +380,12 @@ export function ViewsRail({
 }) {
   const { scope, setScope } = useInboxUi();
   const pick = (next: InboxScope) => setScope(next);
+  const conversations = useConversations();
+  const { me } = useMyMembership();
+  const offlineCount = useMemo(
+    () => conversations.filter((c) => c.assignedOffline && c.assignedTo === me?.userId).length,
+    [conversations, me?.userId],
+  );
 
   return (
     <div className="flex h-full w-12 shrink-0 flex-col items-center gap-1 border-r bg-white py-2">
@@ -398,6 +414,13 @@ export function ViewsRail({
         label="Conversas com automação"
         active={scope === "bot"}
         onClick={() => pick("bot")}
+      />
+      <RailButton
+        icon={WifiOff}
+        label="Recebidas enquanto eu estava offline"
+        active={scope === "offline"}
+        onClick={() => pick("offline")}
+        badge={offlineCount}
       />
       <SavedViews />
     </div>

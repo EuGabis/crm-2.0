@@ -42,6 +42,7 @@ const mapConversation = (r: any): Conversation => ({
   createdAt: r.created_at,
   botPaused: r.bot_paused ?? false,
   awaitingDistribution: r.awaiting_distribution ?? false,
+  assignedOffline: r.assigned_offline ?? false,
 });
 
 const mapMessage = (r: any): Message => ({
@@ -556,11 +557,20 @@ export const conversationActions = {
 
   async markRead(conversationId: string): Promise<void> {
     const supabase = createClient();
-    await supabase.from("conversations").update({ unread_count: 0 }).eq("id", conversationId);
     const s = useConvStore.getState();
+    const conv = s.conversations.find((c) => c.id === conversationId);
+    // Se o próprio atendente abre um lead que caiu enquanto ele estava offline,
+    // some da aba "Offline" (já foi visto).
+    const clearOffline =
+      !!conv?.assignedOffline && conv.assignedTo === useDbStore.getState().userId;
+    const patch: Record<string, unknown> = { unread_count: 0 };
+    if (clearOffline) patch.assigned_offline = false;
+    await supabase.from("conversations").update(patch).eq("id", conversationId);
     s.patch({
       conversations: s.conversations.map((c) =>
-        c.id === conversationId ? { ...c, unreadCount: 0 } : c
+        c.id === conversationId
+          ? { ...c, unreadCount: 0, ...(clearOffline ? { assignedOffline: false } : {}) }
+          : c
       ),
     });
   },

@@ -120,9 +120,11 @@ export function ConversationList({
     let list =
       scope === "mine"
         ? byStatus.filter((c) => c.assignedTo === me?.userId)
-        : scope === "bot"
-          ? byStatus.filter((c) => automatedIds.has(c.id))
-          : byStatus;
+        : scope === "offline"
+          ? byStatus.filter((c) => c.assignedOffline && c.assignedTo === me?.userId)
+          : scope === "bot"
+            ? byStatus.filter((c) => automatedIds.has(c.id))
+            : byStatus;
     // Separa por número quando um está selecionado.
     if (channelFilter) list = list.filter((c) => c.channelId === channelFilter);
     // Filtro por responsável (admin): "__none__" = sem responsável.
@@ -531,9 +533,11 @@ export function ConversationList({
                   ? "Nenhuma conversa arquivada. Arquivar tira a conversa da caixa sem excluir nada."
                   : scope === "mine"
                 ? "Nenhuma conversa atribuída a você. Abra uma conversa e use “Atribuir” no cabeçalho."
-                : scope === "bot"
-                  ? "Nenhuma conversa tocada por automação ainda. Assim que um fluxo registrar nota ou responder um contato, a conversa aparece aqui."
-                  : "Nenhuma conversa neste filtro"}
+                : scope === "offline"
+                  ? "Nenhum lead recebido enquanto você estava offline. Quando todos do rodízio estiverem fora, os leads caem aqui até você abri-los."
+                  : scope === "bot"
+                    ? "Nenhuma conversa tocada por automação ainda. Assim que um fluxo registrar nota ou responder um contato, a conversa aparece aqui."
+                    : "Nenhuma conversa neste filtro"}
           </p>
         )}
       </div>

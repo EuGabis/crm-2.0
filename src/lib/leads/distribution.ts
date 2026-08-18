@@ -113,10 +113,17 @@ export async function assignLeadTo(
   db: any,
   p: { conversationId: string; contactId: string; locationId: string; pipelineName?: string },
   userId: string,
+  offline = false,
 ) {
   await db
     .from("conversations")
-    .update({ assigned_to: userId, bot_paused: true, awaiting_distribution: false })
+    .update({
+      assigned_to: userId,
+      bot_paused: true,
+      awaiting_distribution: false,
+      // caiu enquanto o atendente estava offline → aparece na aba "Offline" dele
+      assigned_offline: offline,
+    })
     .eq("id", p.conversationId);
   const pid = await leadsPipelineId(db, p.locationId, p.pipelineName);
   if (!pid) return;
@@ -132,8 +139,10 @@ export async function assignLeadTo(
 }
 
 /**
- * Escolhe UM atendente online do departamento por rodízio e atribui a conversa.
- * Avança o cursor. Retorna o user escolhido ou null (ninguém online/sem pool).
+ * Escolhe UM atendente do departamento por rodízio e atribui a conversa.
+ * Regra: se ALGUÉM está online, distribui só entre os online (rodízio). Se TODOS
+ * estão offline, distribui igualitário entre todos do pool e marca "offline".
+ * Avança o cursor. Retorna o user escolhido ou null (sem pool = aguardando).
  */
 export async function distributeOne(
   db: any,
@@ -146,9 +155,11 @@ export async function distributeOne(
   },
 ): Promise<string | null> {
   const { pool, cursor } = await departmentPool(db, args.locationId, args.deptId);
+  if (!pool.length) return null; // sem pool/departamento → segura (aguardando)
   const online = await onlineOrdered(db, args.locationId, pool);
-  if (!online.length) return null;
-  const user = online[cursor % online.length];
+  const offline = online.length === 0;
+  const list = offline ? pool : online; // todos off → todos entram no rodízio
+  const user = list[cursor % list.length];
   await db.from("departments").update({ rr_cursor: cursor + 1 }).eq("id", args.deptId);
   await assignLeadTo(
     db,
@@ -159,6 +170,7 @@ export async function distributeOne(
       pipelineName: args.pipelineName,
     },
     user,
+    offline,
   );
   return user;
 }

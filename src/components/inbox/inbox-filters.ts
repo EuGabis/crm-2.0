@@ -65,6 +65,7 @@ export const scopeLabel: Record<InboxScope, string> = {
   group: "Caixa de entrada do grupo",
   mine: "Atribuídas a mim",
   bot: "Conversas com automação",
+  offline: "Recebidas enquanto offline",
 };
 
 export const statusLabel: Record<InboxStatusView, string> = {

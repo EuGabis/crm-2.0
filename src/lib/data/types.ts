@@ -121,13 +121,15 @@ export interface Conversation {
   botPaused?: boolean;
   /** Lead quente qualificado sem ninguém online — aguardando distribuição (0056). */
   awaitingDistribution?: boolean;
+  /** Lead distribuído a este atendente enquanto TODOS estavam offline (0060). */
+  assignedOffline?: boolean;
 }
 
 /** Abas de filtro da caixa de entrada. */
 export type ConversationFilter = "unread" | "all" | "recent" | "starred";
 
 /** Escopo do rail: grupo, minhas, ou conversas tocadas por automação/IA. */
-export type InboxScope = "group" | "mine" | "bot";
+export type InboxScope = "group" | "mine" | "bot" | "offline";
 
 /** Qual pilha a caixa está mostrando (migração 0029). */
 export type InboxStatusView = "abertas" | "finalizadas" | "arquivadas" | "todas";
