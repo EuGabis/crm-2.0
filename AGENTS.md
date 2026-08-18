@@ -1057,6 +1057,26 @@ os módulos ainda não migrados continuam importando dos repos mock em
     primeiro `refresh` só semeia (`seeded`). Em rajada (>3 novos), sai UM
     pop-up resumindo — cinco empilhados são pior que nenhum.
   * `tag` na Notification faz o mesmo aviso se substituir em vez de empilhar.
+  * ⚠️ **O gatilho é a ASSINATURA, não o id.** O id de uma conversa é
+    `conv-<id>` — um id por MENSAGEM encheria a lista com dez linhas do mesmo
+    contato. Só que, com id estável, a segunda mensagem caía como "já
+    conhecida" e o sino tocava uma vez só (sintoma relatado). Cada aviso carrega
+    uma `signature` que muda com atividade nova (conversa:
+    `last_message_at|unread_count`; tarefa: prazo; compromisso: início), e é a
+    MUDANÇA dela que dispara som e pop-up. Atividade nova também desmarca o
+    "lido": chegou mensagem depois de você ler o aviso, ele volta a valer.
+  * ⚠️ **Aviso é só do que é MEU** (ou de ninguém). Ver e ser avisado são coisas
+    diferentes: a RLS já limita o que cada um enxerga, mas a caixa é
+    compartilhada e sem filtro o time inteiro levava pop-up de conversa de
+    colega — interromper quem não tem o que fazer com aquilo treina a pessoa a
+    ignorar o sino. Regra igual nas quatro fontes: conversa
+    (`assigned_to`), mensagem agendada (`scheduled_by`), compromisso
+    (`owner_id`), tarefa (`assignee_id`). O "de ninguém" PRECISA entrar — caixa
+    do grupo, compromisso da empresa e tarefa sem responsável não podem virar
+    aviso que ninguém recebe.
+  * Há um **"Testar som e pop-up agora"** nas preferências: separa "o CRM não
+    disparou" de "o Windows não mostrou" (Foco Assistido, notificação do
+    navegador desligada no sistema).
   Spec:
   `docs/superpowers/specs/2026-08-14-central-notificacoes-design.md`.
 - ⏳ Próximo: Automações reais (Edge Functions) tarefas 5–8, Agentes de IA.
