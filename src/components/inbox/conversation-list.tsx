@@ -193,6 +193,23 @@ export function ConversationList({
       })
     : sorted;
 
+  if (typeof window !== "undefined") {
+    // DEBUG temporário (distribuição): mostra onde a conversa some no cliente.
+    // eslint-disable-next-line no-console
+    console.log("[inbox-debug]", {
+      me: me?.userId,
+      scope,
+      status,
+      filter,
+      store_todas: todas.length,
+      all_filtro_aba: all.length,
+      lista_escopo: conversations.length,
+      visible: visible.length,
+      ids_no_store: todas.map((c) => c.id),
+      assignedTo_no_store: todas.map((c) => c.assignedTo),
+    });
+  }
+
   return (
     <div className="flex h-full w-[300px] shrink-0 flex-col border-r bg-white">
       <div className="flex items-center justify-between border-b px-3 py-2">
