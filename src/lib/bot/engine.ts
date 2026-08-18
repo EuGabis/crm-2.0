@@ -7,6 +7,7 @@
 import { sendText, sendInteractiveList } from "@/lib/whatsapp/client";
 import { toWhatsAppNumber } from "@/lib/whatsapp/phone";
 import { chat } from "@/lib/ai/openai";
+import { channelDepartmentId, distributeOne } from "@/lib/leads/distribution";
 import { normalize, type BotFlow, type BotNode, type BotOption } from "./types";
 import { triagemFlow } from "./flows/triagem";
 
@@ -342,94 +343,27 @@ async function syncCard(
   }
 }
 
-const PRESENCE_MS = 5 * 60 * 1000; // online = visto nos últimos 5 min
-
-/** Atribui o lead ao atendente: conversa + dono do card no funil de leads. */
-async function assignLead(ctx: Ctx, node: { pipeline?: string }, userId: string) {
-  await ctx.db
-    .from("conversations")
-    .update({ assigned_to: userId, bot_paused: true, awaiting_distribution: false })
-    .eq("id", ctx.conversationId);
-  const { pipelines, allStages } = await loadPipelines(ctx);
-  if (!pipelines.length) return;
-  const pick = resolvePipeline(pipelines, allStages, node.pipeline, ["QUENTE", "NOVO LEAD"]);
-  const { data: opp } = await ctx.db
-    .from("opportunities")
-    .select("id")
-    .eq("contact_id", ctx.contact.id)
-    .eq("pipeline_id", pick.id)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (opp) await ctx.db.from("opportunities").update({ owner_id: userId }).eq("id", opp.id);
-}
-
 /**
  * Distribui o lead quente por rodízio entre o pool do DEPARTAMENTO do número que
- * está online. O pool e o cursor vivem no departamento (herança pelo vínculo
- * department_channels). Pool vazio = todos os membros do departamento. Sem ninguém
- * online → segura para o admin distribuir depois (Etapa B).
+ * está online (lógica em @/lib/leads/distribution). Sem departamento vinculado ou
+ * ninguém online → segura para o admin/varredura distribuir depois (Etapa B).
  */
 async function distributeLead(ctx: Ctx, node: { pipeline?: string }) {
-  const markAwaiting = () =>
-    ctx.db.from("conversations").update({ awaiting_distribution: true }).eq("id", ctx.conversationId);
-
-  // Departamento vinculado ao número (o primeiro, se houver mais de um).
-  const { data: dc } = await ctx.db
-    .from("department_channels")
-    .select("department_id")
-    .eq("channel_id", ctx.channel.id)
-    .order("created_at")
-    .limit(1)
-    .maybeSingle();
-  if (!dc?.department_id) {
-    await markAwaiting();
-    return;
+  const deptId = await channelDepartmentId(ctx.db, ctx.channel.id);
+  if (deptId) {
+    const user = await distributeOne(ctx.db, {
+      locationId: ctx.channel.location_id,
+      deptId,
+      conversationId: ctx.conversationId,
+      contactId: ctx.contact.id,
+      pipelineName: node.pipeline,
+    });
+    if (user) return;
   }
-  const deptId = dc.department_id as string;
-
-  const { data: dep } = await ctx.db
-    .from("departments")
-    .select("lead_pool, rr_cursor")
-    .eq("id", deptId)
-    .maybeSingle();
-
-  // Pool = configurado; se vazio, todos os membros do departamento.
-  let pool: string[] = dep?.lead_pool ?? [];
-  if (!pool.length) {
-    const { data: mem } = await ctx.db
-      .from("location_members")
-      .select("user_id")
-      .eq("location_id", ctx.channel.location_id)
-      .eq("department_id", deptId);
-    pool = (mem ?? []).map((m: any) => m.user_id);
-  }
-
-  if (pool.length) {
-    const since = new Date(Date.now() - PRESENCE_MS).toISOString();
-    const { data: onlineRows } = await ctx.db
-      .from("location_members")
-      .select("user_id")
-      .eq("location_id", ctx.channel.location_id)
-      .in("user_id", pool)
-      .gte("last_seen_at", since);
-    const online = new Set((onlineRows ?? []).map((m: any) => m.user_id));
-
-    const cursor = dep?.rr_cursor ?? 0;
-    for (let i = 0; i < pool.length; i++) {
-      const idx = (cursor + i) % pool.length;
-      if (online.has(pool[idx])) {
-        await ctx.db
-          .from("departments")
-          .update({ rr_cursor: (idx + 1) % pool.length })
-          .eq("id", deptId);
-        await assignLead(ctx, node, pool[idx]);
-        return;
-      }
-    }
-  }
-
-  await markAwaiting();
+  await ctx.db
+    .from("conversations")
+    .update({ awaiting_distribution: true })
+    .eq("id", ctx.conversationId);
 }
 
 /** Caminha pelos nós até uma pergunta (para e espera) ou o fim. */

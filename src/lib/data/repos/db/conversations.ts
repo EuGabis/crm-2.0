@@ -40,6 +40,7 @@ const mapConversation = (r: any): Conversation => ({
   archivedBy: r.archived_by ?? null,
   createdAt: r.created_at,
   botPaused: r.bot_paused ?? false,
+  awaitingDistribution: r.awaiting_distribution ?? false,
 });
 
 const mapMessage = (r: any): Message => ({

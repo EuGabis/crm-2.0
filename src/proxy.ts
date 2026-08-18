@@ -16,6 +16,6 @@ export const config = {
   // ou a assinatura HMAC da Meta no webhook do WhatsApp). As rotas autenticadas
   // de marketing (send/test) fazem seu próprio getUser().
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|api/automations|api/whatsapp|api/forms|api/webhooks|api/integrations|api/marketing|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api/automations|api/whatsapp|api/forms|api/webhooks|api/integrations|api/marketing|api/leads|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

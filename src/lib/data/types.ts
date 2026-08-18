@@ -119,6 +119,8 @@ export interface Conversation {
   createdAt?: string;
   /** Bot pausado = humano assumiu (migração 0032). false = bot ainda ativo. */
   botPaused?: boolean;
+  /** Lead quente qualificado sem ninguém online — aguardando distribuição (0056). */
+  awaitingDistribution?: boolean;
 }
 
 /** Abas de filtro da caixa de entrada. */

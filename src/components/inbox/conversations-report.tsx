@@ -4,11 +4,12 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Download, MessageSquare, User } from "lucide-react";
+import { Download, MessageSquare, Send, User } from "lucide-react";
+import { toast } from "sonner";
 import { contactName } from "@/lib/data/repos/contacts";
 import { useDbContacts } from "@/lib/data/repos/db/contacts";
 import { useConversations, useConvStore } from "@/lib/data/repos/db/conversations";
-import { useTeam } from "@/lib/data/repos/db/team";
+import { useMyMembership, useTeam } from "@/lib/data/repos/db/team";
 import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
 import { channelLabel } from "@/components/shared/channel-icon";
 import { cn } from "@/lib/utils";
@@ -17,6 +18,7 @@ import type { Conversation } from "@/lib/data/types";
 const STATUS_STYLE: Record<string, string> = {
   "Caixa de entrada": "bg-indigo-100 text-indigo-700",
   Bot: "bg-violet-100 text-violet-700",
+  "Aguardando distribuição": "bg-amber-100 text-amber-700",
   Finalizada: "bg-emerald-100 text-emerald-700",
   Arquivada: "bg-slate-100 text-slate-500",
 };
@@ -24,6 +26,7 @@ const STATUS_STYLE: Record<string, string> = {
 function statusOf(c: Conversation): string {
   if (c.closedAt) return "Finalizada";
   if (c.archivedAt) return "Arquivada";
+  if (c.awaitingDistribution) return "Aguardando distribuição";
   if (c.assignedTo) return "Caixa de entrada";
   if (c.botPaused === false) return "Bot";
   return "Caixa de entrada";
@@ -50,7 +53,36 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
   const { contacts } = useDbContacts();
   const { channels } = useWhatsappChannels();
   const { members } = useTeam();
+  const { isAdmin } = useMyMembership();
   const messages = useConvStore((s) => s.messages);
+  const [distributing, setDistributing] = useState(false);
+
+  const awaitingCount = useMemo(
+    () => conversations.filter((c) => c.awaitingDistribution).length,
+    [conversations],
+  );
+
+  async function distribute(pct: number) {
+    setDistributing(true);
+    try {
+      const res = await fetch("/api/leads/distribute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pct }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const n = json.distributed ?? 0;
+        n > 0
+          ? toast.success(`${n} lead(s) distribuído(s) para quem está online`)
+          : toast.info("Ninguém online no pool agora — nada distribuído");
+      } else {
+        toast.error(json.error ?? "Não foi possível distribuir");
+      }
+    } finally {
+      setDistributing(false);
+    }
+  }
 
   const [statusF, setStatusF] = useState("todos");
   const [canalF, setCanalF] = useState("todos");
@@ -168,6 +200,32 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
 
   return (
     <div className="space-y-3">
+      {isAdmin && awaitingCount > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
+          <p className="text-xs text-amber-800">
+            <strong>{awaitingCount}</strong> lead(s) quente(s){" "}
+            <strong>aguardando distribuição</strong> — ficaram no bot por não ter ninguém online.
+          </p>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] text-amber-700">Distribuir agora:</span>
+            {[
+              { label: "Todos", pct: 100 },
+              { label: "50%", pct: 50 },
+              { label: "30%", pct: 30 },
+            ].map((o) => (
+              <button
+                key={o.pct}
+                disabled={distributing}
+                onClick={() => distribute(o.pct)}
+                className="flex items-center gap-1 rounded-md bg-amber-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                <Send className="size-3" /> {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-slate-500">
           <span className="font-semibold text-slate-700">{filtered.length.toLocaleString("pt-BR")}</span>{" "}
@@ -195,6 +253,7 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
           <option value="todos">Status: todos</option>
           <option value="Caixa de entrada">Caixa de entrada</option>
           <option value="Bot">Bot</option>
+          <option value="Aguardando distribuição">Aguardando distribuição</option>
           <option value="Finalizada">Finalizada</option>
           <option value="Arquivada">Arquivada</option>
         </select>
