@@ -194,8 +194,13 @@ export function subscribeInbox() {
         (payload) => {
           const conv = mapConversation(payload.new);
           const s = get();
+          // Upsert: uma conversa que estava OCULTA (com o bot) e foi atribuída ao
+          // atendente chega como UPDATE — se ainda não está na lista, adiciona ao
+          // vivo (senão só apareceria após um F5).
           set({
-            conversations: s.conversations.map((c) => (c.id === conv.id ? conv : c)),
+            conversations: s.conversations.some((c) => c.id === conv.id)
+              ? s.conversations.map((c) => (c.id === conv.id ? conv : c))
+              : [conv, ...s.conversations],
           });
         }
       )
