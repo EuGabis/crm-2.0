@@ -101,7 +101,7 @@ function AssignPicker({ conversation }: { conversation: Conversation }) {
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
-        {me && (
+        {me && conversation.assignedTo !== me.userId && (
           <DropdownMenuItem className="text-xs" onClick={() => void set(me.userId)}>
             Atribuir a mim
           </DropdownMenuItem>
