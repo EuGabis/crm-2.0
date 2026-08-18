@@ -564,11 +564,19 @@ function DepartmentDialog({
   onOpenChange: (o: boolean) => void;
 }) {
   const { channels } = useWhatsappChannels();
+  const { members } = useTeam();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [permissions, setPermissions] = useState<ModulePermissions>({});
   const [channelIds, setChannelIds] = useState<string[]>([]);
+  const [leadPool, setLeadPool] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+
+  // Membros deste departamento — só eles entram no rodízio.
+  const deptMembers = useMemo(
+    () => (department ? members.filter((m) => m.departmentId === department.id) : []),
+    [members, department]
+  );
 
   useEffect(() => {
     setName(department?.name ?? "");
@@ -579,10 +587,20 @@ function DepartmentDialog({
         Object.fromEntries(MODULE_KEYS.map((k) => [k, false]))
     );
     setChannelIds(department?.channelIds ?? []);
+    setLeadPool(department?.leadPool ?? []);
   }, [department, open]);
 
   const toggleChannel = (id: string) =>
     setChannelIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
+
+  // Vazio = todos do departamento. Ao desmarcar o 1º, materializa a lista completa.
+  const poolChecked = (userId: string) =>
+    leadPool.length === 0 || leadPool.includes(userId);
+  const togglePool = (userId: string) =>
+    setLeadPool((prev) => {
+      const base = prev.length ? prev : deptMembers.map((m) => m.userId);
+      return base.includes(userId) ? base.filter((id) => id !== userId) : [...base, userId];
+    });
 
   const save = async () => {
     if (!name.trim()) {
@@ -596,8 +614,9 @@ function DepartmentDialog({
           description,
           permissions,
           channelIds,
+          leadPool,
         })
-      : await departmentActions.create({ name, description, permissions, channelIds });
+      : await departmentActions.create({ name, description, permissions, channelIds, leadPool });
     setSaving(false);
     if (!res.ok) {
       toast.error(res.error ?? "Não foi possível salvar");
@@ -682,6 +701,47 @@ function DepartmentDialog({
               {channelIds.length === 0
                 ? "Nenhum número marcado = sem restrição: o departamento vê conversas de qualquer número."
                 : `Quem for deste departamento verá apenas as conversas ${channelIds.length === 1 ? "do número marcado" : `dos ${channelIds.length} números marcados`} — mais as conversas de outros canais (e-mail, Instagram), que não têm número.`}
+            </p>
+          </div>
+
+          {/* Distribuição de leads por rodízio (migração 0057) */}
+          <div>
+            <Label className="text-xs font-semibold">Distribuição de leads (rodízio)</Label>
+            {!department ? (
+              <p className="mt-1 rounded-lg border border-dashed p-3 text-[11px] text-slate-400">
+                Crie o departamento e vincule os atendentes primeiro. Depois volte aqui para
+                escolher quem entra no rodízio de leads.
+              </p>
+            ) : deptMembers.length === 0 ? (
+              <p className="mt-1 rounded-lg border border-dashed p-3 text-[11px] text-slate-400">
+                Nenhum atendente neste departamento ainda. Defina o departamento das pessoas na
+                tabela de usuários para poder distribuir leads.
+              </p>
+            ) : (
+              <div className="mt-1 space-y-1.5 rounded-lg border p-3">
+                {deptMembers.map((m) => (
+                  <Label
+                    key={m.userId}
+                    className="flex items-center gap-2 text-[11px] font-normal text-slate-600"
+                  >
+                    <Checkbox
+                      checked={poolChecked(m.userId)}
+                      onCheckedChange={() => togglePool(m.userId)}
+                    />
+                    <span className="font-medium text-slate-700">{m.name}</span>
+                    {m.role === "admin" && (
+                      <span className="rounded bg-slate-100 px-1 text-[9px] font-semibold text-slate-500">
+                        admin
+                      </span>
+                    )}
+                  </Label>
+                ))}
+              </div>
+            )}
+            <p className="mt-1 text-[10px] leading-tight text-slate-400">
+              Leads <strong>quentes</strong> dos números deste departamento vão, em rodízio,
+              para quem estiver <strong>online</strong> (ativo nos últimos 5 min). Desmarque
+              quem não deve receber — ninguém marcado = todos recebem.
             </p>
           </div>
 
