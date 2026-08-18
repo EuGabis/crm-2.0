@@ -27,6 +27,8 @@ export type BotNode =
       options?: BotOption[];
       /** Rótulo do botão que abre a lista (default "Ver opções"). */
       listButton?: string;
+      /** "name": valida com IA se a resposta é um nome de verdade; senão repergunta. */
+      validate?: "name";
       next: string | null;
     }
   // Grava a resposta num campo do contato (ex.: first_name a partir de "name").

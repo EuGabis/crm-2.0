@@ -179,7 +179,7 @@ function NodeEditor({
           placeholder="Texto da pergunta…"
         />
         <p className="text-[10px] text-slate-400">
-          Use <code>{"{{name}}"}</code> para inserir o nome do contato. Guarda em:{" "}
+          Use <code>{"{{first_name}}"}</code> para chamar pelo primeiro nome. Guarda em:{" "}
           <span className="font-mono">{node.var}</span>
         </p>
         {node.options?.length ? (

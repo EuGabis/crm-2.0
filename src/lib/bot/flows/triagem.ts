@@ -32,6 +32,7 @@ export const triagemFlow: BotFlow = {
       type: "ask",
       text: "Digite o seu nome:",
       var: "name",
+      validate: "name",
       next: "salva_nome",
     },
     salva_nome: {
@@ -43,7 +44,7 @@ export const triagemFlow: BotFlow = {
     pergunta_curso: {
       id: "pergunta_curso",
       type: "ask",
-      text: "{{name}}, clique em qual curso quer fazer?",
+      text: "{{first_name}}, clique em qual curso quer fazer?",
       var: "curso",
       listButton: "Ver cursos",
       options: [
@@ -58,7 +59,7 @@ export const triagemFlow: BotFlow = {
     pergunta_conhece: {
       id: "pergunta_conhece",
       type: "ask",
-      text: "{{name}}, você conhece o Lito?",
+      text: "{{first_name}}, você conhece o Lito?",
       var: "conhece_lito",
       listButton: "Responder",
       options: [
@@ -72,7 +73,7 @@ export const triagemFlow: BotFlow = {
     pergunta_objetivo: {
       id: "pergunta_objetivo",
       type: "ask",
-      text: "{{name}}, em qual momento você está hoje em relação ao seu objetivo na aviação?",
+      text: "{{first_name}}, em qual momento você está hoje em relação ao seu objetivo na aviação?",
       var: "objetivo",
       listButton: "Responder",
       options: [
@@ -86,7 +87,7 @@ export const triagemFlow: BotFlow = {
     pergunta_situacao: {
       id: "pergunta_situacao",
       type: "ask",
-      text: "{{name}}, qual dessas situações mais representa você hoje?",
+      text: "{{first_name}}, qual dessas situações mais representa você hoje?",
       var: "situacao",
       listButton: "Responder",
       options: [
@@ -145,7 +146,7 @@ export const triagemFlow: BotFlow = {
     pergunta_contato: {
       id: "pergunta_contato",
       type: "ask",
-      text: "{{name}}, obrigado pela resposta! Você vai ser direcionado para nosso consultor de carreira. Como prefere o contato?",
+      text: "{{first_name}}, obrigado pela resposta! Você vai ser direcionado para nosso consultor de carreira. Como prefere o contato?",
       var: "pref_contato",
       listButton: "Escolher",
       options: [
@@ -157,7 +158,7 @@ export const triagemFlow: BotFlow = {
     handoff_consultor: {
       id: "handoff_consultor",
       type: "handoff",
-      text: "Perfeito, {{name}}! Já estou passando você para um consultor. Em breve alguém da nossa tripulação fala com você por aqui. ✈️",
+      text: "Perfeito, {{first_name}}! Já estou passando você para um consultor. Em breve alguém da nossa tripulação fala com você por aqui. ✈️",
     },
     // FRIO: manda o link e deixa o agente de IA seguir tirando dúvidas.
     frio_link: {
@@ -165,7 +166,7 @@ export const triagemFlow: BotFlow = {
       type: "handoff",
       to: "ia",
       text:
-        "Obrigado pelas respostas, {{name}}! Você pode ver tudo sobre os nossos cursos neste link: " +
+        "Obrigado pelas respostas, {{first_name}}! Você pode ver tudo sobre os nossos cursos neste link: " +
         "https://litoaviationacademy.com.br/\n\nFicou com alguma dúvida? Pode me perguntar por aqui que eu te ajudo. ✈️",
     },
   },

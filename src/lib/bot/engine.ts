@@ -6,7 +6,8 @@
  */
 import { sendText, sendInteractiveList } from "@/lib/whatsapp/client";
 import { toWhatsAppNumber } from "@/lib/whatsapp/phone";
-import { normalize, type BotFlow, type BotNode } from "./types";
+import { chat } from "@/lib/ai/openai";
+import { normalize, type BotFlow, type BotNode, type BotOption } from "./types";
 import { triagemFlow } from "./flows/triagem";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -48,6 +49,68 @@ interface Ctx {
 
 function render(text: string, vars: Record<string, any>): string {
   return text.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, k) => (vars[k] != null ? String(vars[k]) : ""));
+}
+
+const NOT_A_NAME = new Set([
+  "oi", "ola", "opa", "eae", "bom dia", "boa tarde", "boa noite", "quero", "preco",
+  "valor", "sim", "nao", "talvez", "sei la", "deus", "teste", "aviao", "curso",
+]);
+
+/** Heurística de nome (fallback sem IA): rejeita dígitos/frases-comando óbvias. */
+function heuristicName(raw: string): string | null {
+  const cleaned = raw.replace(/\s+/g, " ").trim();
+  if (!cleaned || /\d/.test(cleaned)) return null;
+  if (cleaned.replace(/[^\p{L}]/gu, "").length < 2) return null;
+  if (NOT_A_NAME.has(normalize(cleaned))) return null;
+  return cleaned.split(" ").slice(0, 4).join(" ");
+}
+
+/**
+ * Extrai/valida o nome da resposta do lead de forma inteligente. Usa a IA para
+ * decidir se é um nome de pessoa real (rejeita "deus", "oi", número, xingamento)
+ * e tira o nome de frases ("meu nome é Gabriel" → "Gabriel"). Sem IA/erro, cai na
+ * heurística. Retorna o nome limpo ou null (=> reperguntar).
+ */
+async function extractName(text: string): Promise<string | null> {
+  const raw = String(text ?? "").trim();
+  if (!raw) return null;
+  if (raw.replace(/[^\p{L}]/gu, "").length < 2) return null;
+  if (!process.env.OPENAI_API_KEY) return heuristicName(raw);
+  try {
+    const { text: out } = await chat(
+      [
+        {
+          role: "system",
+          content:
+            "Você extrai o NOME PRÓPRIO de uma pessoa a partir da resposta dela à " +
+            "pergunta 'Qual é o seu nome?'. Responda APENAS o nome (com sobrenome se " +
+            "houver), sem pontuação nem frases. Se a mensagem NÃO contiver um nome de " +
+            "pessoa real (ex.: 'deus', 'oi', 'quero preço', xingamento, número, emoji), " +
+            "responda exatamente: NONE.",
+        },
+        { role: "user", content: raw },
+      ],
+      { temperature: 0 },
+    );
+    const clean = out.trim().replace(/^["']+|["'.]+$/g, "").trim();
+    if (!clean || /^none$/i.test(clean)) return null;
+    return clean.split(/\s+/).slice(0, 4).join(" ");
+  } catch {
+    return heuristicName(raw);
+  }
+}
+
+/** Casa a resposta com uma opção: pelo clique (replyId) ou pelo texto digitado. */
+function matchOption(options: BotOption[], replyId: string | null, text: string): BotOption | null {
+  if (replyId) {
+    const byId = options.find((o) => o.id === replyId);
+    if (byId) return byId;
+  }
+  const t = normalize(text);
+  if (!t) return null;
+  return (
+    options.find((o) => normalize(o.value ?? o.title) === t || normalize(o.title) === t) ?? null
+  );
 }
 
 /** Grava a mensagem de saída do bot no inbox + atualiza a conversa. */
@@ -311,6 +374,9 @@ async function advance(
           .from("contacts")
           .update({ first_name: first, last_name: last })
           .eq("id", ctx.contact.id);
+        // Disponibiliza {{first_name}} nas mensagens (chamar só pelo 1º nome).
+        vars.first_name = first;
+        vars.last_name = last;
       }
       nodeId = node.next;
     } else if (node.type === "score") {
@@ -404,14 +470,22 @@ export async function maybeRunBot(
         flowKey: flow.key,
       };
       if (node.options?.length) {
-        const opt = node.options.find((o: any) => o.id === args.replyId);
+        const opt = matchOption(node.options, args.replyId, args.text);
         if (!opt) {
-          // Não clicou numa opção válida → pede pra usar as opções e reenvia.
-          await botSend(ctx, "Por favor, selecione uma das opções enviadas.");
+          // Resposta fora da lista → repergunta (essencial pra qualificação).
+          await botSend(ctx, "Para eu continuar, escolha uma das opções da lista, por favor. 🙂");
           await botSendList(ctx, render(node.text, vars), node.listButton, node.options);
           return true;
         }
         vars[node.var] = opt.value ?? opt.title;
+      } else if (node.validate === "name") {
+        const name = await extractName(args.text);
+        if (!name) {
+          // Não parece um nome de verdade → repergunta mantendo a sessão neste nó.
+          await botSend(ctx, "Não consegui identificar seu nome 😅. Pode me dizer só o seu nome, por favor?");
+          return true;
+        }
+        vars[node.var] = name;
       } else {
         vars[node.var] = args.text;
       }
