@@ -137,6 +137,28 @@ src/
 6. Páginas são client components (`"use client"`) — ícones Lucide não podem ser
    passados de Server para Client component como prop.
 
+## Revalidação ao trocar de página (`RouteRevalidator`)
+
+As stores carregam **uma vez por sessão** (`if (loaded || loading) return`) —
+decisão certa para não repetir consulta a cada navegação, e que virou problema
+quando passou a existir quem escreve no banco sem ser o usuário: o **bot** criou
+um lead e o card só aparecia depois de um F5.
+
+`components/layout/route-revalidator.tsx` mora no shell e, ao mudar o
+`pathname`, chama o `reload()` das stores daquela rota (`/leads` e `/dashboard` →
+funil; `/contatos` → contatos + módulo; `/calendarios` → agenda).
+
+- Num lugar só, e não um `useEffect` de reload por página: espalhado, a próxima
+  tela nasceria sem revalidação e ninguém lembraria do porquê.
+- **`reload()` ≠ `load()`**: não toca em `loading`/`loaded`, então nenhuma tela
+  volta para "Carregando..." — e ignora erro de rede, porque dado velho na tela é
+  melhor do que tela vazia.
+- A **primeira montagem não revalida**: o `load()` da página acabou de buscar, e
+  ler de novo no mesmo instante é desperdício.
+- **Conversas fica de fora** de propósito: já tem Realtime + `useInboxLiveSync`.
+- Ao criar store nova com guard de `loaded`, considere expor `reload()` e
+  registrar aqui.
+
 ## Conversas: refresh silencioso (por que Realtime não bastava)
 
 Queixa real: "para alguns usuários a conversa não atualiza, preciso dar F5".

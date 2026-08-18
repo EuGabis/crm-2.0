@@ -60,6 +60,7 @@ interface ModuleState {
   fields: ContactField[];
   logs: BulkLog[];
   load: () => Promise<void>;
+  reload: () => Promise<void>;
   set: (patch: Partial<Pick<ModuleState, "smartLists" | "tasks" | "fields" | "logs">>) => void;
 }
 
@@ -113,6 +114,28 @@ export const useModuleStore = create<ModuleState>((set, get) => ({
     set({
       loaded: true,
       loading: false,
+      smartLists: (lists.data ?? []).map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        conditions: r.conditions ?? [],
+      })),
+      tasks: (tasks.data ?? []).map(mapTask),
+      fields: (fields.data ?? []).map(mapField),
+      logs: (logs.data ?? []).map(mapLog),
+    });
+  },
+
+  /** Mesma leitura do `load`, sem piscar a tela (tarefas criadas por automação). */
+  reload: async () => {
+    const supabase = createClient();
+    const [lists, tasks, fields, logs] = await Promise.all([
+      supabase.from("smart_lists").select("*").order("created_at"),
+      supabase.from("tasks").select("*").order("created_at", { ascending: false }),
+      supabase.from("contact_fields").select("*").order("position").order("created_at"),
+      supabase.from("bulk_logs").select("*").order("created_at", { ascending: false }).limit(50),
+    ]);
+    if (tasks.error) return;
+    set({
       smartLists: (lists.data ?? []).map((r: any) => ({
         id: r.id,
         name: r.name,

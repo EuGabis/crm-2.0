@@ -34,6 +34,7 @@ interface DbState {
   contacts: Contact[];
   team: User[];
   load: () => Promise<void>;
+  reload: () => Promise<void>;
   setContacts: (fn: (prev: Contact[]) => Contact[]) => void;
 }
 
@@ -100,6 +101,40 @@ export const useDbStore = create<DbState>((set, get) => ({
       userId: auth.user?.id ?? null,
       contacts: (contacts ?? []).map(mapContact),
       team,
+    });
+  },
+
+  /**
+   * Relê contatos e equipe sem piscar a tela (não toca em `loading`/`loaded`).
+   * O bot cria CONTATO além do card do funil — sem isso, o contato novo só
+   * aparecia depois de um F5.
+   */
+  reload: async () => {
+    const { locationId } = get();
+    if (!locationId) return;
+    const supabase = createClient();
+    const [{ data: contacts, error }, { data: memberships }, { data: profiles }] =
+      await Promise.all([
+        supabase
+          .from("contacts")
+          .select("*")
+          .eq("location_id", locationId)
+          .order("created_at", { ascending: false }),
+        supabase.from("location_members").select("user_id, role"),
+        supabase.from("profiles").select("*"),
+      ]);
+    // Falha de rede não pode esvaziar a lista que já está na tela.
+    if (error) return;
+    const roleByUser = new Map(memberships?.map((m: any) => [m.user_id, m.role]) ?? []);
+    set({
+      contacts: (contacts ?? []).map(mapContact),
+      team: (profiles ?? []).map((pr: any) => ({
+        id: pr.id,
+        name: pr.name,
+        email: pr.email,
+        role: (roleByUser.get(pr.id) ?? "user") as User["role"],
+        color: pr.color,
+      })),
     });
   },
 
