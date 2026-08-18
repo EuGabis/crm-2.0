@@ -791,21 +791,38 @@ export const conversationActions = {
       | undefined;
 
     if (existing?.conv_id) {
+      const addToStore = (row: any): string => {
+        const conv = mapConversation(row);
+        const s = useConvStore.getState();
+        if (!s.conversations.some((c) => c.id === conv.id)) {
+          s.patch({ conversations: [conv, ...s.conversations] });
+        }
+        return conv.id;
+      };
+
       // Consigo VER essa conversa? (a RLS decide: dono/admin/sees_all).
       const { data: full } = await supabase
         .from("conversations")
         .select("*")
         .eq("id", existing.conv_id)
         .maybeSingle();
-      if (full) {
-        const conv = mapConversation(full);
-        const s = useConvStore.getState();
-        if (!s.conversations.some((c) => c.id === conv.id)) {
-          s.patch({ conversations: [conv, ...s.conversations] });
+      if (full) return { id: addToStore(full) };
+
+      // Não vejo. Se está SEM dono, assumo (reivindico) e abro.
+      if (existing.assigned_to == null) {
+        const { data: claimed } = await supabase.rpc("claim_conversation", {
+          conv_id: existing.conv_id,
+        });
+        if (claimed) {
+          const { data: mine } = await supabase
+            .from("conversations")
+            .select("*")
+            .eq("id", existing.conv_id)
+            .maybeSingle();
+          if (mine) return { id: addToStore(mine) };
         }
-        return { id: conv.id };
       }
-      // Existe, mas não é minha → não abro nem duplico.
+      // É de OUTRO atendente → não abro nem duplico.
       return { id: null, error: "Esta conversa está atribuída a outro atendente." };
     }
 
