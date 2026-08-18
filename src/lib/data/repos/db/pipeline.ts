@@ -43,7 +43,44 @@ interface PipelineDbState {
   pipelines: Pipeline[];
   opportunities: Opportunity[];
   load: () => Promise<void>;
+  reload: () => Promise<void>;
   patch: (p: Partial<Pick<PipelineDbState, "pipelines" | "opportunities">>) => void;
+}
+
+/**
+ * Busca pipelines + fases + oportunidades e devolve o formato da store.
+ * Separado do `load` para que `reload` reaproveite exatamente a mesma leitura —
+ * duas consultas paralelas divergindo seria a origem de bug silencioso.
+ */
+async function fetchPipelineState(): Promise<
+  Pick<PipelineDbState, "pipelines" | "opportunities"> | null
+> {
+  const supabase = createClient();
+  const [pipes, stages, opps] = await Promise.all([
+    supabase.from("pipelines").select("*").order("position").order("created_at"),
+    supabase.from("stages").select("*").order("position"),
+    supabase.from("opportunities").select("*").order("created_at", { ascending: false }),
+  ]);
+  if (pipes.error || stages.error || opps.error) return null;
+  const stagesByPipe = new Map<string, Stage[]>();
+  (stages.data ?? []).forEach((r: any) => {
+    const list = stagesByPipe.get(r.pipeline_id) ?? [];
+    list.push(mapStage(r));
+    stagesByPipe.set(r.pipeline_id, list);
+  });
+  return {
+    pipelines: (pipes.data ?? []).map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      stages: stagesByPipe.get(p.id) ?? [],
+      // Colunas da 0039. `?? "empresa"` cobre o intervalo entre subir o código
+      // e aplicar a migração: sem elas, tudo é da empresa (como era antes).
+      scope: (p.scope ?? "empresa") as PipelineScope,
+      departmentId: p.department_id ?? null,
+      ownerId: p.owner_id ?? null,
+    })),
+    opportunities: (opps.data ?? []).map(mapOpportunity),
+  };
 }
 
 export const usePipelineDbStore = create<PipelineDbState>((set, get) => ({
@@ -56,34 +93,21 @@ export const usePipelineDbStore = create<PipelineDbState>((set, get) => ({
     if (get().loaded || get().loading) return;
     set({ loading: true });
     await useDbStore.getState().load();
-    const supabase = createClient();
-    const [pipes, stages, opps] = await Promise.all([
-      supabase.from("pipelines").select("*").order("position").order("created_at"),
-      supabase.from("stages").select("*").order("position"),
-      supabase.from("opportunities").select("*").order("created_at", { ascending: false }),
-    ]);
-    const stagesByPipe = new Map<string, Stage[]>();
-    (stages.data ?? []).forEach((r: any) => {
-      const list = stagesByPipe.get(r.pipeline_id) ?? [];
-      list.push(mapStage(r));
-      stagesByPipe.set(r.pipeline_id, list);
-    });
-    set({
-      loaded: true,
-      loading: false,
-      pipelines: (pipes.data ?? []).map((p: any) => ({
-        id: p.id,
-        name: p.name,
-        stages: stagesByPipe.get(p.id) ?? [],
-        // Colunas da 0039. `?? "empresa"` cobre o intervalo entre subir o
-        // código e aplicar a migração: sem elas, tudo é da empresa (que é
-        // exatamente como era antes).
-        scope: (p.scope ?? "empresa") as PipelineScope,
-        departmentId: p.department_id ?? null,
-        ownerId: p.owner_id ?? null,
-      })),
-      opportunities: (opps.data ?? []).map(mapOpportunity),
-    });
+    const data = await fetchPipelineState();
+    set(data ? { ...data, loaded: true, loading: false } : { loading: false });
+  },
+
+  /**
+   * Relê tudo SEM piscar a tela: não mexe em `loading` nem em `loaded`, então
+   * nenhum componente volta para o "Carregando...". Usado quando o usuário
+   * troca de página (ver `components/layout/route-revalidator.tsx`) — o card que
+   * o bot criou depois do primeiro carregamento aparecia só com F5.
+   */
+  reload: async () => {
+    await useDbStore.getState().load();
+    const data = await fetchPipelineState();
+    // Falha de rede não pode esvaziar o funil que já está na tela.
+    if (data) set(data);
   },
 
   patch: (p) => set(p),

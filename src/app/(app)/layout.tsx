@@ -4,6 +4,7 @@ import { Topbar } from "@/components/layout/topbar";
 import { SessionManager } from "@/components/layout/session-manager";
 import { Reminders } from "@/components/calendar/reminders";
 import { ConfirmProvider } from "@/components/shared/confirm";
+import { RouteRevalidator } from "@/components/layout/route-revalidator";
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
@@ -12,6 +13,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     <ConfirmProvider>
     <div className="flex h-screen overflow-hidden">
       <SessionManager />
+      {/* Relê os dados da tela ao trocar de página: as stores carregam uma vez
+          por sessão, e o bot escreve no banco sem o usuário estar olhando. */}
+      <RouteRevalidator />
       {/* Lembrete de compromisso (0042): fica no shell para avisar em qualquer
           tela — um aviso que só aparece com o Calendário aberto não serviria. */}
       <Reminders />
