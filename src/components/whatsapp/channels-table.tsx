@@ -8,6 +8,11 @@ import { useWhatsappChannels, whatsappActions } from "@/lib/data/repos/db/whatsa
 import { EmptyState } from "@/components/shared/empty-state";
 import { EditChannelDialog } from "./edit-channel-dialog";
 
+/** Rótulo amigável de cada fluxo de bot para a coluna "Bot". */
+const BOT_LABELS: Record<string, string> = {
+  triagem: "Triagem Comercial",
+};
+
 export function ChannelsTable() {
   const { channels, ready } = useWhatsappChannels();
   const [editing, setEditing] = useState<(typeof channels)[number] | null>(null);
@@ -56,7 +61,15 @@ export function ChannelsTable() {
               </td>
               <td className="px-3 py-2 text-slate-600">{c.sector || "—"}</td>
               <td className="px-3 py-2 text-slate-600">{c.dailyLimit}</td>
-              <td className="px-3 py-2 text-slate-400">—</td>
+              <td className="px-3 py-2">
+                {c.botFlow ? (
+                  <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
+                    {BOT_LABELS[c.botFlow] ?? c.botFlow}
+                  </span>
+                ) : (
+                  <span className="text-slate-400">—</span>
+                )}
+              </td>
               <td className="px-3 py-2 text-slate-400">—</td>
               <td className="px-3 py-2 text-slate-500">
                 {format(new Date(c.createdAt), "d MMM yyyy", { locale: ptBR })}
