@@ -93,11 +93,30 @@ interface NotificationItem {
   /** Momento que ordena e define "novo". ISO. */
   at: string;
   href: string;
+  /**
+   * Muda quando há atividade NOVA no mesmo aviso.
+   *
+   * O `id` é da CONVERSA, não da mensagem — de propósito: um id por mensagem
+   * encheria a lista com dez linhas do mesmo contato. Só que, com id estável, a
+   * segunda mensagem caía como "já conhecida" e o sino não tocava mais (o
+   * sintoma relatado: toca uma vez só). A assinatura resolve os dois: a linha
+   * continua sendo uma, e a mudança dela é o gatilho do som.
+   */
+  signature: string;
 }
 
 /** Item no arquivo local: o aviso + quando ele foi visto pela primeira vez. */
 interface ArchivedItem extends NotificationItem {
   seenAt: string;
+}
+
+/** Avisos com atividade nova desde a última passada (id novo, ou assinatura mudada). */
+function pickFresh(archive: ArchivedItem[], fresh: NotificationItem[]): NotificationItem[] {
+  const byId = new Map(archive.map((a) => [a.id, a]));
+  return fresh.filter((i) => {
+    const old = byId.get(i.id);
+    return !old || old.signature !== i.signature;
+  });
 }
 
 function loadArchive(): ArchivedItem[] {
@@ -133,7 +152,9 @@ function mergeArchive(archive: ArchivedItem[], fresh: NotificationItem[]): Archi
   const byId = new Map(archive.map((a) => [a.id, a]));
   for (const item of fresh) {
     const old = byId.get(item.id);
-    byId.set(item.id, { ...item, seenAt: old?.seenAt ?? now });
+    // Atividade nova renova o "visto em": o aviso volta ao topo do histórico.
+    const changed = !!old && old.signature !== item.signature;
+    byId.set(item.id, { ...item, seenAt: changed || !old ? now : old.seenAt });
   }
   return [...byId.values()];
 }
@@ -191,19 +212,38 @@ export function NotificationsPanel() {
   const refresh = useCallback(async () => {
     await useDbStore.getState().load();
     const loc = useDbStore.getState().locationId;
+    const me = useDbStore.getState().userId;
     if (!loc) return;
     const supabase = createClient();
     const now = Date.now();
 
-    // 1) Conversas não lidas (abertas). A RLS já limita ao que a pessoa vê,
-    // inclusive a segmentação por número da 0035.
+    /**
+     * "É para mim?"
+     *
+     * A RLS já garante que ninguém vê o que não pode (segmentação por número da
+     * 0035, agenda por dono da 0043...). Mas VER e SER AVISADO são coisas
+     * diferentes: a caixa é compartilhada, e sem este filtro o time inteiro
+     * levava um pop-up por conversa de qualquer colega. Aviso é interrupção —
+     * interromper quem não tem o que fazer com aquilo treina a pessoa a ignorar
+     * o sino.
+     *
+     * A regra é a mesma nas quatro fontes: **meu, ou de ninguém**. O "de
+     * ninguém" precisa entrar — conversa na caixa do grupo, compromisso da
+     * empresa e tarefa sem responsável não podem virar aviso que ninguém
+     * recebe.
+     */
+    const isMine = (owner: string | null | undefined) => !owner || owner === me;
+
+    // 1) Conversas não lidas (abertas) atribuídas a mim ou a ninguém. A RLS já
+    // limita ao que a pessoa VÊ, inclusive a segmentação por número da 0035.
     const { data: convs } = await supabase
       .from("conversations")
-      .select("id, contact_id, unread_count, last_message_at, last_message_preview")
+      .select("id, contact_id, unread_count, last_message_at, last_message_preview, assigned_to")
       .eq("location_id", loc)
       .gt("unread_count", 0)
       .is("closed_at", null)
       .is("archived_at", null)
+      .or(me ? `assigned_to.is.null,assigned_to.eq.${me}` : "assigned_to.is.null")
       .order("last_message_at", { ascending: false })
       .limit(15);
 
@@ -223,17 +263,21 @@ export function NotificationsPanel() {
 
     // 2) Mensagens agendadas que falharam — o motor grava o motivo e ninguém
     // ficava sabendo sem abrir a aba Agendadas.
+    // Quem agendou é quem precisa saber que falhou.
     const { data: failed } = await supabase
       .from("messages")
-      .select("id, conversation_id, body, schedule_error, scheduled_for")
+      .select("id, conversation_id, body, schedule_error, scheduled_for, scheduled_by")
       .eq("location_id", loc)
       .eq("schedule_status", "falhou")
+      .or(me ? `scheduled_by.is.null,scheduled_by.eq.${me}` : "scheduled_by.is.null")
       .order("scheduled_for", { ascending: false })
       .limit(10);
 
     // 3) Compromissos das próximas 24h (a store já está carregada pelo
     // lembrete, que vive no mesmo shell).
+    // Compromisso de outra pessoa não é aviso meu; sem dono = da empresa.
     const appointments = useApptStore.getState().appointments.filter((a) => {
+      if (!isMine(a.ownerId)) return false;
       const start = new Date(a.start).getTime();
       return start >= now && start <= now + UPCOMING_HOURS * 3_600_000;
     });
@@ -243,6 +287,7 @@ export function NotificationsPanel() {
     // Vencida ENTRA de propósito — é justamente a que não pode ser esquecida.
     const tasks = useModuleStore.getState().tasks.filter((t) => {
       if (t.status !== "pending" || !t.dueAt) return false;
+      if (!isMine(t.assigneeId)) return false;
       return new Date(t.dueAt).getTime() <= now + UPCOMING_HOURS * 3_600_000;
     });
 
@@ -256,6 +301,9 @@ export function NotificationsPanel() {
         description: c.last_message_preview ?? "Nova mensagem",
         at: c.last_message_at ?? new Date(now).toISOString(),
         href: `/conversas?c=${c.id}`,
+        // Mensagem nova move `last_message_at` e sobe `unread_count`: é o que
+        // faz o sino tocar de novo na MESMA conversa.
+        signature: `${c.last_message_at ?? ""}|${c.unread_count}`,
       })),
       ...(failed ?? []).map((m: any) => ({
         id: `sched-${m.id}`,
@@ -264,6 +312,8 @@ export function NotificationsPanel() {
         description: m.schedule_error || m.body || "Sem detalhes",
         at: m.scheduled_for ?? new Date(now).toISOString(),
         href: `/conversas?c=${m.conversation_id}`,
+        // Uma falha é um evento só; a linha não muda depois de gravada.
+        signature: `sched-${m.id}`,
       })),
       ...tasks.map((t) => {
         const late = new Date(t.dueAt as string).getTime() < now;
@@ -276,6 +326,8 @@ export function NotificationsPanel() {
             : `Vence ${format(new Date(t.dueAt as string), "EEEE 'às' HH:mm", { locale: ptBR })}`,
           at: t.dueAt as string,
           href: "/contatos",
+          // Reagendar o prazo faz o aviso valer de novo.
+          signature: `${t.dueAt}|${late ? "vencida" : "a-vencer"}`,
         };
       }),
       ...appointments.map((a) => ({
@@ -286,20 +338,27 @@ export function NotificationsPanel() {
         // Ordena pelo início: um compromisso "novo" é o que está mais perto.
         at: a.start,
         href: "/calendarios",
+        // Remarcar o compromisso avisa de novo.
+        signature: a.start,
       })),
     ].sort((x, y) => y.at.localeCompare(x.at));
 
     // O arquivo é a fonte da tela; a consulta só atualiza e acrescenta.
     const before = loadArchive();
-    const known = new Set(before.map((a) => a.id));
     const merged = mergeArchive(before, next);
     saveArchive(merged);
     setItems(merged);
 
-    // Avisa só do que É NOVO e ainda não foi lido — reavisar algo que a pessoa
-    // já marcou como lido em outro dispositivo seria barulho puro.
-    const alreadyRead = new Set(loadRead());
-    const fresh = next.filter((i) => !known.has(i.id) && !alreadyRead.has(i.id));
+    // Novo, ou com atividade nova (ver `signature`).
+    const fresh = pickFresh(before, next);
+    // Atividade nova desmarca o "lido": chegou mensagem depois de você ter
+    // lido o aviso, então ele volta a valer.
+    if (fresh.length > 0) {
+      const freshIds = new Set(fresh.map((i) => i.id));
+      const stillRead = loadRead().filter((id) => !freshIds.has(id));
+      saveRead(stillRead);
+      setReadIds(stillRead);
+    }
     if (!seeded.current) {
       seeded.current = true;
       return;
@@ -488,18 +547,44 @@ export function NotificationsPanel() {
                   lado do endereço → Notificações → Permitir.
                 </p>
               ) : permission === "granted" ? (
-                <label className="flex items-center gap-1.5 text-[11px] text-slate-600">
-                  <input
-                    type="checkbox"
-                    checked={desktopOn}
-                    onChange={(e) => {
-                      setDesktopEnabled(e.target.checked);
-                      setDesktopOn(e.target.checked);
+                <>
+                  <label className="flex items-center gap-1.5 text-[11px] text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={desktopOn}
+                      onChange={(e) => {
+                        setDesktopEnabled(e.target.checked);
+                        setDesktopOn(e.target.checked);
+                      }}
+                      className="size-3"
+                    />
+                    Mostrar pop-up no computador a cada aviso novo
+                  </label>
+                  {/* Teste explícito: separa "o CRM não disparou" de "o Windows
+                      não mostrou". Sem ele, um pop-up que não aparece pode ser
+                      o Foco Assistido do Windows, notificação desligada para o
+                      navegador ou o site sem permissão — e não dá para saber
+                      qual olhando a tela do CRM. */}
+                  <button
+                    onClick={() => {
+                      playSound(loadSound());
+                      showDesktop({
+                        id: "teste",
+                        title: "Lito CRM — teste de notificação",
+                        body: "Se você está vendo isto, o pop-up está funcionando.",
+                        href: "/dashboard",
+                      });
                     }}
-                    className="size-3"
-                  />
-                  Mostrar pop-up no computador a cada aviso novo
-                </label>
+                    disabled={!desktopOn}
+                    className="mt-1.5 rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Testar som e pop-up agora
+                  </button>
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    Não apareceu? Veja no Windows se o Foco Assistido está ligado e se as
+                    notificações do navegador estão permitidas.
+                  </p>
+                </>
               ) : (
                 <>
                   <button
