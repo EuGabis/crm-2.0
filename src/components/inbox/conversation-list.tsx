@@ -86,14 +86,26 @@ export function ConversationList({
   const realtime = useRealtimeStatus();
   const { me, isAdmin } = useMyMembership();
   const { members } = useTeam();
-  // Não lidas que ainda pedem ação: finalizada ou arquivada não conta.
-  const unreadCount = useConversations("unread").filter(
-    (c) => !c.closedAt && !c.archivedAt
-  ).length;
+  const unreadRaw = useConversations("unread");
   const automatedIds = useAutomatedConversationIds();
   const views = useInboxViews();
   const activeView = views.find((v) => v.id === activeViewId) ?? null;
   const todas = useConversations("all");
+
+  // Não lidas que ainda pedem ação (finalizada/arquivada não conta) DENTRO do escopo
+  // atual — senão o badge conta uma conversa que a lista escopada não mostra.
+  const unreadCount = useMemo(() => {
+    const open = unreadRaw.filter((c) => !c.closedAt && !c.archivedAt);
+    const scoped =
+      scope === "mine"
+        ? open.filter((c) => c.assignedTo === me?.userId)
+        : scope === "offline"
+          ? open.filter((c) => c.assignedOffline && c.assignedTo === me?.userId)
+          : scope === "bot"
+            ? open.filter((c) => automatedIds.has(c.id))
+            : open;
+    return scoped.length;
+  }, [unreadRaw, scope, me?.userId, automatedIds]);
 
   // Contagem por pilha, mostrada no seletor — evita clicar em "Arquivadas" para
   // descobrir que está vazio.
