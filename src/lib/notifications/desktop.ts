@@ -54,11 +54,36 @@ export async function requestDesktop(): Promise<DesktopPermission> {
 }
 
 /**
- * Mostra o aviso. `href` é para onde o clique leva — a janela é trazida para a
- * frente antes de navegar, senão o CRM abriria atrás de tudo.
+ * Mostra o aviso. Devolve NULL quando conseguiu disparar, ou o motivo em texto
+ * quando não — quem chama decide se mostra na tela (o botão "Testar" mostra).
+ *
+ * Sem esse retorno, um pop-up que não aparece tem quatro explicações
+ * indistinguíveis: navegador sem suporte, permissão não concedida, caixinha
+ * desligada aqui dentro, ou o Windows engolindo o aviso (Foco Assistido /
+ * notificações do navegador desligadas no sistema). As três primeiras o CRM
+ * sabe responder; a quarta é a que sobra quando esta função devolve null e nada
+ * aparece.
+ *
+ * `href` é para onde o clique leva — a janela é trazida para a frente antes de
+ * navegar, senão o CRM abriria atrás de tudo.
  */
-export function showDesktop(item: { id: string; title: string; body: string; href: string }) {
-  if (!desktopEnabled()) return;
+export function showDesktop(item: {
+  id: string;
+  title: string;
+  body: string;
+  href: string;
+}): string | null {
+  const perm = desktopPermission();
+  if (perm === "unsupported") return "Este navegador não suporta avisos do sistema.";
+  if (perm === "denied") {
+    return "O navegador bloqueou os avisos deste site. Libere no cadeado ao lado do endereço → Notificações.";
+  }
+  if (perm === "default") {
+    return "Falta autorizar os avisos: use o botão \"Ativar avisos no computador\".";
+  }
+  if (window.localStorage.getItem(ENABLED_KEY) === "off") {
+    return "Os avisos na área de trabalho estão desligados aqui nas preferências.";
+  }
   try {
     const n = new Notification(item.title, {
       body: item.body,
@@ -70,8 +95,9 @@ export function showDesktop(item: { id: string; title: string; body: string; hre
       window.location.href = item.href;
       n.close();
     };
-  } catch {
-    // Alguns navegadores exigem Service Worker (Android). Sem pop-up, o sino
-    // continua funcionando — não é motivo para quebrar nada.
+    return null;
+  } catch (e) {
+    // Android/Chrome exige Service Worker para notificação; no desktop não.
+    return e instanceof Error ? `O navegador recusou o aviso: ${e.message}` : "O navegador recusou o aviso.";
   }
 }

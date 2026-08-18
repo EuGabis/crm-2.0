@@ -19,8 +19,10 @@ import {
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { createClient } from "@/lib/supabase/client";
+import { toast } from "sonner";
 import {
   DEFAULT_SOUND,
+  installAudioUnlock,
   loadSound,
   playSound,
   saveSound,
@@ -398,10 +400,38 @@ export function NotificationsPanel() {
       setDesktopOn(desktopEnabled());
     };
     void run();
+
+    // Libera o áudio no primeiro clique/tecla da página. Sem isto, a varredura
+    // automática tentava tocar sem gesto do usuário e o navegador descartava em
+    // silêncio — só o clique no sino fazia som.
+    const releaseUnlock = installAudioUnlock();
+
+    // ----- Realtime: avisa na hora, sem esperar a varredura de 1 min -----
+    // As duas tabelas já estão na publicação `supabase_realtime` (0003). Sem
+    // isto, a mensagem que chega às 10h00m05s só viraria aviso às 10h01 — e,
+    // como a pessoa costuma clicar no sino antes disso, parecia que só a ação
+    // manual atualizava.
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const bump = () => {
+      if (debounce) clearTimeout(debounce);
+      // Uma mensagem mexe em `messages` E em `conversations`: sem o debounce,
+      // seriam duas varreduras para o mesmo evento.
+      debounce = setTimeout(() => void run(), 600);
+    };
+    const supabase = createClient();
+    const channel = supabase
+      .channel("lito-notificacoes")
+      .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, bump)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, bump)
+      .subscribe();
+
     const timer = setInterval(() => void run(), REFRESH_MS);
     return () => {
       alive = false;
       clearInterval(timer);
+      if (debounce) clearTimeout(debounce);
+      releaseUnlock();
+      void supabase.removeChannel(channel);
     };
   }, [refresh, locationId]);
 
@@ -565,25 +595,31 @@ export function NotificationsPanel() {
                       o Foco Assistido do Windows, notificação desligada para o
                       navegador ou o site sem permissão — e não dá para saber
                       qual olhando a tela do CRM. */}
+                  {/* Sempre clicável e sempre com resposta na tela: um teste
+                      que falha calado nao ajuda a distinguir "o CRM nao
+                      disparou" de "o Windows nao mostrou". */}
                   <button
                     onClick={() => {
                       playSound(loadSound());
-                      showDesktop({
+                      const problema = showDesktop({
                         id: "teste",
                         title: "Lito CRM — teste de notificação",
                         body: "Se você está vendo isto, o pop-up está funcionando.",
                         href: "/dashboard",
                       });
+                      if (problema) {
+                        toast.error(problema, { duration: 10000 });
+                        return;
+                      }
+                      toast.success(
+                        "Pop-up enviado ao Windows. Não apareceu? Foco Assistido ligado, ou notificações do navegador desligadas em Configurações → Sistema → Notificações.",
+                        { duration: 12000 }
+                      );
                     }}
-                    disabled={!desktopOn}
-                    className="mt-1.5 rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                    className="mt-1.5 rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
                   >
                     Testar som e pop-up agora
                   </button>
-                  <p className="mt-1 text-[10px] text-slate-400">
-                    Não apareceu? Veja no Windows se o Foco Assistido está ligado e se as
-                    notificações do navegador estão permitidas.
-                  </p>
                 </>
               ) : (
                 <>
