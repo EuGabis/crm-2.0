@@ -285,6 +285,24 @@ export async function syncInboxDelta(): Promise<number> {
   return fresh.length;
 }
 
+/**
+ * Rebusca as conversas VISÍVEIS e adiciona na store só as que ainda não estão lá —
+ * pega conversas que ficaram visíveis sem uma mensagem nova (ex.: atribuídas ao
+ * atendente por rodízio/transferência enquanto ele estava offline). Barato: sai
+ * sem mexer na store quando não há nada novo. Não substitui as existentes (o
+ * Realtime e o delta já cuidam disso).
+ */
+export async function resyncConversations(): Promise<void> {
+  const supabase = createClient();
+  const { data, error } = await supabase.from("conversations").select("*");
+  if (error || !data) return;
+  const s = useConvStore.getState();
+  const known = new Set(s.conversations.map((c) => c.id));
+  const novas = data.filter((c: any) => !known.has(c.id)).map(mapConversation);
+  if (novas.length === 0) return;
+  useConvStore.setState({ conversations: [...novas, ...s.conversations] });
+}
+
 export function useConversations(filter: ConversationFilter = "all") {
   const { conversations, load } = useConvStore();
   useEffect(() => {
@@ -963,6 +981,7 @@ export function useInboxLiveSync(intervalMs = 15000) {
   useEffect(() => {
     let alive = true;
     let running = false;
+    let ticks = 0;
 
     const tick = async () => {
       // Uma varredura por vez: numa conexão lenta, duas rodando juntas
@@ -972,6 +991,10 @@ export function useInboxLiveSync(intervalMs = 15000) {
       running = true;
       try {
         await syncInboxDelta();
+        // A cada ~1 min, rebusca conversas inteiras — pega as que viraram visíveis
+        // sem mensagem nova (ex.: lead distribuído/transferido pra este atendente).
+        if (ticks % 4 === 0) await resyncConversations();
+        ticks++;
       } finally {
         running = false;
       }
@@ -982,6 +1005,9 @@ export function useInboxLiveSync(intervalMs = 15000) {
       // Voltou para a aba: se o canal caiu enquanto ela estava oculta, reassina
       // antes de varrer — senão a próxima mensagem também não chegaria sozinha.
       if (useConvStore.getState().realtime === "off") subscribeInbox();
+      // Ao voltar/reconectar, pega na hora o que ficou visível (ex.: leads que
+      // caíram pra ele enquanto estava offline).
+      void resyncConversations();
       void tick();
     };
 
