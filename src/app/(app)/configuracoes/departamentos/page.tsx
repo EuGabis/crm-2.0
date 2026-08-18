@@ -259,6 +259,19 @@ export default function DepartamentosPage() {
                       ))}
                     </div>
                   )}
+                  {people.length > 0 && (
+                    <p className="mt-2 border-t pt-2 text-[10px] text-slate-500">
+                      <span className="font-semibold uppercase tracking-wide text-slate-400">
+                        Rodízio de leads:
+                      </span>{" "}
+                      {d.leadPool.length === 0
+                        ? "todos recebem"
+                        : people
+                            .filter((p) => d.leadPool.includes(p.userId))
+                            .map((p) => p.name)
+                            .join(", ") || "ninguém marcado"}
+                    </p>
+                  )}
                 </div>
               </div>
             );
