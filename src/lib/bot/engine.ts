@@ -478,13 +478,14 @@ async function advance(
       return;
     } else if (node.type === "handoff") {
       if (node.text) await botSend(ctx, render(node.text, vars));
-      // "humano": pausa o bot (atendente assume). "ia": não pausa — o agente de IA
-      // principal responde as próximas mensagens (auto-reply).
-      if ((node.to ?? "humano") === "humano") {
-        await ctx.db.from("conversations").update({ bot_paused: true }).eq("id", ctx.conversationId);
-        await botLogEvent(ctx, "Bot encerrou o atendimento automático e passou para um atendente");
-      } else {
+      if ((node.to ?? "humano") === "ia") {
+        // IA principal responde as próximas mensagens (auto-reply).
         await botLogEvent(ctx, "Bot passou a conversa para o Agente de IA");
+      } else {
+        // "humano" = passar pro atendimento: distribui por rodízio (escolhe UM
+        // atendente e registra pra quem foi), igual ao nó "distribuir". Assim o
+        // lead nunca fica sem dono e o log nomeia quem recebeu.
+        await distributeLead(ctx, {});
       }
       await saveSession(ctx, nodeId, "concluido", vars);
       return;

@@ -33,7 +33,7 @@ function nodeLabel(node: BotNode): string {
     case "handoff":
       return node.to === "ia"
         ? "Encerramento — Agente de IA assume"
-        : "Encerramento — passa pro atendente";
+        : "Encerramento — distribui pro atendente (rodízio)";
     case "distribute":
       return "Encerramento — distribui por rodízio";
     case "end":
@@ -395,7 +395,7 @@ function TerminalSelect({
           else onPatch(node.id, { type: "end" });
         }}
       >
-        <option value="humano">Passar pro atendente humano</option>
+        <option value="humano">Passar pro atendente (rodízio)</option>
         <option value="distribuir">Distribuir por rodízio (atendentes online)</option>
         <option value="ia">Deixar o Agente de IA responder</option>
         <option value="encerrar">Só enviar a mensagem e encerrar</option>
