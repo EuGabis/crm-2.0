@@ -454,9 +454,20 @@ export const conversationActions = {
       : msg.scheduledFor
         ? "Mensagem agendada"
         : msg.body;
+    // Responder (mensagem real ao cliente) REABRE a conversa — senão ela fica
+    // finalizada/arquivada e some da caixa ativa mesmo com o atendente atuando.
+    // Nota interna e agendamento não reabrem.
+    const reopen = !msg.internal && !msg.scheduledFor;
     await supabase
       .from("conversations")
-      .update({ last_message_at: data.created_at, last_message_preview: preview, sla_days: 0 })
+      .update({
+        last_message_at: data.created_at,
+        last_message_preview: preview,
+        sla_days: 0,
+        ...(reopen
+          ? { closed_at: null, closed_by: null, archived_at: null, archived_by: null }
+          : {}),
+      })
       .eq("id", conversationId);
 
     const s = useConvStore.getState();
@@ -466,7 +477,15 @@ export const conversationActions = {
     s.patch({
       conversations: s.conversations.map((c) =>
         c.id === conversationId
-          ? { ...c, lastMessageAt: data.created_at, lastMessagePreview: preview, slaDays: 0 }
+          ? {
+              ...c,
+              lastMessageAt: data.created_at,
+              lastMessagePreview: preview,
+              slaDays: 0,
+              ...(reopen
+                ? { closedAt: null, closedBy: null, archivedAt: null, archivedBy: null }
+                : {}),
+            }
           : c
       ),
     });
