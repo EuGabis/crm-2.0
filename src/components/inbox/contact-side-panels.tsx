@@ -331,7 +331,7 @@ export function NotesPanel({ contactId }: { contactId: string }) {
     const text = body.trim();
     if (!text) return;
     setBusy(true);
-    const conversationId = await conversationActions.openForContact(contactId);
+    const conversationId = (await conversationActions.openForContact(contactId)).id;
     const ok =
       !!conversationId &&
       (await conversationActions.send(conversationId, {
@@ -604,7 +604,7 @@ export function FilesPanel({ contactId }: { contactId: string }) {
 
   const upload = async (file: File) => {
     setBusy(true);
-    const conversationId = await conversationActions.openForContact(contactId);
+    const conversationId = (await conversationActions.openForContact(contactId)).id;
     if (!conversationId) {
       setBusy(false);
       toast.error("Não foi possível abrir a conversa deste contato");

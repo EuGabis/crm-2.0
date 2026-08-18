@@ -777,28 +777,52 @@ export const conversationActions = {
    * cria uma se ele ainda não tiver nenhuma. É o que o botão "Abrir conversa"
    * (card do kanban) precisa: abrir o que já existe, não um chat novo.
    */
-  async openForContact(contactId: string): Promise<string | null> {
+  async openForContact(
+    contactId: string
+  ): Promise<{ id: string | null; error?: string }> {
     const supabase = createClient();
-    const { data } = await supabase
-      .from("conversations")
-      .select("*")
-      .eq("contact_id", contactId)
-      .order("last_message_at", { ascending: false, nullsFirst: false })
-      .limit(1)
-      .maybeSingle();
-    if (data) {
-      const conv = mapConversation(data);
-      const s = useConvStore.getState();
-      if (!s.conversations.some((c) => c.id === conv.id)) {
-        s.patch({ conversations: [conv, ...s.conversations] });
+    // Acha a conversa do contato IGNORANDO a RLS (pode ser de outro atendente).
+    const { data: info } = await supabase.rpc("contact_conversation", {
+      cid: contactId,
+      chan: "whatsapp",
+    });
+    const existing = (Array.isArray(info) ? info[0] : info) as
+      | { conv_id: string; assigned_to: string | null }
+      | undefined;
+
+    if (existing?.conv_id) {
+      // Consigo VER essa conversa? (a RLS decide: dono/admin/sees_all).
+      const { data: full } = await supabase
+        .from("conversations")
+        .select("*")
+        .eq("id", existing.conv_id)
+        .maybeSingle();
+      if (full) {
+        const conv = mapConversation(full);
+        const s = useConvStore.getState();
+        if (!s.conversations.some((c) => c.id === conv.id)) {
+          s.patch({ conversations: [conv, ...s.conversations] });
+        }
+        return { id: conv.id };
       }
-      return conv.id;
+      // Existe, mas não é minha → não abro nem duplico.
+      return { id: null, error: "Esta conversa está atribuída a outro atendente." };
     }
-    return conversationActions.open(contactId, "whatsapp");
+
+    // Não existe conversa → cria ATRIBUÍDA a quem abriu (assim ele consegue ver).
+    const uid = useDbStore.getState().userId;
+    const id = await conversationActions.open(contactId, "whatsapp", uid);
+    return { id };
   },
 
-  /** Cria (ou reaproveita) a conversa de um contato num canal. Retorna o id. */
-  async open(contactId: string, channel: Channel): Promise<string | null> {
+  /** Cria (ou reaproveita) a conversa de um contato num canal. Retorna o id.
+   *  `assignTo` já nasce como responsável — necessário quando quem cria só vê o
+   *  que é dele (senão a RLS esconderia a conversa recém-criada e daria erro). */
+  async open(
+    contactId: string,
+    channel: Channel,
+    assignTo: string | null = null
+  ): Promise<string | null> {
     const s = useConvStore.getState();
     const existing = s.conversations.find(
       (c) => c.contactId === contactId && c.channel === channel
@@ -847,6 +871,7 @@ export const conversationActions = {
         contact_id: contactId,
         channel,
         ...(channelId ? { channel_id: channelId } : {}),
+        ...(assignTo ? { assigned_to: assignTo } : {}),
       })
       .select()
       .single();

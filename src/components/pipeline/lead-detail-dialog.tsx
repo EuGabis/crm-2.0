@@ -128,7 +128,7 @@ function LeadDetailBody({
     const body = note.trim();
     if (!body || !contact) return;
     setSavingNote(true);
-    const conversationId = await conversationActions.openForContact(contact.id);
+    const conversationId = (await conversationActions.openForContact(contact.id)).id;
     const ok =
       !!conversationId &&
       (await conversationActions.send(conversationId, {
@@ -150,13 +150,13 @@ function LeadDetailBody({
 
   const openConversation = async () => {
     if (!contact) return;
-    const id = await conversationActions.openForContact(contact.id);
-    if (!id) {
-      toast.error("Não foi possível abrir a conversa");
+    const res = await conversationActions.openForContact(contact.id);
+    if (!res.id) {
+      toast.error(res.error ?? "Não foi possível abrir a conversa");
       return;
     }
     onOpenChange(false);
-    router.push(`/conversas?c=${id}`);
+    router.push(`/conversas?c=${res.id}`);
   };
 
   return (

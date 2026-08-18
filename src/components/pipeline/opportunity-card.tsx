@@ -173,13 +173,13 @@ export function OpportunityCard({
     setBusy(true);
     // Reaproveita a conversa que o contato já tem — nunca abre um chat novo
     // por cima de um existente.
-    const id = await conversationActions.openForContact(contact.id);
+    const res = await conversationActions.openForContact(contact.id);
     setBusy(false);
-    if (!id) {
-      toast.error("Não foi possível abrir a conversa");
+    if (!res.id) {
+      toast.error(res.error ?? "Não foi possível abrir a conversa");
       return;
     }
-    router.push(`/conversas?c=${id}`);
+    router.push(`/conversas?c=${res.id}`);
   };
 
   const assignOwner = async (userId: string | null) => {
@@ -217,7 +217,7 @@ export function OpportunityCard({
     const body = note.trim();
     if (!body || !contact) return;
     setBusy(true);
-    const conversationId = await conversationActions.openForContact(contact.id);
+    const conversationId = (await conversationActions.openForContact(contact.id)).id;
     const ok =
       !!conversationId &&
       (await conversationActions.send(conversationId, {

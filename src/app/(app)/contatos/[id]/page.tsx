@@ -120,13 +120,13 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
   // conversa da lista — nunca a do contato clicado.
   const openConversation = async () => {
     setOpeningChat(true);
-    const convId = await conversationActions.openForContact(contact.id);
+    const res = await conversationActions.openForContact(contact.id);
     setOpeningChat(false);
-    if (!convId) {
-      toast.error("Não foi possível abrir a conversa");
+    if (!res.id) {
+      toast.error(res.error ?? "Não foi possível abrir a conversa");
       return;
     }
-    router.push(`/conversas?c=${convId}`);
+    router.push(`/conversas?c=${res.id}`);
   };
 
   return (
