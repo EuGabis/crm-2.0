@@ -51,11 +51,20 @@ export function SessionManager() {
       lastAct = Date.now();
     };
     ACTIVITY.forEach((e) => window.addEventListener(e, bump, { passive: true }));
-    const ping = () => {
-      if (Date.now() - lastAct <= IDLE_MS) void supabase.rpc("touch_presence");
+    // IMPORTANTE: o builder do supabase é lazy — precisa de await/.then() para a
+    // chamada REALMENTE ir ao banco. Sem isso o last_seen_at nunca era gravado e
+    // todo mundo aparecia offline (a distribuição caía sempre no "todos offline").
+    const ping = async () => {
+      if (Date.now() - lastAct <= IDLE_MS) {
+        try {
+          await supabase.rpc("touch_presence");
+        } catch {
+          // best-effort (ex.: rede oscilando)
+        }
+      }
     };
-    ping(); // marca presença já ao abrir
-    const interval = window.setInterval(ping, 60000);
+    void ping(); // marca presença já ao abrir
+    const interval = window.setInterval(() => void ping(), 60000);
     return () => {
       ACTIVITY.forEach((e) => window.removeEventListener(e, bump));
       window.clearInterval(interval);
