@@ -232,6 +232,9 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
         archived_by: null,
         // Reabriu do fechado: solta o bot para poder recomeçar.
         ...(wasClosed ? { bot_paused: false } : {}),
+        // Reabriu do fechado E o número tem bot: o contato volta pra FILA — tira o
+        // dono anterior pra o bot re-qualificar e redistribuir (pode ir pra outro).
+        ...(wasClosed && channel.bot_flow ? { assigned_to: null } : {}),
       })
       .eq("id", conv.id);
   }
