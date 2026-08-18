@@ -25,6 +25,7 @@ import {
 import { useAiAgents, aiAgentActions, type AiAgent } from "@/lib/data/repos/db/ai-agents";
 import { cn } from "@/lib/utils";
 
+import { useConfirm } from "@/components/shared/confirm";
 const STATUS_LABEL: Record<AiAgent["status"], string> = {
   ativo: "Ativo",
   sugestivo: "Sugestivo",
@@ -40,6 +41,7 @@ const ACTION_KEYS = [
 ];
 
 export function ConversationAiTab() {
+  const confirm = useConfirm();
   const { agents, ready } = useAiAgents();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = useMemo(
@@ -182,9 +184,17 @@ export function ConversationAiTab() {
                           >Tornar principal</button>
                         )}
                         <button
-                          onClick={(e) => {
+                          onClick={async (e) => {
                             e.stopPropagation();
-                            if (!window.confirm(`Excluir o agente "${a.name}"? Essa ação não pode ser desfeita.`)) return;
+                            if (
+                              !(await confirm({
+                                title: `Excluir o agente "${a.name}"?`,
+                                description: "Essa ação não pode ser desfeita.",
+                                confirmLabel: "Excluir",
+                                destructive: true,
+                              }))
+                            )
+                              return;
                             void aiAgentActions.remove(a.id).then((ok) => ok && toast.success("Agente excluído"));
                           }}
                           className="text-rose-600 hover:underline"

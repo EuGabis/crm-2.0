@@ -41,6 +41,7 @@ import { conversationActions } from "@/lib/data/repos/db/conversations";
 import { useContactNotes } from "@/lib/data/repos/db/notes";
 import { cn } from "@/lib/utils";
 
+import { useConfirm } from "@/components/shared/confirm";
 /**
  * Os quatro painéis da barra lateral da conversa: Tarefas, Observações,
  * Compromissos e Arquivos.
@@ -152,6 +153,7 @@ const primaryBtn =
 /* --------------------------------- Tarefas -------------------------------- */
 
 export function TasksPanel({ contactId }: { contactId: string }) {
+  const confirm = useConfirm();
   const { tasks } = useContactsModule();
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
@@ -291,7 +293,7 @@ export function TasksPanel({ contactId }: { contactId: string }) {
               </div>
               <button
                 onClick={async () => {
-                  if (!window.confirm("Excluir esta tarefa?")) return;
+                  if (!(await confirm({ title: "Excluir esta tarefa?", confirmLabel: "Excluir", destructive: true }))) return;
                   if (await taskActions.remove(t.id)) toast.success("Tarefa excluída");
                   else toast.error("Não foi possível excluir");
                 }}
@@ -311,6 +313,7 @@ export function TasksPanel({ contactId }: { contactId: string }) {
 /* ------------------------------- Observações ------------------------------ */
 
 export function NotesPanel({ contactId }: { contactId: string }) {
+  const confirm = useConfirm();
   const { notes, reload } = useContactNotes(contactId);
   const team = useDbTeam();
   const { me, isAdmin } = useMyMembership();
@@ -405,7 +408,7 @@ export function NotesPanel({ contactId }: { contactId: string }) {
                 {canDelete && (
                   <button
                     onClick={async () => {
-                      if (!window.confirm("Excluir esta observação?")) return;
+                      if (!(await confirm({ title: "Excluir esta observação?", confirmLabel: "Excluir", destructive: true }))) return;
                       if (await conversationActions.removeMessage(n.id)) {
                         await reload();
                         toast.success("Observação excluída");
@@ -431,6 +434,7 @@ export function NotesPanel({ contactId }: { contactId: string }) {
 /* ------------------------------ Compromissos ------------------------------ */
 
 export function AppointmentsPanel({ contactId }: { contactId: string }) {
+  const confirm = useConfirm();
   const { appointments } = useDbAppointments();
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
@@ -545,7 +549,7 @@ export function AppointmentsPanel({ contactId }: { contactId: string }) {
                 </div>
                 <button
                   onClick={async () => {
-                    if (!window.confirm("Excluir este compromisso?")) return;
+                    if (!(await confirm({ title: "Excluir este compromisso?", confirmLabel: "Excluir", destructive: true }))) return;
                     if (await appointmentActions.remove(a.id))
                       toast.success("Compromisso excluído");
                     else toast.error("Não foi possível excluir");

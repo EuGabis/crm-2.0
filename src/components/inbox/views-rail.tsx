@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 import { currentViewConfig, useInboxUi } from "./inbox-filters";
 import type { InboxScope } from "@/lib/data/types";
 
+import { useConfirm } from "@/components/shared/confirm";
 export type { InboxScope } from "@/lib/data/types";
 
 function RailButton({
@@ -204,6 +205,7 @@ function GlobalSearch({ onSelect }: { onSelect: (conversationId: string) => void
 /* ---------- Visualizações salvas (reais, tabela inbox_views) ---------- */
 
 function SavedViews() {
+  const confirm = useConfirm();
   const views = useInboxViews();
   const { activeViewId, applyView } = useInboxUi();
   const [open, setOpen] = useState(false);
@@ -338,7 +340,7 @@ function SavedViews() {
                 </button>
                 <button
                   onClick={async () => {
-                    if (!window.confirm(`Excluir a visualização "${v.name}"?`)) return;
+                    if (!(await confirm({ title: `Excluir a visualização "${v.name}"?`, confirmLabel: "Excluir", destructive: true }))) return;
                     (await inboxViewActions.remove(v.id))
                       ? toast.success("Visualização excluída")
                       : toast.error("Não foi possível excluir");

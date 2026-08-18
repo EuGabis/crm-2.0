@@ -42,6 +42,7 @@ import {
 } from "@/lib/data/repos/db/contacts-module";
 import type { Contact } from "@/lib/data/types";
 
+import { useConfirm } from "@/components/shared/confirm";
 /* ============ util: aplicar condições de lista inteligente ============ */
 
 export function matchesConditions(c: Contact, conditions: FilterCondition[]): boolean {
@@ -76,6 +77,7 @@ export function SmartListsTab({
   contacts: Contact[];
   onApply: (conditions: FilterCondition[]) => void;
 }) {
+  const confirm = useConfirm();
   const { smartLists, loaded } = useContactsModule();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState("");
@@ -164,7 +166,7 @@ export function SmartListsTab({
                   size="sm"
                   className="h-8 px-2 text-red-500 hover:text-red-600"
                   onClick={async () => {
-                    if (!window.confirm(`Excluir a lista "${l.name}"?`)) return;
+                    if (!(await confirm({ title: `Excluir a lista "${l.name}"?`, confirmLabel: "Excluir", destructive: true }))) return;
                     (await smartListActions.remove(l.id))
                       ? toast.success("Lista excluída")
                       : toast.error("Não foi possível excluir");
@@ -318,6 +320,7 @@ export function BulkLogTab() {
 /* ============ Tarefas (reais) ============ */
 
 export function TasksTab({ contacts }: { contacts: Contact[] }) {
+  const confirm = useConfirm();
   const { tasks, loaded } = useContactsModule();
   const team = useDbTeam();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -411,7 +414,7 @@ export function TasksTab({ contacts }: { contacts: Contact[] }) {
       render: (t) => (
         <button
           onClick={async () => {
-            if (!window.confirm("Excluir esta tarefa?")) return;
+            if (!(await confirm({ title: "Excluir esta tarefa?", confirmLabel: "Excluir", destructive: true }))) return;
             (await taskActions.remove(t.id))
               ? toast.success("Tarefa excluída")
               : toast.error("Não foi possível excluir");
@@ -612,6 +615,7 @@ export function CompaniesTab({ contacts }: { contacts: Contact[] }) {
 /* ============ Campos personalizados (reais) ============ */
 
 export function FieldsTab() {
+  const confirm = useConfirm();
   const { fields, loaded } = useContactsModule();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState("");
@@ -693,7 +697,7 @@ export function FieldsTab() {
                 </span>
                 <button
                   onClick={async () => {
-                    if (!window.confirm(`Excluir o campo "${f.name}"?`)) return;
+                    if (!(await confirm({ title: `Excluir o campo "${f.name}"?`, confirmLabel: "Excluir", destructive: true }))) return;
                     (await fieldActions.remove(f.id))
                       ? toast.success("Campo excluído")
                       : toast.error("Não foi possível excluir");

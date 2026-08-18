@@ -40,6 +40,7 @@ import { driveActions, useDriveItems } from "@/lib/data/repos/db/media-drive";
 import { DrivePicker } from "@/components/media/drive-picker";
 import { cn } from "@/lib/utils";
 
+import { useConfirm } from "@/components/shared/confirm";
 /**
  * `useSearchParams` obriga um limite de Suspense — o callback do OAuth volta
  * com `?connected=` / `?error=` e sem a casca o build falha ao pré-renderizar.
@@ -65,6 +66,7 @@ function iconFor(mime: string | null, name: string) {
 }
 
 function MidiaPageInner() {
+  const confirm = useConfirm();
   const params = useSearchParams();
   const { folders, files, loading } = useMedia();
   const usage = useMediaUsage();
@@ -286,9 +288,7 @@ function MidiaPageInner() {
                     <button
                       onClick={async () => {
                         if (
-                          !window.confirm(
-                            `Excluir a pasta "${f.name}"? Os arquivos dela voltam para a raiz.`
-                          )
+                          !(await confirm({ title: `Excluir a pasta "${f.name}"? Os arquivos dela voltam para a raiz.`, confirmLabel: "Excluir", destructive: true }))
                         )
                           return;
                         (await mediaActions.removeFolder(f.id))
@@ -368,7 +368,8 @@ function MidiaPageInner() {
                       </button>
                       <button
                         onClick={async () => {
-                          if (!window.confirm(`Excluir "${file.name}"? Não tem desfazer.`)) return;
+                          if (!(await confirm({ title: `Excluir "${file.name}"?`,
+                              description: "O arquivo sai do armazenamento da empresa. Não tem desfazer.", confirmLabel: "Excluir", destructive: true }))) return;
                           (await mediaActions.remove(file))
                             ? toast.success("Arquivo excluído")
                             : toast.error("Não foi possível excluir");
@@ -406,6 +407,7 @@ function MidiaPageInner() {
  * dos test users.
  */
 function DriveTab() {
+  const confirm = useConfirm();
   const { items, loaded, reload } = useDriveItems();
   const [query, setQuery] = useState("");
 
@@ -474,9 +476,7 @@ function DriveTab() {
                   <button
                     onClick={async () => {
                       if (
-                        !window.confirm(
-                          `Remover o atalho de "${item.name}"? O arquivo no Drive não é apagado.`
-                        )
+                        !(await confirm({ title: `Remover o atalho de "${item.name}"? O arquivo no Drive não é apagado.`, confirmLabel: "Remover", destructive: true }))
                       )
                         return;
                       if (await driveActions.remove(item.id)) {

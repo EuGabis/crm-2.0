@@ -35,6 +35,7 @@ import { contactName } from "@/lib/data/repos/contacts";
 import type { Appointment, Opportunity } from "@/lib/data/types";
 import { cn } from "@/lib/utils";
 
+import { useConfirm } from "@/components/shared/confirm";
 const TABS = [
   { label: "Visualização de calendário" },
   { label: "Lista de compromissos" },
@@ -50,6 +51,7 @@ function ListaCompromissos({
   onNew: () => void;
   onEdit: (a: Appointment) => void;
 }) {
+  const confirm = useConfirm();
   const { appointments } = useDbAppointments();
   const { contacts } = useDbContacts();
   const opportunities = useDbOpportunities();
@@ -61,7 +63,7 @@ function ListaCompromissos({
   const [owner, setOwner] = useState(ALL);
 
   const remove = async (id: string, title: string) => {
-    if (!window.confirm(`Excluir o compromisso "${title}"?`)) return;
+    if (!(await confirm({ title: `Excluir o compromisso "${title}"?`, confirmLabel: "Excluir", destructive: true }))) return;
     (await appointmentActions.remove(id))
       ? toast.success("Compromisso excluído")
       : toast.error("Não foi possível excluir");
@@ -393,6 +395,7 @@ function AppointmentDialog({
   draft: AppointmentDraft | null;
   onOpenChange: (o: boolean) => void;
 }) {
+  const confirm = useConfirm();
   const { contacts } = useDbContacts();
   const opportunities = useDbOpportunities();
   const pipelines = useDbPipelines();
@@ -477,7 +480,7 @@ function AppointmentDialog({
 
   const removeAppointment = async () => {
     if (!editing) return;
-    if (!window.confirm(`Excluir o compromisso "${editing.title}"?`)) return;
+    if (!(await confirm({ title: `Excluir o compromisso "${editing.title}"?`, confirmLabel: "Excluir", destructive: true }))) return;
     if (await appointmentActions.remove(editing.id)) {
       toast.success("Compromisso excluído");
       onOpenChange(false);

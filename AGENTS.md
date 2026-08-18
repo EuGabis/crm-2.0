@@ -137,6 +137,33 @@ src/
 6. Páginas são client components (`"use client"`) — ícones Lucide não podem ser
    passados de Server para Client component como prop.
 
+## Confirmação de ação (nunca `window.confirm`)
+
+Toda ação que pede confirmação usa o diálogo DO CRM:
+`src/components/shared/confirm.tsx`, com o `ConfirmProvider` montado no shell
+(`(app)/layout.tsx`).
+
+```tsx
+const confirm = useConfirm();           // no corpo do componente
+if (!(await confirm({ title: `Excluir "${nome}"?`, description: "Não tem desfazer.",
+                      confirmLabel: "Excluir", destructive: true }))) return;
+```
+
+- A API é **promise** de propósito: no ponto de uso a troca é linha por linha a
+  partir do `if (!window.confirm(x)) return;`, sem espalhar estado de diálogo
+  pelos 13 arquivos que pediam confirmação.
+- `destructive: true` pinta o botão de vermelho e põe o ícone de alerta —
+  exclusão, desconexão, cancelamento. O `window.confirm` dava o mesmo botão para
+  "Salvar" e para "Excluir 12 contatos".
+- **Título diz O QUE, `description` diz o RISCO.** Não empilhe "Essa ação não
+  pode ser desfeita" no título.
+- Fora do provider o hook cai no `window.confirm` — componente reaproveitado em
+  tela sem provider continua funcionando em vez de quebrar em runtime.
+- ⚠️ **Não volte a usar `window.confirm`**: além do visual do navegador ("o site
+  X diz"), ele não distingue ação destrutiva e não aceita formatação.
+- Ainda restam **8 `window.prompt`/`alert`** (ex.: "Nome da nova pasta") — mesma
+  cara de navegador, ainda não convertidos.
+
 ## Convenções
 
 - Todo texto de UI em **pt-BR**; datas mock fixas em 2026; moeda via `formatBRL`.

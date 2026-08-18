@@ -26,6 +26,7 @@ import { useDepartments, useMyMembership } from "@/lib/data/repos/db/team";
 import { DEFAULT_WIDGETS } from "./widget-catalog";
 import { cn } from "@/lib/utils";
 
+import { useConfirm } from "@/components/shared/confirm";
 /**
  * Seletor de painéis. Antes eram três nomes fixos no código e um "Adicionar
  * painel" que só emitia toast; agora lista os painéis reais
@@ -46,6 +47,7 @@ export function DashboardSwitcher({
   activeId: string | null;
   onSelect: (id: string | null) => void;
 }) {
+  const confirm = useConfirm();
   const [query, setQuery] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const { isAdmin } = useMyMembership();
@@ -95,7 +97,7 @@ export function DashboardSwitcher({
       {(v.scope === "user" || isAdmin) && (
         <button
           onClick={async () => {
-            if (!window.confirm(`Excluir o painel "${v.name}"?`)) return;
+            if (!(await confirm({ title: `Excluir o painel "${v.name}"?`, confirmLabel: "Excluir", destructive: true }))) return;
             const ok = await dashboardActions.remove(v.id);
             if (!ok) {
               toast.error("Não foi possível excluir");

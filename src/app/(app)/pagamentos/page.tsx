@@ -94,6 +94,7 @@ import {
 import { GuruStatusBadge } from "@/components/payments/status-badge";
 import { cn } from "@/lib/utils";
 
+import { useConfirm } from "@/components/shared/confirm";
 const TABS = [
   { label: "Integrações" },
   { label: "Arquivos e contratos" },
@@ -182,6 +183,7 @@ function GuruDialog({
   open: boolean;
   onOpenChange: (o: boolean) => void;
 }) {
+  const confirm = useConfirm();
   const { guru } = useGuruIntegration();
   const [apiKey, setApiKey] = useState(guru.apiKey);
   const [webhookToken, setWebhookToken] = useState(guru.webhookToken);
@@ -225,7 +227,9 @@ function GuruDialog({
   };
 
   const disconnect = async () => {
-    if (!window.confirm("Desconectar a Guru? Os eventos já recebidos continuam salvos.")) return;
+    if (!(await confirm({ title: "Desconectar a Guru?",
+      description:
+        "As vendas e assinaturas já recebidas continuam salvas — o CRM só para de sincronizar novidades.", confirmLabel: "Desconectar", destructive: true }))) return;
     const ok = await paymentsActions.disconnectGuru();
     if (ok) {
       toast.success("Guru desconectada");
@@ -2080,6 +2084,7 @@ const FILE_ACCEPT = [
 ].join(",");
 
 function ArquivosTab() {
+  const confirm = useConfirm();
   const { files, ready } = usePaymentFiles();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -2102,7 +2107,8 @@ function ArquivosTab() {
   };
 
   const onDelete = async (f: PaymentFile) => {
-    if (!window.confirm(`Excluir "${f.name}"? Essa ação não pode ser desfeita.`)) return;
+    if (!(await confirm({ title: `Excluir "${f.name}"?`,
+      description: "Essa ação não pode ser desfeita.", confirmLabel: "Excluir", destructive: true }))) return;
     const ok = await paymentFilesActions.remove(f.id, f.path);
     if (ok) toast.success("Arquivo excluído");
     else toast.error("Não foi possível excluir");

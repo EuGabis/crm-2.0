@@ -36,6 +36,7 @@ import { oppActions, usePipelineDb } from "@/lib/data/repos/db/pipeline";
 import { formatBRL } from "@/lib/data/repos/opportunities";
 import type { Opportunity } from "@/lib/data/types";
 
+import { useConfirm } from "@/components/shared/confirm";
 const TABS = [{ label: "Leads" }, { label: "Pipelines" }, { label: "Ações em massa" }];
 
 /**
@@ -51,6 +52,7 @@ export default function LeadsPage() {
 }
 
 function LeadsPageInner() {
+  const confirm = useConfirm();
   const [tab, setTab] = useState("Leads");
   const { pipelines, opportunities, loaded } = usePipelineDb();
   const team = useDbTeam();
@@ -205,7 +207,7 @@ function LeadsPageInner() {
             size="sm"
             className="h-7 gap-1 text-xs text-red-600 hover:text-red-700"
             onClick={async () => {
-              if (!window.confirm(`Excluir ${ids.length} oportunidade(s)?`)) return;
+              if (!(await confirm({ title: `Excluir ${ids.length} oportunidade(s)?`, confirmLabel: "Excluir", destructive: true }))) return;
               const ok = await oppActions.remove(ids);
               ok ? toast.success("Excluídas") : toast.error("Não foi possível excluir");
               clear();

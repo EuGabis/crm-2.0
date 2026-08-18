@@ -56,6 +56,7 @@ import { useTeam } from "@/lib/data/repos/db/team";
 import { brand } from "@/lib/config/brand";
 import type { Channel, ScheduleStatus } from "@/lib/data/types";
 
+import { useConfirm } from "@/components/shared/confirm";
 const TABS = [
   { label: "Conversas" },
   { label: "Relatório" },
@@ -372,6 +373,7 @@ const SCHEDULE_BADGE: Record<ScheduleStatus, { label: string; className: string 
 };
 
 function AgendadasTab() {
+  const confirm = useConfirm();
   const scheduled = useScheduledMessages();
   const conversations = useConversations();
   const { contacts } = useDbContacts();
@@ -478,7 +480,7 @@ function AgendadasTab() {
         r.scheduleStatus === "pendente" ? (
           <button
             onClick={async () => {
-              if (!window.confirm("Cancelar este agendamento?")) return;
+              if (!(await confirm({ title: "Cancelar este agendamento?", confirmLabel: "Sim, cancelar", destructive: true }))) return;
               (await scheduleActions.cancel(r.id))
                 ? toast.success("Agendamento cancelado")
                 : toast.error("Não foi possível cancelar — pode já ter sido disparada");
@@ -535,6 +537,7 @@ function AcoesManuaisTab() {
 /* ---------- Trechos (reais) ---------- */
 
 function TrechosTab() {
+  const confirm = useConfirm();
   const snippets = useSnippets();
   const loaded = useConvStore((s) => s.loaded);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -579,7 +582,7 @@ function TrechosTab() {
       render: (r) => (
         <button
           onClick={async () => {
-            if (!window.confirm(`Excluir o trecho "${r.name}"?`)) return;
+            if (!(await confirm({ title: `Excluir o trecho "${r.name}"?`, confirmLabel: "Excluir", destructive: true }))) return;
             (await snippetActions.remove(r.id))
               ? toast.success("Trecho excluído")
               : toast.error("Não foi possível excluir");
