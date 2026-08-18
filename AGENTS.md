@@ -1088,6 +1088,15 @@ os módulos ainda não migrados continuam importando dos repos mock em
   * ⚠️ **Sem aba aberta não há pop-up.** É `Notification` de página, não Web
     Push: não existe service worker nem servidor de push aqui. Fechou o CRM,
     para de avisar.
+  * ⚠️ **`requireInteraction: true`** no aviso. Sem isso, o Chrome no Windows
+    desenha o próprio balãozinho por ~5 s e ele **não é arquivado na Central de
+    Notificações do Windows**: quem estava em outra janela nunca vê e, ao abrir a
+    central, encontra "não há notificações novas" — foi exatamente o sintoma
+    relatado. Com a opção, o aviso espera ser fechado.
+  * A engrenagem mostra um **diagnóstico linha a linha** (suporte, conexão
+    segura, permissão, ligado aqui, endereço). A pegadinha silenciosa é a
+    conexão: fora de HTTPS ou `localhost` — abrir o CRM pelo IP da rede local,
+    por exemplo — o Chrome **nem pergunta** pela permissão.
   * `showDesktop` **devolve o motivo** quando não consegue disparar (sem
     suporte, permissão negada, permissão não pedida, caixinha desligada) e o
     botão **"Testar som e pop-up agora"** mostra isso na tela. Um pop-up que não
