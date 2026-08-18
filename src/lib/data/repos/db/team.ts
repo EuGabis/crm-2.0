@@ -281,7 +281,10 @@ export const departmentActions = {
     if (error || !data) {
       return {
         ok: false,
-        error: error?.code === "23505" ? "Já existe um departamento com esse nome" : "Não foi possível criar",
+        error:
+          error?.code === "23505"
+            ? "Já existe um departamento com esse nome"
+            : error?.message ?? "Não foi possível criar",
       };
     }
     const channelIds = input.channelIds ?? [];
@@ -322,7 +325,10 @@ export const departmentActions = {
     if (error || !data) {
       return {
         ok: false,
-        error: error?.code === "23505" ? "Já existe um departamento com esse nome" : "Não foi possível salvar",
+        error:
+          error?.code === "23505"
+            ? "Já existe um departamento com esse nome"
+            : error?.message ?? "Não foi possível salvar",
       };
     }
     const s = useTeamStore.getState();
