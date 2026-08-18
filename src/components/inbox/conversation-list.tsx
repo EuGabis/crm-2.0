@@ -121,7 +121,9 @@ export function ConversationList({
       scope === "mine"
         ? byStatus.filter((c) => c.assignedTo === me?.userId)
         : scope === "offline"
-          ? byStatus.filter((c) => c.assignedOffline && c.assignedTo === me?.userId)
+          ? // Aba Offline = revisar TODOS os leads recebidos offline (mesmo conjunto
+            // do badge): não aplica status/aba, senão some da lista com o badge cheio.
+            todas.filter((c) => c.assignedOffline && c.assignedTo === me?.userId)
           : scope === "bot"
             ? byStatus.filter((c) => automatedIds.has(c.id))
             : byStatus;
@@ -131,7 +133,7 @@ export function ConversationList({
     if (userFilter === "__none__") list = list.filter((c) => !c.assignedTo);
     else if (userFilter) list = list.filter((c) => c.assignedTo === userFilter);
     return list;
-  }, [all, status, scope, me?.userId, automatedIds, channelFilter, userFilter]);
+  }, [all, todas, status, scope, me?.userId, automatedIds, channelFilter, userFilter]);
 
   const sorted =
     sort === "Maior atraso de SLA"
