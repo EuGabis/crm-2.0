@@ -124,6 +124,19 @@ export async function assignLeadTo(
       assigned_offline: offline,
     })
     .eq("id", p.conversationId);
+
+  // Log inline na conversa: registra a transferência (quem recebeu, se estava off).
+  const { data: prof } = await db.from("profiles").select("name").eq("id", userId).maybeSingle();
+  const nome = prof?.name || "atendente";
+  await db.from("messages").insert({
+    location_id: p.locationId,
+    conversation_id: p.conversationId,
+    direction: "out",
+    type: "event",
+    channel: "whatsapp",
+    body: `Lead distribuído para ${nome}${offline ? " (estava offline)" : ""} pelo rodízio`,
+  });
+
   const pid = await leadsPipelineId(db, p.locationId, p.pipelineName);
   if (!pid) return;
   const { data: opp } = await db

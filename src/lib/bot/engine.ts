@@ -221,6 +221,18 @@ async function saveSession(
   );
 }
 
+/** Registra um evento inline na conversa (pílula cinza) — histórico do que o bot fez. */
+async function botLogEvent(ctx: Ctx, body: string) {
+  await ctx.db.from("messages").insert({
+    location_id: ctx.channel.location_id,
+    conversation_id: ctx.conversationId,
+    direction: "out",
+    type: "event",
+    channel: "whatsapp",
+    body,
+  });
+}
+
 /** Status da oportunidade deduzido do nome da etapa (igual ao pipeline.ts). */
 function statusForStageName(name: string): "open" | "won" | "lost" {
   const n = (name ?? "").toUpperCase();
@@ -358,6 +370,7 @@ async function syncCard(
     if (Object.keys(patch).length) {
       await ctx.db.from("opportunities").update(patch).eq("id", opp.id);
     }
+    if (target) await botLogEvent(ctx, `Card movido para a etapa "${target.name}"`);
   } else {
     const stage = target ?? stages[0];
     await ctx.db.from("opportunities").insert({
@@ -370,6 +383,7 @@ async function syncCard(
       value: 0,
       status: statusForStageName(stage.name),
     });
+    await botLogEvent(ctx, `Card criado no funil na etapa "${stage.name}"`);
   }
 }
 
@@ -388,12 +402,13 @@ async function distributeLead(ctx: Ctx, node: { pipeline?: string }) {
       contactId: ctx.contact.id,
       pipelineName: node.pipeline,
     });
-    if (user) return;
+    if (user) return; // assignLeadTo já registrou o log da transferência
   }
   await ctx.db
     .from("conversations")
     .update({ awaiting_distribution: true })
     .eq("id", ctx.conversationId);
+  await botLogEvent(ctx, "Nenhum atendente no rodízio — lead aguardando distribuição");
 }
 
 /** Caminha pelos nós até uma pergunta (para e espera) ou o fim. */
@@ -467,6 +482,9 @@ async function advance(
       // principal responde as próximas mensagens (auto-reply).
       if ((node.to ?? "humano") === "humano") {
         await ctx.db.from("conversations").update({ bot_paused: true }).eq("id", ctx.conversationId);
+        await botLogEvent(ctx, "Bot encerrou o atendimento automático e passou para um atendente");
+      } else {
+        await botLogEvent(ctx, "Bot passou a conversa para o Agente de IA");
       }
       await saveSession(ctx, nodeId, "concluido", vars);
       return;
