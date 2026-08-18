@@ -570,8 +570,6 @@ function DepartmentDialog({
   const [permissions, setPermissions] = useState<ModulePermissions>({});
   const [channelIds, setChannelIds] = useState<string[]>([]);
   const [leadPool, setLeadPool] = useState<string[]>([]);
-  const [sweepEnabled, setSweepEnabled] = useState(false);
-  const [sweepPct, setSweepPct] = useState("30");
   const [saving, setSaving] = useState(false);
 
   // Membros deste departamento — só eles entram no rodízio.
@@ -590,8 +588,6 @@ function DepartmentDialog({
     );
     setChannelIds(department?.channelIds ?? []);
     setLeadPool(department?.leadPool ?? []);
-    setSweepEnabled(department?.sweepEnabled ?? false);
-    setSweepPct(String(department?.sweepPct ?? 30));
   }, [department, open]);
 
   const toggleChannel = (id: string) =>
@@ -619,18 +615,8 @@ function DepartmentDialog({
           permissions,
           channelIds,
           leadPool,
-          sweepEnabled,
-          sweepPct: Number(sweepPct) || 30,
         })
-      : await departmentActions.create({
-          name,
-          description,
-          permissions,
-          channelIds,
-          leadPool,
-          sweepEnabled,
-          sweepPct: Number(sweepPct) || 30,
-        });
+      : await departmentActions.create({ name, description, permissions, channelIds, leadPool });
     setSaving(false);
     if (!res.ok) {
       toast.error(res.error ?? "Não foi possível salvar");
@@ -756,32 +742,6 @@ function DepartmentDialog({
               Leads <strong>quentes</strong> dos números deste departamento vão, em rodízio,
               para quem estiver <strong>online</strong> (ativo nos últimos 5 min). Desmarque
               quem não deve receber — ninguém marcado = todos recebem.
-            </p>
-          </div>
-
-          {/* Varredura horária (migração 0058) */}
-          <div className="rounded-lg border p-3">
-            <div className="flex items-center justify-between gap-2">
-              <Label className="text-xs font-semibold">Varredura automática (a cada 1h)</Label>
-              <Switch checked={sweepEnabled} onCheckedChange={(v) => setSweepEnabled(Boolean(v))} />
-            </div>
-            {sweepEnabled && (
-              <div className="mt-2 flex items-center gap-2 text-xs text-slate-600">
-                A cada hora, distribui
-                <Input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={sweepPct}
-                  onChange={(e) => setSweepPct(e.target.value)}
-                  className="h-7 w-16 text-xs"
-                />
-                % dos leads parados para quem estiver online.
-              </div>
-            )}
-            <p className="mt-1 text-[10px] leading-tight text-slate-400">
-              Pega os leads quentes que ficaram <strong>aguardando distribuição</strong> (ninguém
-              online na hora) e escoa uma parte a cada hora. Independe da distribuição em tempo real.
             </p>
           </div>
 

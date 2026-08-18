@@ -1,8 +1,7 @@
 /**
- * Núcleo da distribuição de leads (rodízio). Usado em 3 lugares:
+ * Núcleo da distribuição de leads (rodízio). Usado em 2 lugares:
  *  - tempo real: o nó `distribute` do bot, quando o lead vira quente;
- *  - varredura horária: /api/leads/sweep (pg_cron) pega os "aguardando" e escoa %;
- *  - manual: /api/leads/distribute (admin) força a distribuição.
+ *  - manual: /api/leads/distribute (admin) força a distribuição dos "aguardando".
  * Roda sempre com um client de service role (ignora RLS). Presença = ≤ 5 min.
  */
 import { normalize } from "@/lib/bot/types";

@@ -29,10 +29,6 @@ export interface Department {
   channelIds: string[];
   /** Atendentes (user_ids) no rodízio de distribuição de leads. Vazio = todos do depto. */
   leadPool: string[];
-  /** Varredura horária dos leads aguardando distribuição (0058). */
-  sweepEnabled: boolean;
-  /** Fração (%) dos parados distribuída a cada varredura (default 30). */
-  sweepPct: number;
   createdAt: string;
 }
 
@@ -108,8 +104,6 @@ const mapDepartment = (r: any, channelIds: string[] = []): Department => ({
   permissions: r.permissions ?? {},
   channelIds,
   leadPool: r.lead_pool ?? [],
-  sweepEnabled: r.sweep_enabled ?? false,
-  sweepPct: r.sweep_pct ?? 30,
   createdAt: r.created_at,
 });
 
@@ -267,8 +261,6 @@ export const departmentActions = {
     permissions: ModulePermissions;
     channelIds?: string[];
     leadPool?: string[];
-    sweepEnabled?: boolean;
-    sweepPct?: number;
   }): Promise<{ ok: boolean; error?: string }> {
     const loc = locationId();
     if (!loc) return { ok: false, error: "Empresa não encontrada" };
@@ -282,8 +274,6 @@ export const departmentActions = {
         description: input.description.trim(),
         permissions: input.permissions,
         lead_pool: input.leadPool ?? [],
-        sweep_enabled: input.sweepEnabled ?? false,
-        sweep_pct: input.sweepPct ?? 30,
         created_by: auth.user?.id ?? null,
       })
       .select()
@@ -313,8 +303,6 @@ export const departmentActions = {
       permissions?: ModulePermissions;
       channelIds?: string[];
       leadPool?: string[];
-      sweepEnabled?: boolean;
-      sweepPct?: number;
     }
   ): Promise<{ ok: boolean; error?: string }> {
     const loc = locationId();
@@ -324,8 +312,6 @@ export const departmentActions = {
     if (patch.description !== undefined) row.description = patch.description.trim();
     if (patch.permissions !== undefined) row.permissions = patch.permissions;
     if (patch.leadPool !== undefined) row.lead_pool = patch.leadPool;
-    if (patch.sweepEnabled !== undefined) row.sweep_enabled = patch.sweepEnabled;
-    if (patch.sweepPct !== undefined) row.sweep_pct = patch.sweepPct;
     const supabase = createClient();
     const { data, error } = await supabase
       .from("departments")
