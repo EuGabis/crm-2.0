@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import type {
   Channel,
@@ -127,8 +128,35 @@ export const useConvStore = create<ConvState>((set, get) => ({
       views: (views.data ?? []).map(mapView),
     });
 
-    // Realtime: mensagens e conversas chegam ao vivo (RLS filtra por tenant)
-    supabase
+    subscribeInbox();
+  },
+
+  patch: (p) => set(p),
+}));
+
+/**
+ * Assina o Realtime da caixa de entrada — e pode ser chamada DE NOVO.
+ *
+ * O `.subscribe()` original só tratava `SUBSCRIBED`. Quando o websocket morre
+ * (notebook suspenso, rede oscilando, proxy cortando conexão ociosa), o canal
+ * fica em `CLOSED`/`CHANNEL_ERROR`, ninguém reinscreve e o selo continuava
+ * dizendo "Ao vivo" — a caixa parava de atualizar sem nenhum sinal, e só um F5
+ * resolvia. Era o sintoma relatado.
+ */
+let inboxChannel: RealtimeChannel | null = null;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function subscribeInbox() {
+  const supabase = createClient();
+  const set = useConvStore.setState;
+  const get = useConvStore.getState;
+
+  if (inboxChannel) {
+    void supabase.removeChannel(inboxChannel);
+    inboxChannel = null;
+  }
+
+  inboxChannel = supabase
       .channel("lito-inbox")
       .on(
         "postgres_changes",
@@ -171,12 +199,85 @@ export const useConvStore = create<ConvState>((set, get) => ({
         }
       )
       .subscribe((status) => {
-        if (status === "SUBSCRIBED") set({ realtime: "on" });
+        if (status === "SUBSCRIBED") {
+          set({ realtime: "on" });
+          return;
+        }
+        // Qualquer outro estado final = não estamos mais recebendo nada. Dizer
+        // isso ("Ao vivo" apaga) importa: o usuário precisa saber que a lista
+        // pode estar velha. A varredura de `useInboxLiveSync` cobre o buraco.
+        if (status === "CLOSED" || status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          set({ realtime: "off" });
+          if (retryTimer) clearTimeout(retryTimer);
+          // Espera antes de tentar de novo: reinscrever em rajada durante uma
+          // queda de rede só multiplica o erro.
+          retryTimer = setTimeout(() => subscribeInbox(), 5000);
+        }
       });
-  },
+}
 
-  patch: (p) => set(p),
-}));
+/**
+ * Cursor da varredura: a mensagem mais recente que já temos, MENOS uma
+ * sobreposição.
+ *
+ * A sobreposição não é preciosismo: com `created_at > cursor`, duas mensagens
+ * gravadas no mesmo instante fariam a segunda ser pulada para sempre. Os poucos
+ * registros repetidos que a janela traz de volta são descartados pelo filtro de
+ * id logo depois — barato, e fecha o buraco.
+ */
+const SYNC_OVERLAP_MS = 30_000;
+
+function syncCursor(): string | null {
+  const { messages } = useConvStore.getState();
+  let max: string | null = null;
+  // Compara sempre `at` (created_at): misturar `dispatchedAt` empurraria o
+  // cursor para além do que a coluna consultada contém, e aí sim haveria salto.
+  for (const m of messages) {
+    if (!max || m.at > max) max = m.at;
+  }
+  if (!max) return null;
+  const t = new Date(max).getTime();
+  return Number.isNaN(t) ? max : new Date(t - SYNC_OVERLAP_MS).toISOString();
+}
+
+/**
+ * Busca o que chegou DEPOIS do cursor e emenda na store. Silenciosa de
+ * propósito: não mexe em `loading`, não recarrega a lista inteira e não
+ * substitui nada que já esteja lá — só acrescenta o que falta. Sem isso, o
+ * "refresh automático" piscaria a tela e jogaria o scroll da conversa.
+ */
+export async function syncInboxDelta(): Promise<number> {
+  const supabase = createClient();
+  const cursor = syncCursor();
+  let query = supabase.from("messages").select("*").order("created_at").limit(300);
+  // Sem cursor (store vazia) não há delta a buscar — quem carrega é o load().
+  if (!cursor) return 0;
+  query = query.gt("created_at", cursor);
+
+  const { data, error } = await query;
+  if (error || !data || data.length === 0) return 0;
+
+  const s = useConvStore.getState();
+  const known = new Set(s.messages.map((m) => m.id));
+  const fresh = data.map(mapMessage).filter((m) => !known.has(m.id));
+  if (fresh.length === 0) return 0;
+
+  useConvStore.setState({ messages: [...s.messages, ...fresh] });
+
+  // As conversas tocadas precisam vir junto: prévia, contador de não lidas e
+  // reabertura por mensagem de entrada mudam na linha da conversa, não na
+  // mensagem. Só as afetadas — recarregar todas a cada varredura seria caro.
+  const touched = [...new Set(fresh.map((m) => m.conversationId))];
+  const { data: convs } = await supabase.from("conversations").select("*").in("id", touched);
+  if (convs?.length) {
+    const byId = new Map(convs.map((c: any) => [c.id, mapConversation(c)]));
+    const cur = useConvStore.getState();
+    const updated = cur.conversations.map((c) => byId.get(c.id) ?? c);
+    const novas = [...byId.values()].filter((c) => !cur.conversations.some((x) => x.id === c.id));
+    useConvStore.setState({ conversations: [...novas, ...updated] });
+  }
+  return fresh.length;
+}
 
 export function useConversations(filter: ConversationFilter = "all") {
   const { conversations, load } = useConvStore();
@@ -818,3 +919,65 @@ export const snippetActions = {
     return true;
   },
 };
+
+/**
+ * Refresh silencioso da caixa de entrada — montado SÓ na página de Conversas.
+ *
+ * Por que existe, mesmo havendo Realtime: o websocket cai por motivos que o CRM
+ * não controla (notebook suspenso, wi-fi trocando de rede, proxy corporativo
+ * cortando conexão ociosa, token expirando). Quando cai, a caixa simplesmente
+ * para de atualizar e o usuário só descobre quando estranha o silêncio — a
+ * queixa foi exatamente "preciso dar F5 para ver mensagem nova".
+ *
+ * Três gatilhos, porque cada um cobre um caso diferente:
+ *   * intervalo — a rede voltou mas o canal não;
+ *   * voltar para a aba — o navegador congela timers em aba oculta, então o
+ *     intervalo NÃO é confiável em segundo plano; sem isto a pessoa voltaria
+ *     para uma lista velha;
+ *   * `online` — sai do modo avião / cabo reconectado.
+ *
+ * Em aba oculta a varredura é pulada de propósito: gastar consulta a cada 15 s
+ * numa aba que ninguém está vendo não ajuda, e o gatilho de foco cobre.
+ *
+ * "Não perceptível" é requisito: `syncInboxDelta` só ACRESCENTA (nunca troca a
+ * lista nem toca em `loading`), então não há piscada, spinner nem salto de
+ * scroll. Se de fato chegou mensagem, o thread rola para o fim — isso é o
+ * comportamento esperado de um chat, não efeito colateral do refresh.
+ */
+export function useInboxLiveSync(intervalMs = 15000) {
+  useEffect(() => {
+    let alive = true;
+    let running = false;
+
+    const tick = async () => {
+      // Uma varredura por vez: numa conexão lenta, duas rodando juntas
+      // duplicariam a mesma emenda.
+      if (!alive || running || typeof document === "undefined") return;
+      if (document.hidden) return;
+      running = true;
+      try {
+        await syncInboxDelta();
+      } finally {
+        running = false;
+      }
+    };
+
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      // Voltou para a aba: se o canal caiu enquanto ela estava oculta, reassina
+      // antes de varrer — senão a próxima mensagem também não chegaria sozinha.
+      if (useConvStore.getState().realtime === "off") subscribeInbox();
+      void tick();
+    };
+
+    const timer = setInterval(() => void tick(), intervalMs);
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", onVisible);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", onVisible);
+    };
+  }, [intervalMs]);
+}

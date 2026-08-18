@@ -49,6 +49,7 @@ import {
   useConvStore,
   useConversation,
   useConversations,
+  useInboxLiveSync,
   useScheduledMessages,
   useSnippets,
 } from "@/lib/data/repos/db/conversations";
@@ -116,6 +117,10 @@ export default function ConversasPage() {
 function ConversasPageInner() {
   const [tab, setTab] = useState("Conversas");
   const conversations = useConversations();
+  // Refresh silencioso, SÓ nesta página: o Realtime cai por motivos fora do
+  // controle do CRM (notebook suspenso, wi-fi trocando, proxy cortando conexão
+  // ociosa) e a caixa parava de atualizar até um F5.
+  useInboxLiveSync();
   // ?c=<id> vem do card do kanban ("Abrir conversa") — abre direto naquela.
   const searchParams = useSearchParams();
   const [selectedId, setSelectedId] = useState<string | null>(

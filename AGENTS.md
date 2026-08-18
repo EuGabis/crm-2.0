@@ -137,6 +137,40 @@ src/
 6. Páginas são client components (`"use client"`) — ícones Lucide não podem ser
    passados de Server para Client component como prop.
 
+## Conversas: refresh silencioso (por que Realtime não bastava)
+
+Queixa real: "para alguns usuários a conversa não atualiza, preciso dar F5".
+
+Causa: o `.subscribe()` do canal `lito-inbox` só tratava `SUBSCRIBED`. Quando o
+websocket morre — notebook suspenso, wi-fi trocando de rede, proxy corporativo
+cortando conexão ociosa, token expirando — o canal fica em
+`CLOSED`/`CHANNEL_ERROR`, **ninguém reinscrevia**, e o selo continuava dizendo
+"Ao vivo" enquanto nada chegava. Só o F5 resolvia.
+
+Duas peças, em `db/conversations.ts`:
+
+1. **`subscribeInbox()`** virou função chamável de novo. Estado final que não
+   seja `SUBSCRIBED` marca `realtime: "off"` (o selo "Ao vivo" apaga — o usuário
+   precisa saber que a lista pode estar velha) e reagenda a reinscrição em 5 s
+   (esperar importa: reinscrever em rajada durante queda de rede multiplica o
+   erro).
+2. **`useInboxLiveSync()`** — montado SÓ em `/conversas`. Varre a cada 15 s, ao
+   VOLTAR PARA A ABA (o navegador congela timers em aba oculta, então o
+   intervalo não é confiável em segundo plano) e no evento `online`. Em aba
+   oculta a varredura é pulada de propósito.
+
+`syncInboxDelta()` é o que faz o refresh ser **imperceptível**: busca só o que
+chegou depois do cursor e **acrescenta** — nunca troca a lista, nunca toca em
+`loading`. Sem isso haveria piscada, spinner e salto de scroll. Depois emenda
+apenas as conversas afetadas (prévia/não lidas/reabertura moram na linha da
+conversa, não na mensagem).
+
+⚠️ O cursor tem **sobreposição de 30 s**: com `created_at > cursor`, duas
+mensagens gravadas no mesmo instante fariam a segunda ser pulada para sempre. As
+repetidas que a janela traz são descartadas pelo filtro de id. E o cursor compara
+sempre `at` (created_at) — misturar `dispatchedAt` o empurraria além da coluna
+consultada, criando o salto que se quer evitar.
+
 ## Sidebar minimizável
 
 Botão **"Minimizar menu"** no pé da barra (junto de Configurações — é ajuste de
