@@ -135,43 +135,126 @@ function statusForStageName(name: string): "open" | "won" | "lost" {
   return "open";
 }
 
-/** Atualiza o card do contato no funil (nome + etapa); cria se não existir. */
-async function syncCard(
-  ctx: Ctx,
-  node: { pipeline?: string; var: string; stageMap: Record<string, string> },
-  vars: Record<string, any>,
-) {
+/** Carrega os funis + todas as etapas da empresa (uma vez por passo de card). */
+async function loadPipelines(ctx: Ctx) {
   const loc = ctx.channel.location_id;
   const { data: pipelines } = await ctx.db
     .from("pipelines")
     .select("id, name, position")
     .eq("location_id", loc)
     .order("position");
-  if (!pipelines?.length) return;
   const { data: allStages } = await ctx.db
     .from("stages")
     .select("id, name, position, pipeline_id")
-    .in("pipeline_id", pipelines.map((p: any) => p.id))
+    .in("pipeline_id", (pipelines ?? []).map((p: any) => p.id))
     .order("position");
-  const stagesOf = (pid: string) => (allStages ?? []).filter((s: any) => s.pipeline_id === pid);
-  const stageByName = (pid: string, name: string) =>
-    name ? stagesOf(pid).find((s: any) => normalize(s.name).includes(normalize(name))) : null;
+  return { pipelines: pipelines ?? [], allStages: allStages ?? [] };
+}
+
+const stagesOf = (allStages: any[], pid: string) =>
+  allStages.filter((s: any) => s.pipeline_id === pid);
+const stageByName = (stages: any[], name: string) =>
+  name ? stages.find((s: any) => normalize(s.name).includes(normalize(name))) : null;
+
+/**
+ * Escolhe o FUNIL DE LEADS certo — o contato pode ter card em vários funis.
+ * 1) por nome configurado; 2) senão, o funil que mais contém as etapas esperadas
+ * (ex.: QUENTE/NOVO LEAD); 3) fallback no primeiro. Evita mexer no funil errado.
+ */
+function resolvePipeline(pipelines: any[], allStages: any[], name: string | undefined, hints: string[]) {
+  if (name) {
+    const byName = pipelines.find((p: any) => normalize(p.name).includes(normalize(name)));
+    if (byName) return byName;
+  }
+  let best: any = null;
+  let bestScore = -1;
+  for (const p of pipelines) {
+    const names = stagesOf(allStages, p.id).map((s: any) => normalize(s.name));
+    const score = hints.reduce(
+      (acc, h) => acc + (h && names.some((n: string) => n.includes(normalize(h))) ? 1 : 0),
+      0,
+    );
+    if (score > bestScore) {
+      bestScore = score;
+      best = p;
+    }
+  }
+  return bestScore > 0 ? best : pipelines[0];
+}
+
+/** Nome do card: usa o que o lead digitou; senão o nome atual do contato. */
+async function cardName(ctx: Ctx, vars: Record<string, any>): Promise<string> {
+  const v = String(vars.name ?? "").trim();
+  if (v) return v;
+  const { data: c } = await ctx.db
+    .from("contacts")
+    .select("first_name, last_name")
+    .eq("id", ctx.contact.id)
+    .maybeSingle();
+  return [c?.first_name, c?.last_name].filter(Boolean).join(" ").trim() || "Lead";
+}
+
+/** Garante o card no funil de leads (cria em NOVO LEAD se não existir; senão nada). */
+async function ensureCard(
+  ctx: Ctx,
+  node: { pipeline?: string; stage: string },
+  vars: Record<string, any>,
+) {
+  const { pipelines, allStages } = await loadPipelines(ctx);
+  if (!pipelines.length) return;
+  const pick = resolvePipeline(pipelines, allStages, node.pipeline, [node.stage]);
+  const stages = stagesOf(allStages, pick.id);
+  if (!stages.length) return;
+
+  const { data: existing } = await ctx.db
+    .from("opportunities")
+    .select("id")
+    .eq("contact_id", ctx.contact.id)
+    .eq("pipeline_id", pick.id)
+    .limit(1)
+    .maybeSingle();
+  if (existing) return; // já tem card nesse funil → segue com o existente
+
+  const entry = stageByName(stages, node.stage) ?? stages[0];
+  await ctx.db.from("opportunities").insert({
+    location_id: ctx.channel.location_id,
+    contact_id: ctx.contact.id,
+    pipeline_id: pick.id,
+    stage_id: entry.id,
+    name: await cardName(ctx, vars),
+    source: "Bot",
+    value: 0,
+    status: statusForStageName(entry.name),
+  });
+}
+
+/** Move o card do contato no funil de leads: atualiza nome + etapa (quente/frio). */
+async function syncCard(
+  ctx: Ctx,
+  node: { pipeline?: string; var: string; stageMap: Record<string, string> },
+  vars: Record<string, any>,
+) {
+  const { pipelines, allStages } = await loadPipelines(ctx);
+  if (!pipelines.length) return;
+  const pick = resolvePipeline(pipelines, allStages, node.pipeline, Object.values(node.stageMap));
+  const stages = stagesOf(allStages, pick.id);
+  if (!stages.length) return;
 
   const wantName = node.stageMap[normalize(vars[node.var])] ?? "";
+  const target = stageByName(stages, wantName);
   const fullName = String(vars.name ?? "").trim();
 
-  // Oportunidade existente do contato em QUALQUER funil (a mais recente): move ela
-  // dentro do próprio funil, para o card que a pessoa vê realmente andar.
+  // Card do contato NESTE funil de leads (o que a pessoa vê no kanban de leads).
   const { data: opp } = await ctx.db
     .from("opportunities")
-    .select("id, pipeline_id")
+    .select("id")
     .eq("contact_id", ctx.contact.id)
+    .eq("pipeline_id", pick.id)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
   if (opp) {
-    const target = stageByName(opp.pipeline_id, wantName);
     const patch: any = {};
     if (fullName) patch.name = fullName;
     if (target) {
@@ -182,20 +265,13 @@ async function syncCard(
       await ctx.db.from("opportunities").update(patch).eq("id", opp.id);
     }
   } else {
-    // Sem card ainda: cria no funil configurado (ou no primeiro) na etapa alvo.
-    const pick =
-      (node.pipeline
-        ? pipelines.find((p: any) => normalize(p.name) === normalize(node.pipeline))
-        : null) ?? pipelines[0];
-    const stages = stagesOf(pick.id);
-    if (!stages.length) return;
-    const stage = stageByName(pick.id, wantName) ?? stages[0];
+    const stage = target ?? stages[0];
     await ctx.db.from("opportunities").insert({
-      location_id: loc,
+      location_id: ctx.channel.location_id,
       contact_id: ctx.contact.id,
       pipeline_id: pick.id,
       stage_id: stage.id,
-      name: fullName || "Lead",
+      name: fullName || (await cardName(ctx, vars)),
       source: "Bot",
       value: 0,
       status: statusForStageName(stage.name),
@@ -243,6 +319,9 @@ async function advance(
         sum += table[normalize(vars[v])] ?? 0;
       }
       vars[node.var] = sum >= node.threshold ? node.hotValue : node.coldValue;
+      nodeId = node.next;
+    } else if (node.type === "ensure_card") {
+      await ensureCard(ctx, node, vars);
       nodeId = node.next;
     } else if (node.type === "sync_card") {
       await syncCard(ctx, node, vars);

@@ -17,6 +17,14 @@ export const triagemFlow: BotFlow = {
       text:
         "Saudações Aeronáuticas, eu sou a Lita, assistente virtual da Lito Academy.\n" +
         "Para ser atendido mais rapidamente pela nossa tripulação humana, você precisa responder 5 perguntinhas muito rápidas:",
+      next: "cria_card",
+    },
+    // Já na 1ª mensagem: garante um card do lead em "NOVO LEAD" (se não existir).
+    cria_card: {
+      id: "cria_card",
+      type: "ensure_card",
+      pipeline: "Controle de Leads",
+      stage: "NOVO LEAD",
       next: "pergunta_nome",
     },
     pergunta_nome: {
@@ -117,6 +125,7 @@ export const triagemFlow: BotFlow = {
     atualiza_card: {
       id: "atualiza_card",
       type: "sync_card",
+      pipeline: "Controle de Leads",
       var: "qualificacao",
       stageMap: {
         quente: "QUENTE",

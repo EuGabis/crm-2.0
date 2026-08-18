@@ -24,6 +24,8 @@ function nodeLabel(node: BotNode): string {
       return "Salva um dado do contato";
     case "score":
       return "Qualificação (pontuação)";
+    case "ensure_card":
+      return "Cria o card do lead no funil";
     case "sync_card":
       return "Atualiza o card no funil";
     case "condition":
@@ -189,6 +191,35 @@ function NodeEditor({
 
   if (node.type === "score") {
     return <ScoreEditor node={node} nodes={nodes} onPatch={onPatch} />;
+  }
+
+  if (node.type === "ensure_card") {
+    return (
+      <div className="space-y-2">
+        <p className="text-[11px] text-slate-500">
+          Assim que o lead manda a 1ª mensagem, cria um card no funil abaixo (se ainda não
+          existir). Se já existir, segue com o card atual.
+        </p>
+        <label className="flex items-center gap-2 text-xs text-slate-600">
+          <span className="w-24 shrink-0">Funil</span>
+          <input
+            className="h-8 flex-1 rounded-lg border px-2 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            value={node.pipeline ?? ""}
+            onChange={(e) => onPatch(node.id, { pipeline: e.target.value })}
+            placeholder="Ex.: Controle de Leads"
+          />
+        </label>
+        <label className="flex items-center gap-2 text-xs text-slate-600">
+          <span className="w-24 shrink-0">Etapa inicial</span>
+          <input
+            className="h-8 flex-1 rounded-lg border px-2 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            value={node.stage}
+            onChange={(e) => onPatch(node.id, { stage: e.target.value })}
+            placeholder="Ex.: NOVO LEAD"
+          />
+        </label>
+      </div>
+    );
   }
 
   if (node.type === "sync_card") {
@@ -362,6 +393,15 @@ function StageMapEditor({
   const label: Record<string, string> = { quente: "Quente 🔥", frio: "Frio ❄️" };
   return (
     <div className="space-y-1.5">
+      <label className="flex items-center gap-2 text-xs text-slate-600">
+        <span className="w-24 shrink-0">Funil</span>
+        <input
+          className="h-8 flex-1 rounded-lg border px-2 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400"
+          value={node.pipeline ?? ""}
+          onChange={(e) => onPatch(node.id, { pipeline: e.target.value })}
+          placeholder="Ex.: Controle de Leads"
+        />
+      </label>
       <p className="text-[11px] text-slate-500">
         Para onde o card do lead vai, conforme a qualificação (nome da etapa do funil):
       </p>

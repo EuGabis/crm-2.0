@@ -46,13 +46,24 @@ export type BotNode =
       coldValue: string;
       next: string | null;
     }
-  // Sincroniza o CARD (oportunidade) do contato no funil: atualiza o nome e move
-  // pra etapa mapeada pela variável (ex.: qualificacao=quente → etapa "QUENTE").
-  // Cria a oportunidade se o contato ainda não tiver uma no funil.
+  // Garante que o contato tenha um CARD no funil de leads. Se não tiver, cria na
+  // etapa de entrada (ex.: "NOVO LEAD") já na 1ª mensagem. Se já tiver, não mexe.
+  | {
+      id: string;
+      type: "ensure_card";
+      /** Nome do funil de leads (ex.: "Controle de Leads"). */
+      pipeline?: string;
+      /** Etapa de entrada onde o card nasce (ex.: "NOVO LEAD"). */
+      stage: string;
+      next: string | null;
+    }
+  // Sincroniza o CARD (oportunidade) do contato no funil de leads: atualiza o nome
+  // e move pra etapa mapeada pela variável (ex.: qualificacao=quente → "QUENTE").
+  // Cria a oportunidade se ainda não existir.
   | {
       id: string;
       type: "sync_card";
-      /** Nome do funil (default: o primeiro). */
+      /** Nome do funil de leads (ex.: "Controle de Leads"). Cai no melhor palpite. */
       pipeline?: string;
       /** Variável que decide a etapa (ex.: "qualificacao"). */
       var: string;
