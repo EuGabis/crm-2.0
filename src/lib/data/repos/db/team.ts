@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { create } from "zustand";
 import { createClient } from "@/lib/supabase/client";
 import { useDbStore } from "./contacts";
@@ -42,6 +42,8 @@ export interface TeamMember {
   /** Só as exceções ao departamento. Vazio = segue o departamento à risca. */
   permissions: ModulePermissions;
   departmentId: string | null;
+  /** Última presença (heartbeat). Online = ≤ 5 min. null = nunca visto. */
+  lastSeenAt: string | null;
   createdAt: string;
 }
 
@@ -172,6 +174,7 @@ export const useTeamStore = create<TeamState>((set, get) => ({
         onlyAssigned: m.only_assigned,
         permissions: m.permissions ?? {},
         departmentId: m.department_id ?? null,
+        lastSeenAt: m.last_seen_at ?? null,
         createdAt: m.created_at,
       };
     });
@@ -197,6 +200,37 @@ export function useTeam() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return store;
+}
+
+/**
+ * Presença ao vivo (last_seen_at) por user_id — recarrega a cada 30s. O componente
+ * decide online/offline (≤ 5 min = online). Cai no que veio no membro se ainda não
+ * recarregou.
+ */
+export function usePresence(): Record<string, string | null> {
+  const [seen, setSeen] = useState<Record<string, string | null>>({});
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      const loc = useDbStore.getState().locationId;
+      if (!loc) return;
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("location_members")
+        .select("user_id, last_seen_at")
+        .eq("location_id", loc);
+      if (active && data) {
+        setSeen(Object.fromEntries(data.map((r: any) => [r.user_id, r.last_seen_at ?? null])));
+      }
+    };
+    void load();
+    const t = setInterval(() => void load(), 30000);
+    return () => {
+      active = false;
+      clearInterval(t);
+    };
+  }, []);
+  return seen;
 }
 
 /** Departamentos da empresa (segmentações de acesso). */

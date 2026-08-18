@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { format } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
   Building2,
@@ -45,6 +45,7 @@ import {
   departmentActions,
   teamActions,
   useMyMembership,
+  usePresence,
   useTeam,
   type Department,
   type MemberRole,
@@ -77,11 +78,23 @@ function allowedCount(p: ModulePermissions) {
   return MODULE_KEYS.filter((k) => p[k] !== false).length;
 }
 
+/** Online = visto nos últimos 5 min. Senão, "visto há X" (ou "nunca acessou"). */
+function presenceInfo(lastSeen: string | null): { online: boolean; label: string } {
+  if (!lastSeen) return { online: false, label: "nunca acessou" };
+  const diff = Date.now() - new Date(lastSeen).getTime();
+  if (diff < 5 * 60 * 1000) return { online: true, label: "Online" };
+  return {
+    online: false,
+    label: `visto ${formatDistanceToNow(new Date(lastSeen), { locale: ptBR, addSuffix: true })}`,
+  };
+}
+
 export default function DepartamentosPage() {
   const confirm = useConfirm();
   const { members, invitations, departments, loaded, loading } = useTeam();
   const { isAdmin, me, loaded: meLoaded } = useMyMembership();
   const { channels } = useWhatsappChannels();
+  const presence = usePresence();
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -279,12 +292,19 @@ export default function DepartamentosPage() {
       )}
 
       {/* Usuários */}
-      <h2 className="mb-2 mt-6 text-sm font-bold text-slate-900">Usuários</h2>
+      <h2 className="mb-2 mt-6 flex items-center gap-2 text-sm font-bold text-slate-900">
+        Usuários
+        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+          {members.filter((m) => presenceInfo(presence[m.userId] ?? m.lastSeenAt).online).length} online
+          agora
+        </span>
+      </h2>
       <div className="overflow-x-auto rounded-xl border bg-white">
         <table className="w-full text-left text-xs">
           <thead>
             <tr className="border-b text-[11px] text-slate-400">
               <th className="px-4 py-2.5 font-medium">Nome</th>
+              <th className="px-4 py-2.5 font-medium">Presença</th>
               <th className="px-4 py-2.5 font-medium">E-mail</th>
               <th className="px-4 py-2.5 font-medium">Função</th>
               <th className="px-4 py-2.5 font-medium">Departamento</th>
@@ -301,6 +321,7 @@ export default function DepartamentosPage() {
               const allowed = MODULE_KEYS.filter((k) =>
                 canAccess(k, m, departments)
               ).length;
+              const pres = presenceInfo(presence[m.userId] ?? m.lastSeenAt);
               return (
                 <tr key={m.userId} className="border-b last:border-0">
                   <td className="px-4 py-2.5">
@@ -317,6 +338,19 @@ export default function DepartamentosPage() {
                       {isMe && (
                         <span className="text-[10px] font-normal text-slate-400">(você)</span>
                       )}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <span className="flex items-center gap-1.5 whitespace-nowrap text-[11px]">
+                      <span
+                        className={cn(
+                          "size-2 shrink-0 rounded-full",
+                          pres.online ? "bg-emerald-500" : "bg-slate-300"
+                        )}
+                      />
+                      <span className={pres.online ? "font-semibold text-emerald-600" : "text-slate-500"}>
+                        {pres.label}
+                      </span>
                     </span>
                   </td>
                   <td className="px-4 py-2.5 text-slate-500">{m.email}</td>
