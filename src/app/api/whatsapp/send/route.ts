@@ -138,6 +138,11 @@ export async function POST(request: Request) {
       last_message_preview: bodyText,
       sla_days: 0,
       bot_paused: true,
+      // Responder REABRE a conversa (volta pra caixa ativa se estava finalizada/arquivada).
+      closed_at: null,
+      closed_by: null,
+      archived_at: null,
+      archived_by: null,
     })
     .eq("id", conversationId);
 
