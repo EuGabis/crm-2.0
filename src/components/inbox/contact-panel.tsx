@@ -79,7 +79,7 @@ function OppEditor({
   const stages = pipeline?.stages ?? [];
   const stage = stages.find((s) => s.id === opportunity.stageId);
   const owner = team.find((u) => u.id === opportunity.ownerId);
-  const { me } = useMyMembership();
+  const { me, isAdmin } = useMyMembership();
   const actor = team.find((u) => u.id === me?.userId)?.name ?? "Alguém";
 
   const changeStage = async (s: Stage) => {
@@ -151,9 +151,45 @@ function OppEditor({
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        {/* Responsável */}
-        <DropdownMenu>
-          <DropdownMenuTrigger render={<button title="Definir responsável" className={trigger} />}>
+        {/* Responsável — transferir (trocar dono) é só admin. */}
+        {isAdmin ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<button title="Definir responsável" className={trigger} />}>
+              <span className="flex min-w-0 items-center gap-1.5">
+                {owner ? (
+                  <Avatar className="size-4">
+                    <AvatarFallback
+                      className="text-[7px] font-bold text-white"
+                      style={{ background: owner.color }}
+                    >
+                      {owner.name.slice(0, 2).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                ) : (
+                  <UserPlus className="size-3 text-slate-400" />
+                )}
+                <span className="truncate text-slate-700">{owner?.name ?? "Responsável"}</span>
+              </span>
+              <ChevronDown className="size-3 shrink-0 text-slate-400" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="max-h-64 w-48 overflow-y-auto">
+              {team.map((u) => (
+                <DropdownMenuItem key={u.id} className="text-xs" onClick={() => void changeOwner(u.id)}>
+                  {u.name}
+                </DropdownMenuItem>
+              ))}
+              {opportunity.ownerId && (
+                <DropdownMenuItem
+                  className="text-xs text-slate-500"
+                  onClick={() => void changeOwner(null)}
+                >
+                  Remover responsável
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <span className={cn(trigger, "cursor-default")} title="Responsável">
             <span className="flex min-w-0 items-center gap-1.5">
               {owner ? (
                 <Avatar className="size-4">
@@ -167,26 +203,10 @@ function OppEditor({
               ) : (
                 <UserPlus className="size-3 text-slate-400" />
               )}
-              <span className="truncate text-slate-700">{owner?.name ?? "Responsável"}</span>
+              <span className="truncate text-slate-700">{owner?.name ?? "Sem responsável"}</span>
             </span>
-            <ChevronDown className="size-3 shrink-0 text-slate-400" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="max-h-64 w-48 overflow-y-auto">
-            {team.map((u) => (
-              <DropdownMenuItem key={u.id} className="text-xs" onClick={() => void changeOwner(u.id)}>
-                {u.name}
-              </DropdownMenuItem>
-            ))}
-            {opportunity.ownerId && (
-              <DropdownMenuItem
-                className="text-xs text-slate-500"
-                onClick={() => void changeOwner(null)}
-              >
-                Remover responsável
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+          </span>
+        )}
       </div>
     </div>
   );

@@ -52,7 +52,7 @@ import { cn } from "@/lib/utils";
 /** Responsável pelo atendimento — grava em `conversations.assigned_to` (0024). */
 function AssignPicker({ conversation }: { conversation: Conversation }) {
   const { members } = useTeam();
-  const { me } = useMyMembership();
+  const { me, isAdmin } = useMyMembership();
   const owner = members.find((m) => m.userId === conversation.assignedTo) ?? null;
 
   const set = async (userId: string | null) => {
@@ -70,6 +70,32 @@ function AssignPicker({ conversation }: { conversation: Conversation }) {
     );
     toast.success(target ? `Atribuída a ${target}` : "Devolvida para a caixa do grupo");
   };
+
+  // Transferir/atribuir é só admin. Não-admin só vê quem é o responsável.
+  if (!isAdmin) {
+    return (
+      <span
+        title={owner ? `Responsável: ${owner.name}` : "Sem responsável"}
+        className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-slate-500"
+      >
+        {owner ? (
+          <>
+            <Avatar className="size-5">
+              <AvatarFallback
+                className="text-[9px] font-bold text-white"
+                style={{ background: owner.color }}
+              >
+                {owner.name.slice(0, 2).toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+            <span className="max-w-24 truncate">{owner.name}</span>
+          </>
+        ) : (
+          <span className="text-slate-400">Sem responsável</span>
+        )}
+      </span>
+    );
+  }
 
   return (
     <DropdownMenu>
@@ -270,13 +296,7 @@ function PipelineEvent({ message }: { message: Message }) {
     <div className="my-2 flex justify-center">
       <span className="flex items-center gap-1.5 rounded-full border bg-slate-50 px-3 py-1 text-[10px] text-slate-500">
         <CalendarDays className="size-3" />
-        {message.body} ·{" "}
-        <button
-          onClick={() => toast.info("Detalhes da oportunidade em breve")}
-          className="font-semibold text-indigo-600 hover:underline"
-        >
-          Detalhes
-        </button>
+        {message.body}
       </span>
     </div>
   );
