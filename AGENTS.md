@@ -204,6 +204,20 @@ ganho.
 - A preferência é por DISPOSITIVO (`localStorage`, chave
   `lito.sidebar.collapsed`): num notebook de 13" se quer fechada, no monitor
   grande aberta; guardar "na conta" imporia a mesma decisão nos dois.
+- Minimizada, o nome de cada item aparece em **tooltip** ao passar o mouse, com
+  o ícone crescendo um pouco (a resposta ao mouse vem antes do rótulo chegar).
+  ⚠️ Duas coisas que fizeram a primeira versão NÃO mostrar o rótulo:
+  1. **Base UI não é Radix** (regra nº 1 aqui): o elemento vai em `render` SEM
+     filhos e os filhos são passados ao `TooltipTrigger`. A v1 fez o contrário
+     (`render={link}` com os filhos dentro do `Link`).
+  2. Sem `TooltipProvider`, cada tooltip usa o atraso padrão e a barra parece
+     travada. O provider entra **só no modo minimizado**, envolvendo a barra:
+     o atraso passa a ser compartilhado — o primeiro rótulo espera 150 ms (não
+     pisca ao atravessar a barra com o mouse) e, percorrendo os ícones, os
+     seguintes aparecem na hora.
+  O tooltip é **portal**, e é isso que o faz funcionar aqui: o `<nav>` tem
+  `overflow-y-auto`, então um rótulo posicionado ao lado com CSS seria recortado
+  pela própria barra.
 - Lida com **`useSyncExternalStore`**, não `useState` + efeito: o servidor não
   tem localStorage (o snapshot do servidor é "aberta" e o React reconcilia na
   hidratação, sem mismatch), `setState` dentro de efeito dispara renderização em

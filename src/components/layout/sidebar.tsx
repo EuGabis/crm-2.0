@@ -7,6 +7,7 @@ import { ChevronsUpDown, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
+  TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { brand } from "@/lib/config/brand";
@@ -73,41 +74,69 @@ function NavLink({
   collapsed: boolean;
 }) {
   const Icon = item.icon;
-  const link = (
-    <Link
-      href={item.href}
-      // `title` some quando há tooltip para não aparecerem os dois.
-      title={collapsed ? undefined : item.label}
-      className={cn(
-        "flex items-center rounded-md py-[7px] text-[13px] font-medium text-slate-300 transition-colors",
-        collapsed ? "justify-center px-0" : "gap-2.5 px-2.5",
-        active
-          ? "bg-[var(--lito-sidebar-accent)] text-white"
-          : "hover:bg-[var(--lito-sidebar-hover)] hover:text-white"
-      )}
-    >
-      <Icon className="size-4 shrink-0" />
-      {!collapsed && (
-        <>
-          <span className="truncate">{item.label}</span>
-          {item.badge && (
-            <span className="ml-auto rounded bg-amber-400/90 px-1.5 py-px text-[10px] font-bold text-amber-950">
-              {item.badge}
-            </span>
-          )}
-        </>
-      )}
-    </Link>
+  const base = cn(
+    "relative flex items-center rounded-md py-[7px] text-[13px] font-medium text-slate-300 transition-colors",
+    active
+      ? "bg-[var(--lito-sidebar-accent)] text-white"
+      : "hover:bg-[var(--lito-sidebar-hover)] hover:text-white"
   );
 
-  if (!collapsed) return link;
-  // Fechada, o nome vira tooltip — sem isso a barra viraria adivinhação de ícone.
+  if (!collapsed) {
+    return (
+      <Link href={item.href} className={cn(base, "gap-2.5 px-2.5")}>
+        <Icon className="size-4 shrink-0" />
+        <span className="truncate">{item.label}</span>
+        {item.badge && (
+          <span className="ml-auto rounded bg-amber-400/90 px-1.5 py-px text-[10px] font-bold text-amber-950">
+            {item.badge}
+          </span>
+        )}
+      </Link>
+    );
+  }
+
+  /**
+   * Minimizada, o nome vira tooltip — senão a barra viraria adivinhação de
+   * ícone.
+   *
+   * ⚠️ Base UI NÃO é Radix (regra nº 1 do AGENTS.md): o elemento vai em `render`
+   * SEM filhos, e os filhos são passados ao `TooltipTrigger`. A primeira versão
+   * fez o contrário (`render={link}` com os filhos dentro do Link) e o rótulo
+   * não aparecia.
+   *
+   * O tooltip é PORTAL (ver components/ui/tooltip.tsx), e isso é o que faz ele
+   * funcionar aqui: o `<nav>` tem `overflow-y-auto`, então um rótulo posicionado
+   * ao lado com CSS seria recortado pela própria barra.
+   */
   return (
     <Tooltip>
-      <TooltipTrigger render={link} />
-      <TooltipContent side="right" className="text-[11px]">
+      <TooltipTrigger
+        render={
+          <Link
+            href={item.href}
+            aria-label={item.label}
+            className={cn(base, "group justify-center px-0")}
+          />
+        }
+      >
+        {/* A animação do ícone acompanha a do rótulo: o item "responde" ao mouse
+            antes de o tooltip chegar. */}
+        <Icon className="size-4 shrink-0 transition-transform duration-150 group-hover:scale-110" />
+        {item.badge && (
+          <span className="absolute right-1 top-1 size-1.5 rounded-full bg-amber-400" />
+        )}
+      </TooltipTrigger>
+      <TooltipContent
+        side="right"
+        sideOffset={8}
+        className="bg-slate-900 text-[11px] font-medium text-white duration-150"
+      >
         {item.label}
-        {item.badge ? ` · ${item.badge}` : ""}
+        {item.badge && (
+          <span className="rounded bg-amber-400/90 px-1 py-px text-[9px] font-bold text-amber-950">
+            {item.badge}
+          </span>
+        )}
       </TooltipContent>
     </Tooltip>
   );
@@ -122,7 +151,7 @@ export function Sidebar() {
 
   const items = NAV_ITEMS.slice(1).filter((item) => can(item.key));
 
-  return (
+  const aside = (
     <aside
       className={cn(
         "flex h-screen shrink-0 flex-col bg-[var(--lito-sidebar)] transition-[width] duration-200",
@@ -213,5 +242,20 @@ export function Sidebar() {
         </button>
       </div>
     </aside>
+  );
+
+  if (!collapsed) return aside;
+
+  /**
+   * `TooltipProvider` só no modo minimizado, envolvendo a barra inteira: o
+   * atraso passa a ser COMPARTILHADO entre os itens. Efeito prático — o primeiro
+   * rótulo espera 150 ms (não pisca ao atravessar a barra com o mouse), e daí em
+   * diante, percorrendo os ícones, cada nome aparece na hora. Sem o provider,
+   * cada tooltip tem atraso próprio e a barra parece travada.
+   */
+  return (
+    <TooltipProvider delay={150} closeDelay={0}>
+      {aside}
+    </TooltipProvider>
   );
 }
