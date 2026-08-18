@@ -571,8 +571,11 @@ Cloud API → celular.
   não-leakproof = Seq Scan, ver seção do detalhe do lead),
   0050 = lembrete de tarefa (`tasks.reminder_minutes`, irmã da 0042),
   0051 = autor exclui a própria nota interna (`messages.created_by`),
-  0052 = painel pessoal volta a ser privado (policy de leitura da 0037);
-  **próxima migração livre: 0053**.
+  0052 = painel pessoal volta a ser privado (policy de leitura da 0037),
+  0053 = conversa visível/atribuída, 0054 = bot conversacional,
+  0055 = editor do bot (`bot_flows`) — as três do outro Claude,
+  0056 = view `payment_new_sales` (o que conta como VENDA NOVA);
+  **próxima migração livre: 0057**.
 - Env (privadas, nunca `NEXT_PUBLIC_`): `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`,
   `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_GRAPH_VERSION` (default `v21.0`).
 - **Mídia real (imagem/áudio/vídeo)** — helpers em `src/lib/whatsapp/client.ts`
@@ -1097,6 +1100,25 @@ os módulos ainda não migrados continuam importando dos repos mock em
     segura, permissão, ligado aqui, endereço). A pegadinha silenciosa é a
     conexão: fora de HTTPS ou `localhost` — abrir o CRM pelo IP da rede local,
     por exemplo — o Chrome **nem pergunta** pela permissão.
+  * **Lead quente do bot** e **venda nova** entraram como fontes (2026-08-18):
+    - Lead: oportunidade com `source = 'Bot'` numa fase cujo NOME contém
+      "quente" (o bot grava essa fonte em `ensureCard`/`syncCard`,
+      `src/lib/bot/engine.ts`, e escolhe a etapa por nome no `stageMap` — por
+      isso o aviso também casa por nome, não por id fixo). Filtra por `Bot` de
+      propósito: quem move o lead à mão já sabe que moveu; o aviso existe para o
+      que aconteceu sozinho.
+    - Venda: view **`payment_new_sales`** (migração **0056**, aplicada), só para
+      quem enxerga Pagamentos.
+  * ⚠️ **"Venda aprovada chegou" NÃO é venda nova.** Medido neste banco em 7
+    dias: 12.224 vendas aprovadas entraram e só 93 eram novas — avisar por
+    chegada renderia doze mil pop-ups. Três casos se disfarçam: (1) histórico
+    sincronizando (12.033), (2) **boleto/Pix antigo pago agora** (696 —
+    `dates.created_at` velho, `dates.confirmed_at` de hoje) e (3) **renovação de
+    assinatura** (6.815 contra 411 primeiras cobranças, 94% do volume de plano).
+    A view resolve os três: status aprovado + `guru_created_at` recente (a
+    JANELA é de quem consulta) + `subscription.charged_times <= 1` quando
+    `product.type = 'plan'`. Em 24h: 84 vendas novas contra 98 do critério
+    ingênuo.
   * `showDesktop` **devolve o motivo** quando não consegue disparar (sem
     suporte, permissão negada, permissão não pedida, caixinha desligada) e o
     botão **"Testar som e pop-up agora"** mostra isso na tela. Um pop-up que não

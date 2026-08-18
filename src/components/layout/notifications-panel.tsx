@@ -10,6 +10,8 @@ import {
   CalendarClock,
   Check,
   CheckSquare,
+  CircleDollarSign,
+  Flame,
   MessageSquare,
   Monitor,
   Play,
@@ -40,6 +42,8 @@ import {
 } from "@/lib/notifications/desktop";
 import { useApptStore } from "@/lib/data/repos/db/appointments";
 import { useModuleStore } from "@/lib/data/repos/db/contacts-module";
+import { useMyMembership } from "@/lib/data/repos/db/team";
+import { formatBRL } from "@/lib/data/repos/opportunities";
 import { useDbStore } from "@/lib/data/repos/db/contacts";
 import { cn } from "@/lib/utils";
 
@@ -86,7 +90,13 @@ const ARCHIVE_LIMIT = 150;
 const REFRESH_MS = 60_000;
 const UPCOMING_HOURS = 24;
 
-type NotificationKind = "conversa" | "compromisso" | "agendamento" | "tarefa";
+type NotificationKind =
+  | "conversa"
+  | "compromisso"
+  | "agendamento"
+  | "tarefa"
+  | "lead-quente"
+  | "venda";
 
 interface NotificationItem {
   id: string;
@@ -167,6 +177,8 @@ const ICON: Record<NotificationKind, typeof Bell> = {
   compromisso: CalendarClock,
   agendamento: AlertTriangle,
   tarefa: CheckSquare,
+  "lead-quente": Flame,
+  venda: CircleDollarSign,
 };
 
 const ICON_CLASS: Record<NotificationKind, string> = {
@@ -174,6 +186,8 @@ const ICON_CLASS: Record<NotificationKind, string> = {
   compromisso: "bg-emerald-50 text-emerald-600",
   agendamento: "bg-rose-50 text-rose-600",
   tarefa: "bg-amber-50 text-amber-600",
+  "lead-quente": "bg-orange-50 text-orange-600",
+  venda: "bg-emerald-50 text-emerald-600",
 };
 
 function loadRead(): string[] {
@@ -211,6 +225,9 @@ export function NotificationsPanel() {
    */
   const seeded = useRef(false);
   const locationId = useDbStore((s) => s.locationId);
+  // Venda é assunto de quem enxerga Pagamentos — mesmo guard da sidebar.
+  const { can } = useMyMembership();
+  const canPayments = can("pagamentos");
 
   const refresh = useCallback(async () => {
     await useDbStore.getState().load();
@@ -294,6 +311,60 @@ export function NotificationsPanel() {
       return new Date(t.dueAt).getTime() <= now + UPCOMING_HOURS * 3_600_000;
     });
 
+    /**
+     * 5) Lead que o BOT colocou em fase "quente".
+     *
+     * Filtra por `source = 'Bot'` de propósito: quem move um lead à mão já sabe
+     * que moveu — o aviso existe para o que aconteceu sozinho, sem ninguém
+     * olhando. O bot grava essa fonte em `ensureCard`/`syncCard`
+     * (src/lib/bot/engine.ts).
+     *
+     * A fase é reconhecida pelo NOME ("quente"), não por um id fixo: cada
+     * empresa monta o próprio funil, e no fluxo do bot a etapa também é
+     * escolhida por nome (`stageMap`).
+     */
+    const { data: hotStages } = await supabase
+      .from("stages")
+      .select("id, name, pipeline_id")
+      .eq("location_id", loc)
+      .ilike("name", "%quente%");
+
+    const hotIds = (hotStages ?? []).map((st: any) => st.id);
+    const since24h = new Date(now - UPCOMING_HOURS * 3_600_000).toISOString();
+    const hotLeads =
+      hotIds.length > 0
+        ? (
+            await supabase
+              .from("opportunities")
+              .select("id, name, value, stage_id, pipeline_id, source, created_at, owner_id")
+              .eq("location_id", loc)
+              .eq("source", "Bot")
+              .in("stage_id", hotIds)
+              .gte("created_at", since24h)
+              .order("created_at", { ascending: false })
+              .limit(10)
+          ).data ?? []
+        : [];
+
+    /**
+     * 6) VENDA NOVA — e só ela. A view `payment_new_sales` (migração 0056)
+     * carrega a definição: aprovada, criada na janela, e primeira cobrança
+     * quando é assinatura. Medido neste banco em 7 dias: 12.224 vendas
+     * aprovadas ENTRARAM, 93 eram novas; sem essa separação o aviso seria
+     * inútil no primeiro dia.
+     */
+    const newSales = canPayments
+      ? (
+          await supabase
+            .from("payment_new_sales")
+            .select("id, code, amount, currency, product_name, contact_name, guru_created_at, kind")
+            .eq("location_id", loc)
+            .gte("guru_created_at", since24h)
+            .order("guru_created_at", { ascending: false })
+            .limit(10)
+        ).data ?? []
+      : [];
+
     const next: NotificationItem[] = [
       ...(convs ?? []).map((c: any) => ({
         id: `conv-${c.id}`,
@@ -344,6 +415,32 @@ export function NotificationsPanel() {
         // Remarcar o compromisso avisa de novo.
         signature: a.start,
       })),
+      ...hotLeads
+        .filter((o: any) => isMine(o.owner_id))
+        .map((o: any) => ({
+          id: `hot-${o.id}`,
+          kind: "lead-quente" as const,
+          title: `Lead quente: ${o.name}`,
+          description: `O bot classificou como quente${
+            Number(o.value) > 0 ? ` · ${formatBRL(Number(o.value))}` : ""
+          }`,
+          at: o.created_at,
+          href: `/leads?pipeline=${o.pipeline_id}`,
+          // Mudar de fase avisa de novo (o bot pode reclassificar depois).
+          signature: `${o.stage_id}`,
+        })),
+      ...newSales.map((v: any) => ({
+        id: `venda-${v.id}`,
+        kind: "venda" as const,
+        title: `Venda nova · ${v.amount === null ? "" : formatBRL(Number(v.amount))}`.trim(),
+        description: `${v.product_name ?? "Produto"} — ${v.contact_name ?? "cliente"}${
+          v.kind === "assinatura-primeira" ? " (1ª cobrança da assinatura)" : ""
+        }`,
+        at: v.guru_created_at,
+        href: "/pagamentos",
+        // A venda entra na view já aprovada; a linha não muda depois.
+        signature: `venda-${v.id}`,
+      })),
     ].sort((x, y) => y.at.localeCompare(x.at));
 
     // O arquivo é a fonte da tela; a consulta só atualiza e acrescenta.
@@ -382,7 +479,9 @@ export function NotificationsPanel() {
         href: "/conversas",
       });
     }
-  }, []);
+    // `canPayments` entra nas dependências: quem acabou de ganhar acesso a
+    // Pagamentos passa a receber aviso de venda sem precisar recarregar.
+  }, [canPayments]);
 
   useEffect(() => {
     let alive = true;
@@ -692,7 +791,7 @@ export function NotificationsPanel() {
             <p className="px-3 py-8 text-center text-[11px] leading-relaxed text-slate-400">
               {tab === "lidas"
                 ? "Nenhuma notificação lida ainda. O que você marcar como lido fica guardado aqui."
-                : "Nada por aqui. Aparecem avisos de conversas não lidas, tarefas vencendo, compromissos das próximas 24 horas e mensagens agendadas que falharam."}
+                : "Nada por aqui. Aparecem avisos de conversas não lidas, lead que o bot marcou como quente, venda nova, tarefas vencendo, compromissos das próximas 24 horas e mensagens agendadas que falharam."}
             </p>
           )}
           {visible.map((item) => {
