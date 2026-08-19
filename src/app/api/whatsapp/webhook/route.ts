@@ -190,18 +190,26 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
   // Uma conversa por NÚMERO: casa contato + channel_id (o número que recebeu),
   // não uma conversa única por contato. Assim cada número tem seu próprio
   // histórico e o número da conversa nunca "migra".
-  let { data: conv } = await db
-    .from("conversations")
-    .select("id, unread_count, closed_at, archived_at")
-    .eq("location_id", channel.location_id)
-    .eq("contact_id", contact.id)
-    .eq("channel_id", channel.id)
-    .maybeSingle();
+  // order+limit: defensivo contra eventuais duplicatas antigas (o maybeSingle
+  // "cru" QUEBRA com >1 linha — foi o que fazia o webhook criar conversa nova a
+  // cada mensagem). Com o índice único (0075) há no máximo uma.
+  const findConv = () =>
+    db
+      .from("conversations")
+      .select("id, unread_count, closed_at, archived_at")
+      .eq("location_id", channel.location_id)
+      .eq("contact_id", contact.id)
+      .eq("channel_id", channel.id)
+      .order("created_at")
+      .limit(1)
+      .maybeSingle();
+
+  let { data: conv } = await findConv();
   // Conversa fechada/arquivada + cliente escreveu de novo = reabrir E reiniciar o
   // agente do zero (nova sessão), sem precisar apagar a conversa.
   const wasClosed = !!(conv && (conv.closed_at || conv.archived_at));
   if (!conv) {
-    const { data: created } = await db
+    const { data: created, error: convErr } = await db
       .from("conversations")
       .insert({
         location_id: channel.location_id,
@@ -214,7 +222,14 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
       })
       .select("id")
       .single();
-    conv = created;
+    if (convErr) {
+      // Corrida: outra entrega criou a conversa em paralelo e o índice único
+      // (0075) barrou este insert — pega a existente em vez de duplicar.
+      const { data: again } = await findConv();
+      conv = again;
+    } else {
+      conv = created;
+    }
   } else {
     await db
       .from("conversations")
