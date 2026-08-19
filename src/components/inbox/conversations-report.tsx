@@ -16,20 +16,24 @@ import { cn } from "@/lib/utils";
 import type { Conversation } from "@/lib/data/types";
 
 const STATUS_STYLE: Record<string, string> = {
-  "Caixa de entrada": "bg-indigo-100 text-indigo-700",
-  Bot: "bg-violet-100 text-violet-700",
+  Aberta: "bg-indigo-100 text-indigo-700",
+  "No bot": "bg-violet-100 text-violet-700",
   "Aguardando distribuição": "bg-amber-100 text-amber-700",
+  "Na fila": "bg-sky-100 text-sky-700",
   Finalizada: "bg-emerald-100 text-emerald-700",
   Arquivada: "bg-slate-100 text-slate-500",
 };
 
+const STATUS_OPTIONS = ["Aberta", "No bot", "Aguardando distribuição", "Na fila", "Finalizada", "Arquivada"];
+
+/** Estado real da conversa (o que aparece na coluna Status do relatório). */
 function statusOf(c: Conversation): string {
   if (c.closedAt) return "Finalizada";
   if (c.archivedAt) return "Arquivada";
   if (c.awaitingDistribution) return "Aguardando distribuição";
-  if (c.assignedTo) return "Caixa de entrada";
-  if (c.botPaused === false) return "Bot";
-  return "Caixa de entrada";
+  if (!c.assignedTo && c.botPaused === false) return "No bot";
+  if (c.assignedTo) return "Aberta";
+  return "Na fila"; // sem dono e fora do bot — na fila do setor
 }
 
 interface Row {
@@ -251,11 +255,11 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
           className={selCls}
         >
           <option value="todos">Status: todos</option>
-          <option value="Caixa de entrada">Caixa de entrada</option>
-          <option value="Bot">Bot</option>
-          <option value="Aguardando distribuição">Aguardando distribuição</option>
-          <option value="Finalizada">Finalizada</option>
-          <option value="Arquivada">Arquivada</option>
+          {STATUS_OPTIONS.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
         </select>
         <select
           value={numeroF}
