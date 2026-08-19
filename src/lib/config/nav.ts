@@ -12,9 +12,7 @@ import {
   Globe,
   GraduationCap,
   HardDrive,
-  Star,
   BarChart3,
-  Puzzle,
   MessageCircle,
   Settings,
   type LucideIcon,
@@ -43,9 +41,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/sites", label: "Sites", icon: Globe, key: "sites" },
   { href: "/assinaturas", label: "Assinaturas", icon: GraduationCap, key: "assinaturas" },
   { href: "/midia", label: "Mídia Drive", icon: HardDrive, key: "midia" },
-  { href: "/reputacao", label: "Reputação", icon: Star, key: "reputacao" },
   { href: "/relatorios", label: "Relatórios", icon: BarChart3, key: "relatorios" },
-  { href: "/marketplace", label: "Marketplace", icon: Puzzle, key: "marketplace" },
   { href: "/whatsapp", label: "WhatsApp", icon: MessageCircle, key: "whatsapp" },
 ];
 
