@@ -905,7 +905,8 @@ export const conversationActions = {
         .maybeSingle();
       if (full) return { id: addToStore(full) };
 
-      // Não vejo. Se está SEM dono, assumo (reivindico) e abro.
+      // Não vejo. Se está SEM dono, tento assumir (reivindico) — mas o banco só
+      // deixa se o número for do MEU setor e a conversa não estiver com o bot.
       if (existing.assigned_to == null) {
         const { data: claimed } = await supabase.rpc("claim_conversation", {
           conv_id: existing.conv_id,
@@ -918,6 +919,11 @@ export const conversationActions = {
             .maybeSingle();
           if (mine) return { id: addToStore(mine) };
         }
+        // Sem dono, mas o claim foi negado → é de outro setor ou está com o bot.
+        return {
+          id: null,
+          error: "Esta conversa é de outro setor ou ainda está com o assistente.",
+        };
       }
       // É de OUTRO atendente → não abro nem duplico.
       return { id: null, error: "Esta conversa está atribuída a outro atendente." };
