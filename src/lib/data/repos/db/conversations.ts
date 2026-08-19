@@ -737,7 +737,26 @@ export const conversationActions = {
       to_user: userId,
     });
     if (error || data === false) return false;
+
+    const me = useDbStore.getState().userId;
     const s = useConvStore.getState();
+
+    // Transferi para OUTRO: posso ter perdido a visibilidade (atendente que só vê
+    // as suas). Reconsulto respeitando a RLS — se não volta, a conversa some da
+    // minha lista NA HORA, sem precisar de F5. Admin/sees_all continua vendo, aí
+    // volta e só atualizo o dono.
+    if (userId && userId !== me) {
+      const { data: still } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("id", conversationId)
+        .maybeSingle();
+      if (!still) {
+        s.patch({ conversations: s.conversations.filter((c) => c.id !== conversationId) });
+        return true;
+      }
+    }
+
     s.patch({
       conversations: s.conversations.map((c) =>
         c.id === conversationId ? { ...c, assignedTo: userId } : c

@@ -43,6 +43,7 @@ import { useDbContact } from "@/lib/data/repos/db/contacts";
 import {
   conversationActions,
   useConversation,
+  useConvStore,
   useMessages,
   useMessagesLoading,
 } from "@/lib/data/repos/db/conversations";
@@ -52,7 +53,14 @@ import type { Conversation, Message } from "@/lib/data/types";
 import { cn } from "@/lib/utils";
 
 /** Responsável pelo atendimento — grava em `conversations.assigned_to` (0024). */
-function AssignPicker({ conversation }: { conversation: Conversation }) {
+function AssignPicker({
+  conversation,
+  onGone,
+}: {
+  conversation: Conversation;
+  /** Chamado quando, após transferir, eu perco a visibilidade da conversa. */
+  onGone?: () => void;
+}) {
   const { members } = useTeam();
   const { me } = useMyMembership();
   const owner = members.find((m) => m.userId === conversation.assignedTo) ?? null;
@@ -87,6 +95,15 @@ function AssignPicker({ conversation }: { conversation: Conversation }) {
     }
     void conversationActions.logEvent(conversation.id, body);
     toast.success(target ? `Atribuída a ${target}` : "Devolvida para a caixa do grupo");
+    // Transferi para outro e perdi a visibilidade → o assign() já tirou a conversa
+    // do store. Fecho o painel para voltar à lista, sem depender de F5.
+    if (
+      userId &&
+      userId !== me?.userId &&
+      !useConvStore.getState().conversations.some((c) => c.id === conversation.id)
+    ) {
+      onGone?.();
+    }
   };
 
   return (
@@ -577,7 +594,7 @@ export function Thread({
           <SlaBadge days={conversation.slaDays} />
         </div>
         <div className="flex items-center gap-1.5">
-          <AssignPicker conversation={conversation} />
+          <AssignPicker conversation={conversation} onGone={onDeleted} />
           <button
             onClick={async () => {
               await conversationActions.markUnread(conversation.id);
