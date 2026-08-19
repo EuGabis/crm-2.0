@@ -658,7 +658,11 @@ export const conversationActions = {
       .from("conversations")
       .update({ assigned_to: userId })
       .eq("id", conversationId);
-    if (error) return false;
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error("[assign] erro do banco:", error.message, error.code, error.details);
+      return false;
+    }
     const s = useConvStore.getState();
     s.patch({
       conversations: s.conversations.map((c) =>
