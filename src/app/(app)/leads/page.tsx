@@ -11,7 +11,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { KanbanSquare, List, Plus, Search, Trash2 } from "lucide-react";
+import { Filter, KanbanSquare, List, Plus, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { SubNav } from "@/components/layout/subnav";
 import { DataTable, type Column } from "@/components/shared/data-table";
@@ -32,6 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useDbTeam } from "@/lib/data/repos/db/contacts";
+import { useMyMembership } from "@/lib/data/repos/db/team";
 import { oppActions, usePipelineDb } from "@/lib/data/repos/db/pipeline";
 import { formatBRL } from "@/lib/data/repos/opportunities";
 import type { Opportunity } from "@/lib/data/types";
@@ -56,6 +57,7 @@ function LeadsPageInner() {
   const [tab, setTab] = useState("Leads");
   const { pipelines, opportunities, loaded } = usePipelineDb();
   const team = useDbTeam();
+  const { isAdmin } = useMyMembership();
 
   // ?pipeline=<id> vem do painel: clicar num pedaço do gráfico e escolher
   // "Abrir no funil" precisa cair no pipeline certo, não no primeiro da lista.
@@ -67,6 +69,19 @@ function LeadsPageInner() {
     pipelines.find((p) => p.id === pipelineId) ?? pipelines[0] ?? null;
 
   const [query, setQuery] = useState("");
+  // Filtros do admin (e de todos): responsável, etapa, período de criação.
+  const [showFilters, setShowFilters] = useState(false);
+  const [ownerFilter, setOwnerFilter] = useState("");
+  const [stageFilter, setStageFilter] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const activeFilters = [ownerFilter, stageFilter, fromDate, toDate].filter(Boolean).length;
+  const clearFilters = () => {
+    setOwnerFilter("");
+    setStageFilter("");
+    setFromDate("");
+    setToDate("");
+  };
   const [view, setView] = useState<"kanban" | "list">("kanban");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -93,12 +108,18 @@ function LeadsPageInner() {
 
   const pipeOps = useMemo(
     () =>
-      opportunities.filter(
-        (o) =>
-          o.pipelineId === pipeline?.id &&
-          (query === "" || o.name.toLowerCase().includes(query.toLowerCase()))
-      ),
-    [opportunities, pipeline?.id, query]
+      opportunities.filter((o) => {
+        if (o.pipelineId !== pipeline?.id) return false;
+        if (query !== "" && !o.name.toLowerCase().includes(query.toLowerCase())) return false;
+        if (ownerFilter && o.ownerId !== ownerFilter) return false;
+        if (stageFilter && o.stageId !== stageFilter) return false;
+        // createdAt é ISO; comparar só a parte YYYY-MM-DD contra os inputs de data.
+        const day = o.createdAt.slice(0, 10);
+        if (fromDate && day < fromDate) return false;
+        if (toDate && day > toDate) return false;
+        return true;
+      }),
+    [opportunities, pipeline?.id, query, ownerFilter, stageFilter, fromDate, toDate]
   );
 
   const activeOp = activeId ? opportunities.find((o) => o.id === activeId) : null;
@@ -247,6 +268,7 @@ function LeadsPageInner() {
                   if (!v) return;
                   setPipelineId(v);
                   clearSelection(); // ids do pipeline anterior não valem aqui
+                  setStageFilter(""); // as fases mudam entre pipelines
                 }}
               >
                 <SelectTrigger className="h-8 w-[220px] text-xs font-semibold">
@@ -274,6 +296,20 @@ function LeadsPageInner() {
                   className="h-7 w-36 border-0 p-0 text-xs shadow-none focus-visible:ring-0"
                 />
               </div>
+              <Button
+                variant={showFilters || activeFilters > 0 ? "secondary" : "outline"}
+                size="sm"
+                className="h-8 gap-1.5 text-xs"
+                onClick={() => setShowFilters((v) => !v)}
+              >
+                <Filter className="size-3.5" />
+                Filtros
+                {activeFilters > 0 && (
+                  <span className="rounded-full bg-indigo-600 px-1.5 text-[10px] font-bold text-white">
+                    {activeFilters}
+                  </span>
+                )}
+              </Button>
               <div className="flex rounded-md border">
                 <button
                   onClick={() => setView("kanban")}
@@ -302,6 +338,94 @@ function LeadsPageInner() {
             </div>
           </div>
 
+          {showFilters && (
+            <div className="mb-3 flex flex-wrap items-end gap-3 rounded-lg border bg-slate-50 px-3 py-2.5">
+              {isAdmin && (
+                <label className="flex flex-col gap-1 text-[11px] font-medium text-slate-500">
+                  Responsável
+                  <Select
+                    value={ownerFilter || "todos"}
+                    onValueChange={(v) => setOwnerFilter(v === "todos" ? "" : v ?? "")}
+                  >
+                    <SelectTrigger className="h-8 w-44 text-xs" size="sm">
+                      <SelectValue>
+                        {ownerFilter
+                          ? team.find((u) => u.id === ownerFilter)?.name ?? "—"
+                          : "Todos"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="todos" className="text-xs">
+                        Todos
+                      </SelectItem>
+                      {team.map((u) => (
+                        <SelectItem key={u.id} value={u.id} className="text-xs">
+                          {u.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </label>
+              )}
+              <label className="flex flex-col gap-1 text-[11px] font-medium text-slate-500">
+                Etapa
+                <Select
+                  value={stageFilter || "todas"}
+                  onValueChange={(v) => setStageFilter(v === "todas" ? "" : v ?? "")}
+                >
+                  <SelectTrigger className="h-8 w-40 text-xs" size="sm">
+                    <SelectValue>
+                      {stageFilter
+                        ? pipeline?.stages.find((s) => s.id === stageFilter)?.name ?? "—"
+                        : "Todas"}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todas" className="text-xs">
+                      Todas
+                    </SelectItem>
+                    {pipeline?.stages
+                      .slice()
+                      .sort((a, b) => a.order - b.order)
+                      .map((s) => (
+                        <SelectItem key={s.id} value={s.id} className="text-xs">
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="flex flex-col gap-1 text-[11px] font-medium text-slate-500">
+                De
+                <Input
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="h-8 w-36 text-xs"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-[11px] font-medium text-slate-500">
+                Até
+                <Input
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="h-8 w-36 text-xs"
+                />
+              </label>
+              {activeFilters > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-1 text-xs text-slate-500 hover:text-slate-700"
+                  onClick={clearFilters}
+                >
+                  <X className="size-3.5" /> Limpar filtros
+                </Button>
+              )}
+            </div>
+          )}
+
           {view === "kanban" ? (
             <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
               {selected.size > 0 && (
@@ -313,6 +437,7 @@ function LeadsPageInner() {
                 {pipeline?.stages
                   .slice()
                   .sort((a, b) => a.order - b.order)
+                  .filter((stage) => !stageFilter || stage.id === stageFilter)
                   .map((stage) => (
                     <StageColumn
                       key={stage.id}
