@@ -348,7 +348,9 @@ async function syncCard(
 
   const wantName = node.stageMap[normalize(vars[node.var])] ?? "";
   const target = stageByName(stages, wantName);
-  const fullName = String(vars.name ?? "").trim();
+  // Sempre recompõe pelo nome atual (vars.name ou o do contato) — assim um card
+  // criado antes do nome ("E"/telefone) se conserta neste sync.
+  const fullName = await cardName(ctx, vars);
 
   // Card do contato NESTE funil de leads (o que a pessoa vê no kanban de leads).
   const { data: opp } = await ctx.db
@@ -443,9 +445,21 @@ async function advance(
           .from("contacts")
           .update({ first_name: first, last_name: last })
           .eq("id", ctx.contact.id);
-        // Disponibiliza {{first_name}} nas mensagens (chamar só pelo 1º nome).
+        // Disponibiliza {{first_name}} nas mensagens (chamar só pelo 1º nome) e o
+        // nome completo para os nós de card (ensure_card/sync_card usam vars.name).
         vars.first_name = first;
         vars.last_name = last;
+        vars.name = [first, last].filter(Boolean).join(" ").trim();
+        // O card pode ter sido criado ANTES do nome (ficou "E"/telefone). Assim
+        // que o bot descobre o nome, renomeia os cards ABERTOS do contato — é o
+        // "filling" que faz o kanban refletir o lead na hora.
+        if (vars.name) {
+          await ctx.db
+            .from("opportunities")
+            .update({ name: vars.name })
+            .eq("contact_id", ctx.contact.id)
+            .eq("status", "open");
+        }
       }
       nodeId = node.next;
     } else if (node.type === "score") {
