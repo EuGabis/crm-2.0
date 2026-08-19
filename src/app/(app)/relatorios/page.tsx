@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
-import { Plus } from "lucide-react";
+import { Loader2, Plus, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { SubNav } from "@/components/layout/subnav";
 import { GoogleAdsReport } from "@/components/reports/google-ads-report";
@@ -11,7 +11,109 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useUsers, useContacts, contactName } from "@/lib/data/repos/contacts";
 import { formatBRL, useOpportunities } from "@/lib/data/repos/opportunities";
+import { useMyMembership } from "@/lib/data/repos/db/team";
 import { cn } from "@/lib/utils";
+
+const EXAMPLES = [
+  "Qual o tempo médio de resposta de cada atendente?",
+  "Quem tem mais leads ganhos no período?",
+  "Quantas conversas estão aguardando distribuição?",
+  "Compare o desempenho da equipe de vendas.",
+];
+
+/** Aba "Análise IA": admin pergunta em linguagem natural e a IA responde sobre os
+ *  dados reais do sistema (rota /api/relatorios/analise). */
+function AnaliseIA() {
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const ask = async (q?: string) => {
+    const pergunta = (q ?? question).trim();
+    if (!pergunta) {
+      toast.error("Escreva uma pergunta");
+      return;
+    }
+    setQuestion(pergunta);
+    setLoading(true);
+    setAnswer(null);
+    try {
+      const res = await fetch("/api/relatorios/analise", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: pergunta }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(json?.error ?? "Não foi possível analisar");
+        return;
+      }
+      setAnswer(json.answer ?? "");
+    } catch {
+      toast.error("Falha de conexão");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="mx-auto max-w-3xl">
+      <div className="mb-1 flex items-center gap-2">
+        <Sparkles className="size-4 text-indigo-600" />
+        <h1 className="text-lg font-bold text-slate-900">Análise com IA</h1>
+      </div>
+      <p className="mb-4 text-xs text-slate-500">
+        Pergunte qualquer coisa sobre a operação — a IA analisa os dados reais do sistema
+        (equipe, tempos de resposta, conversas e leads dos últimos 30 dias) e responde.
+      </p>
+
+      <div className="rounded-xl border bg-white p-3">
+        <textarea
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void ask();
+          }}
+          placeholder="Ex.: qual o tempo médio de resposta que o Alberto está tendo com os leads?"
+          rows={3}
+          className="w-full resize-none border-0 p-1 text-sm text-slate-800 outline-none placeholder:text-slate-400"
+        />
+        <div className="mt-2 flex items-center justify-between">
+          <span className="text-[10px] text-slate-400">Ctrl/⌘ + Enter para enviar</span>
+          <Button size="sm" className="h-8 gap-1.5 text-xs" disabled={loading} onClick={() => void ask()}>
+            {loading ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+            {loading ? "Analisando..." : "Analisar"}
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {EXAMPLES.map((ex) => (
+          <button
+            key={ex}
+            onClick={() => void ask(ex)}
+            disabled={loading}
+            className="rounded-full border bg-white px-2.5 py-1 text-[11px] text-slate-600 hover:border-indigo-300 hover:text-indigo-700 disabled:opacity-50"
+          >
+            {ex}
+          </button>
+        ))}
+      </div>
+
+      {loading && (
+        <div className="mt-4 flex items-center gap-2 rounded-xl border bg-white p-4 text-xs text-slate-500">
+          <Loader2 className="size-4 animate-spin" /> Analisando os dados do sistema...
+        </div>
+      )}
+      {answer && !loading && (
+        <div className="mt-4 rounded-xl border bg-white p-4">
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-indigo-500">Resposta</p>
+          <div className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{answer}</div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const TABS = [
   { label: "Google Ads" },
@@ -118,7 +220,11 @@ function StatusBadge({ value }: { value: string }) {
 }
 
 export default function RelatoriosPage() {
-  const [tab, setTab] = useState("Google Ads");
+  const { isAdmin } = useMyMembership();
+  const [tab, setTab] = useState("Análise IA");
+  // Só admin vê a aba de Análise IA; demais começam no Google Ads.
+  const tabs = isAdmin ? [{ label: "Análise IA" }, ...TABS] : TABS;
+  const activeTab = !isAdmin && tab === "Análise IA" ? "Google Ads" : tab;
   const users = useUsers();
   const contacts = useContacts();
   const opportunities = useOpportunities();
@@ -140,11 +246,13 @@ export default function RelatoriosPage() {
 
   return (
     <div>
-      <SubNav tabs={TABS} active={tab} onChange={setTab} />
+      <SubNav tabs={tabs} active={activeTab} onChange={setTab} />
       <div className="p-6">
-        {tab === "Google Ads" && <GoogleAdsReport />}
+        {activeTab === "Análise IA" && isAdmin && <AnaliseIA />}
 
-        {tab === "Anúncios Meta" && (
+        {activeTab === "Google Ads" && <GoogleAdsReport />}
+
+        {activeTab === "Anúncios Meta" && (
           <>
             <SampleBanner platform="Meta Ads" />
             <div className="mb-4 grid gap-3 md:grid-cols-3">
@@ -184,7 +292,7 @@ export default function RelatoriosPage() {
           </>
         )}
 
-        {tab === "Relatórios personalizados" && (
+        {activeTab === "Relatórios personalizados" && (
           <>
             <div className="mb-4 flex items-center justify-between">
               <div>
@@ -223,7 +331,7 @@ export default function RelatoriosPage() {
           </>
         )}
 
-        {tab === "Atribuição" && (
+        {activeTab === "Atribuição" && (
           <>
             <h1 className="mb-1 text-lg font-bold text-slate-900">Relatório de atribuição</h1>
             <p className="mb-4 text-xs text-slate-500">
@@ -264,7 +372,7 @@ export default function RelatoriosPage() {
           </>
         )}
 
-        {tab === "Ligações" && (
+        {activeTab === "Ligações" && (
           <>
             <div className="mb-4 grid gap-3 md:grid-cols-3">
               <KpiCard label="Chamadas hoje" value="14" delta={16.7} />
@@ -302,7 +410,7 @@ export default function RelatoriosPage() {
           </>
         )}
 
-        {tab === "Agentes" && (
+        {activeTab === "Agentes" && (
           <>
             <h1 className="mb-1 text-lg font-bold text-slate-900">Desempenho por agente</h1>
             <p className="mb-4 text-xs text-slate-500">Produtividade da equipe no período</p>
@@ -334,7 +442,7 @@ export default function RelatoriosPage() {
           </>
         )}
 
-        {tab === "Compromissos" && (
+        {activeTab === "Compromissos" && (
           <>
             <div className="mb-4 grid gap-3 md:grid-cols-3">
               <KpiCard label="Agendados no mês" value="46" delta={9.5} />
