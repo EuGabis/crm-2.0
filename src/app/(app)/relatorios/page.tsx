@@ -116,6 +116,7 @@ interface AgenteRow {
   nome: string;
   conversas_atribuidas: number;
   tempo_medio_resposta: string;
+  templates_enviados_30d: number;
   ganhos: number;
   perdidos: number;
   receita_ganha: number;
@@ -168,7 +169,7 @@ function AgentesReport() {
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b text-[11px] text-slate-400">
-                {["Atendente", "Conversas", "Tempo médio de resposta", "Ganhos", "Perdidos", "Receita ganha"].map((h) => (
+                {["Atendente", "Conversas", "Tempo médio de resposta", "Templates (30d)", "Ganhos", "Perdidos", "Receita ganha"].map((h) => (
                   <th key={h} className="whitespace-nowrap px-4 py-2.5 font-medium">{h}</th>
                 ))}
               </tr>
@@ -179,6 +180,7 @@ function AgentesReport() {
                   <td className="px-4 py-2.5 font-medium text-slate-800">{a.nome}</td>
                   <td className="px-4 py-2.5">{a.conversas_atribuidas}</td>
                   <td className="px-4 py-2.5">{a.tempo_medio_resposta}</td>
+                  <td className="px-4 py-2.5">{a.templates_enviados_30d}</td>
                   <td className="px-4 py-2.5 text-emerald-600">{a.ganhos}</td>
                   <td className="px-4 py-2.5 text-slate-500">{a.perdidos}</td>
                   <td className="px-4 py-2.5">{formatBRL(a.receita_ganha)}</td>
@@ -186,7 +188,7 @@ function AgentesReport() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
+                  <td colSpan={7} className="px-4 py-6 text-center text-slate-400">
                     Sem dados de equipe ainda.
                   </td>
                 </tr>

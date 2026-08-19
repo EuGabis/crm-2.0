@@ -45,8 +45,11 @@ export async function POST(request: Request) {
     "atendente tem 'atendimentos_hoje' (conversas distintas que respondeu hoje) e " +
     "'atividade_por_dia' (por data: atendimentos, mensagens e templates) — some os dias certos " +
     "para períodos como 'esta semana'. 'atendimento' = conversa que o atendente respondeu " +
-    "naquele dia. Envio de templates: use 'mensagens.templates_hoje', 'mensagens.templates_30d' " +
-    "e 'mensagens.por_dia[data].templates'. Há ainda 'mensagens.recebidas_30d/enviadas_30d', " +
+    "naquele dia. Cada atendente tem também 'templates_enviados_hoje' e " +
+    "'templates_enviados_30d' (atribuídos a QUEM ENVIOU o disparo, não ao dono da conversa) e " +
+    "'mensagens_enviadas_hoje' — use isso para 'quem enviou mais templates' e 'quantos disparos " +
+    "cada um fez'. Totais da empresa: 'mensagens.templates_hoje', 'mensagens.templates_30d' e " +
+    "'mensagens.por_dia[data].templates'. Há ainda 'mensagens.recebidas_30d/enviadas_30d', " +
     "'agenda' (compromissos: total/hoje/futuros) e 'tarefas' (pendentes/concluídas/vencidas). " +
     "Se a informação pedida não estiver no JSON, diga claramente que não há dado " +
     "suficiente — nunca invente números. Ao citar atendentes, use os nomes exatamente como " +

@@ -36,6 +36,9 @@ export interface AtendenteStat {
   respostas_medidas: number;
   atendimentos_hoje: number; // conversas distintas que ele respondeu hoje
   atendimentos_30d: number; // conversas distintas que respondeu no período
+  templates_enviados_hoje: number; // disparos de template feitos por ele hoje
+  templates_enviados_30d: number;
+  mensagens_enviadas_hoje: number;
   atividade_por_dia: Record<string, { atendimentos: number; mensagens: number; templates: number }>;
   leads_em_posse: number;
   ganhos: number;
@@ -81,7 +84,7 @@ export async function buildReportSnapshot(
     await Promise.all([
       supabase.from("location_members").select("user_id, role, department_id").eq("location_id", locationId),
       supabase.from("conversations").select("id, assigned_to, channel_id, closed_at, awaiting_distribution, bot_paused").eq("location_id", locationId),
-      supabase.from("messages").select("conversation_id, direction, type, internal, template_name, created_at").eq("location_id", locationId).gte("created_at", since).order("created_at"),
+      supabase.from("messages").select("conversation_id, direction, type, internal, template_name, created_by, created_at").eq("location_id", locationId).gte("created_at", since).order("created_at"),
       supabase.from("opportunities").select("owner_id, status, value, stage_id, pipeline_id").eq("location_id", locationId),
       supabase.from("pipelines").select("id, name").eq("location_id", locationId),
       supabase.from("stages").select("id, name, pipeline_id"),
@@ -110,11 +113,10 @@ export async function buildReportSnapshot(
   const deptOf = new Map((deptRes.data ?? []).map((d: any) => [d.id, d.name]));
   const stageName = new Map(stages.map((s: any) => [s.id, s.name]));
   const pipeName = new Map(pipelines.map((p: any) => [p.id, p.name]));
-  const convOwner = new Map<string, string | null>(
-    conversations.map((c: any) => [c.id as string, (c.assigned_to as string | null) ?? null]),
-  );
-
-  // Tempo de resposta (delta cliente→resposta) atribuído ao dono da conversa.
+  // Atividade de ENVIO é atribuída a quem realmente enviou (messages.created_by),
+  // não ao dono da conversa — assim disparos de template feitos em conversa sem
+  // dono (ou antes da atribuição) contam para quem os fez. created_by null =
+  // mensagem de máquina (bot/auto), não entra na conta de nenhum atendente.
   const byConv = new Map<string, any[]>();
   for (const m of messages) {
     if (!byConv.has(m.conversation_id)) byConv.set(m.conversation_id, []);
@@ -122,10 +124,9 @@ export async function buildReportSnapshot(
   }
   const respByUser = new Map<string, { total: number; count: number }>();
   const sentByUser = new Map<string, number>();
-  // owner -> dia (YYYY-MM-DD) -> { conversas atendidas (set), mensagens, templates }
+  // ator (created_by) -> dia -> { conversas tocadas (set), mensagens, templates }
   const dailyByUser = new Map<string, Map<string, { convs: Set<string>; msgs: number; templates: number }>>();
   for (const [convId, msgs] of byConv) {
-    const owner = convOwner.get(convId);
     let lastIn: number | null = null;
     for (const m of msgs) {
       if (m.internal || m.type === "event") continue;
@@ -133,13 +134,14 @@ export async function buildReportSnapshot(
       if (m.direction === "in") {
         lastIn = t;
       } else if (m.direction === "out") {
-        if (owner) {
-          sentByUser.set(owner, (sentByUser.get(owner) ?? 0) + 1);
+        const actor = (m.created_by as string | null) ?? null;
+        if (actor) {
+          sentByUser.set(actor, (sentByUser.get(actor) ?? 0) + 1);
           const day = brDay(m.created_at);
-          let dm = dailyByUser.get(owner);
+          let dm = dailyByUser.get(actor);
           if (!dm) {
             dm = new Map();
-            dailyByUser.set(owner, dm);
+            dailyByUser.set(actor, dm);
           }
           let e = dm.get(day);
           if (!e) {
@@ -149,17 +151,17 @@ export async function buildReportSnapshot(
           e.convs.add(convId);
           e.msgs += 1;
           if (m.template_name) e.templates += 1;
-        }
-        if (owner && lastIn != null) {
-          const min = (t - lastIn) / 60000;
-          if (min >= 0 && min <= MAX_RESPONSE_MIN) {
-            const cur = respByUser.get(owner) ?? { total: 0, count: 0 };
-            cur.total += min;
-            cur.count += 1;
-            respByUser.set(owner, cur);
+          if (lastIn != null) {
+            const min = (t - lastIn) / 60000;
+            if (min >= 0 && min <= MAX_RESPONSE_MIN) {
+              const cur = respByUser.get(actor) ?? { total: 0, count: 0 };
+              cur.total += min;
+              cur.count += 1;
+              respByUser.set(actor, cur);
+            }
           }
-          lastIn = null;
         }
+        lastIn = null; // uma resposta por entrada
       }
     }
   }
@@ -189,10 +191,12 @@ export async function buildReportSnapshot(
     const dm = dailyByUser.get(m.user_id);
     const atividade_por_dia: Record<string, { atendimentos: number; mensagens: number; templates: number }> = {};
     const convs30d = new Set<string>();
+    let templates30d = 0;
     if (dm) {
       for (const [day, e] of dm) {
         atividade_por_dia[day] = { atendimentos: e.convs.size, mensagens: e.msgs, templates: e.templates };
         for (const c of e.convs) convs30d.add(c);
+        templates30d += e.templates;
       }
     }
     return {
@@ -207,6 +211,9 @@ export async function buildReportSnapshot(
       respostas_medidas: resp?.count ?? 0,
       atendimentos_hoje: atividade_por_dia[hoje]?.atendimentos ?? 0,
       atendimentos_30d: convs30d.size,
+      templates_enviados_hoje: atividade_por_dia[hoje]?.templates ?? 0,
+      templates_enviados_30d: templates30d,
+      mensagens_enviadas_hoje: atividade_por_dia[hoje]?.mensagens ?? 0,
       atividade_por_dia,
       leads_em_posse: opp?.total ?? 0,
       ganhos: opp?.won ?? 0,
