@@ -71,10 +71,14 @@ function AssignPicker({ conversation }: { conversation: Conversation }) {
     let body: string;
     if (!target) {
       body = `${actor} removeu o responsável`;
+    } else if (from && actor === target && from !== target) {
+      // Quem transfere PUXA a conversa para si, tirando de outro — deixa claro
+      // que foi o ator (ex.: admin assume a conversa da Cibele).
+      body = `${actor} assumiu a conversa de ${from}`;
     } else if (from && from !== target) {
-      // Credita "por Fulano" quando quem transferiu não é a origem nem o destino
-      // (ex.: admin transfere a conversa de outro atendente).
-      const by = actor !== from && actor !== target ? ` por ${actor}` : "";
+      // Credita "por Fulano" quando quem transferiu não é a origem (ex.: admin
+      // transfere a conversa de um atendente para outro).
+      const by = actor !== from ? ` por ${actor}` : "";
       body = `Conversa transferida de ${from} para ${target}${by}`;
     } else if (!from) {
       body = actor === target ? `${actor} assumiu a conversa` : `Conversa atribuída a ${target} por ${actor}`;
