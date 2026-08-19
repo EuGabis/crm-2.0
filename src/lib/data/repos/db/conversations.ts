@@ -86,6 +86,14 @@ const mapView = (r: any): InboxView => ({
 export const MEDIA_BUCKET = "conversation-media";
 export const MAX_MEDIA_BYTES = 15 * 1024 * 1024; // 15 MB
 
+// Teto das mensagens recentes carregadas no load inicial da caixa. Cobre a
+// atividade recente (busca, contadores, relatório do período) sem puxar o
+// histórico inteiro da empresa. O resto de cada conversa vem sob demanda.
+const RECENT_MESSAGES_LIMIT = 3000;
+// Teto por conversa ao abrir (loadMessagesFor). Fundo de histórico mais que
+// suficiente para o thread; o Realtime cuida do que chega depois.
+const CONVERSATION_MESSAGES_LIMIT = 500;
+
 interface ConvState {
   loaded: boolean;
   loading: boolean;
@@ -94,9 +102,16 @@ interface ConvState {
   messages: Message[];
   snippets: Snippet[];
   views: InboxView[];
+  // Conversa cujo histórico está sendo buscado agora (carregamento sob demanda).
+  loadingMessagesFor: string | null;
   load: () => Promise<void>;
   patch: (
-    p: Partial<Pick<ConvState, "conversations" | "messages" | "snippets" | "views" | "realtime">>
+    p: Partial<
+      Pick<
+        ConvState,
+        "conversations" | "messages" | "snippets" | "views" | "realtime" | "loadingMessagesFor"
+      >
+    >
   ) => void;
 }
 
@@ -108,15 +123,27 @@ export const useConvStore = create<ConvState>((set, get) => ({
   messages: [],
   snippets: [],
   views: [],
+  loadingMessagesFor: null,
 
   load: async () => {
     if (get().loaded || get().loading) return;
     set({ loading: true });
     await useDbStore.getState().load();
     const supabase = createClient();
+    // Antes buscávamos TODAS as mensagens da empresa aqui — crescia sem teto e
+    // travava a caixa inteira até a consulta gigante voltar (a conversa clicada
+    // ficava em branco). Agora só as mais RECENTES (teto fixo): cobre a busca
+    // global, os contadores e o relatório do período. O histórico completo de
+    // cada conversa é carregado sob demanda ao abri-la (loadMessagesFor). A
+    // lista usa o preview desnormalizado (last_message_preview), sem depender
+    // deste array.
     const [convs, msgs, snips, views] = await Promise.all([
       supabase.from("conversations").select("*"),
-      supabase.from("messages").select("*").order("created_at"),
+      supabase
+        .from("messages")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(RECENT_MESSAGES_LIMIT),
       supabase.from("snippets").select("*").order("created_at"),
       supabase.from("inbox_views").select("*").order("created_at"),
     ]);
@@ -124,6 +151,8 @@ export const useConvStore = create<ConvState>((set, get) => ({
       loaded: true,
       loading: false,
       conversations: (convs.data ?? []).map(mapConversation),
+      // Vieram em ordem decrescente (para o teto pegar as mais novas); a UI
+      // reordena por conversa, então a ordem do array cru não importa.
       messages: (msgs.data ?? []).map(mapMessage),
       snippets: (snips.data ?? []).map((r: any) => ({ id: r.id, name: r.name, content: r.content })),
       views: (views.data ?? []).map(mapView),
@@ -323,8 +352,49 @@ export function useConversation(id: string | null) {
   return useConvStore((s) => (id ? s.conversations.find((c) => c.id === id) ?? null : null));
 }
 
+/**
+ * Carrega o histórico COMPLETO de uma conversa sob demanda (ao abri-la) e
+ * emenda na store. Só busca uma vez por conversa — as mensagens que chegam
+ * depois vêm pelo Realtime. Idempotente e à prova de corrida (marca a conversa
+ * como carregada ANTES do await, então dois cliques rápidos não duplicam o
+ * fetch).
+ */
+const loadedMsgConvs = new Set<string>();
+
+export async function loadMessagesFor(conversationId: string): Promise<void> {
+  if (!conversationId || loadedMsgConvs.has(conversationId)) return;
+  loadedMsgConvs.add(conversationId);
+  useConvStore.setState({ loadingMessagesFor: conversationId });
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("messages")
+    .select("*")
+    .eq("conversation_id", conversationId)
+    .order("created_at")
+    .limit(CONVERSATION_MESSAGES_LIMIT);
+  if (error) {
+    loadedMsgConvs.delete(conversationId); // deixa tentar de novo no próximo open
+    useConvStore.setState((s) => ({
+      loadingMessagesFor: s.loadingMessagesFor === conversationId ? null : s.loadingMessagesFor,
+    }));
+    return;
+  }
+  const s = useConvStore.getState();
+  const known = new Set(s.messages.map((m) => m.id));
+  const fresh = (data ?? []).map(mapMessage).filter((m) => !known.has(m.id));
+  useConvStore.setState({
+    messages: fresh.length ? [...s.messages, ...fresh] : s.messages,
+    loadingMessagesFor: s.loadingMessagesFor === conversationId ? null : s.loadingMessagesFor,
+  });
+}
+
 export function useMessages(conversationId: string | null) {
   const messages = useConvStore((s) => s.messages);
+  // Ao abrir a conversa, puxa o histórico completo dela (o load inicial só traz
+  // as mensagens recentes globais). Conversa já carregada = no-op.
+  useEffect(() => {
+    if (conversationId) void loadMessagesFor(conversationId);
+  }, [conversationId]);
   return useMemo(
     () =>
       conversationId
@@ -334,6 +404,11 @@ export function useMessages(conversationId: string | null) {
         : [],
     [messages, conversationId]
   );
+}
+
+/** True enquanto o histórico da conversa está sendo buscado sob demanda. */
+export function useMessagesLoading(conversationId: string | null) {
+  return useConvStore((s) => !!conversationId && s.loadingMessagesFor === conversationId);
 }
 
 export function useSnippets() {

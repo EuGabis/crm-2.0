@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   Download,
   FileText,
+  Loader2,
   Mail,
   Pause,
   Phone,
@@ -43,6 +44,7 @@ import {
   conversationActions,
   useConversation,
   useMessages,
+  useMessagesLoading,
 } from "@/lib/data/repos/db/conversations";
 import { useMyMembership, useTeam } from "@/lib/data/repos/db/team";
 import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
@@ -466,6 +468,7 @@ export function Thread({
   const conversation = useConversation(conversationId);
   const { contact } = useDbContact(conversation?.contactId ?? null);
   const messages = useMessages(conversationId);
+  const loadingMessages = useMessagesLoading(conversationId);
   const callContact = useWebphone((s) => s.callContact);
   const { isAdmin } = useMyMembership();
   const { channels } = useWhatsappChannels();
@@ -769,6 +772,11 @@ export function Thread({
         className="min-h-0 flex-1 overflow-y-auto bg-slate-50 p-4 [scrollbar-width:thin]"
       >
         <div ref={contentRef} className="space-y-2">
+        {loadingMessages && messages.length === 0 && (
+          <div className="flex items-center justify-center gap-2 py-10 text-xs text-slate-400">
+            <Loader2 className="size-4 animate-spin" /> Carregando conversa...
+          </div>
+        )}
         {messages.map((m) => {
           const day = format(new Date(m.at), "d 'de' MMMM", { locale: ptBR });
           const showDay = day !== lastDay;
