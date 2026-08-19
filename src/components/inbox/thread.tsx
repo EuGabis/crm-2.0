@@ -61,13 +61,25 @@ function AssignPicker({ conversation }: { conversation: Conversation }) {
       toast.error("Não foi possível alterar o responsável");
       return;
     }
-    // Registra quem transferiu para quem — vira evento inline na conversa (log).
+    // Registra de quem, para quem e POR quem — vira evento inline (log).
+    // `owner` é o dono ANTERIOR (capturado no render antes da troca) = a origem.
     const actor = members.find((m) => m.userId === me?.userId)?.name ?? "Alguém";
+    const from = owner?.name ?? null;
     const target = userId ? members.find((m) => m.userId === userId)?.name ?? "usuário" : null;
-    void conversationActions.logEvent(
-      conversation.id,
-      target ? `Conversa transferida de ${actor} para ${target}` : `${actor} removeu o responsável`
-    );
+    let body: string;
+    if (!target) {
+      body = `${actor} removeu o responsável`;
+    } else if (from && from !== target) {
+      // Credita "por Fulano" quando quem transferiu não é a origem nem o destino
+      // (ex.: admin transfere a conversa de outro atendente).
+      const by = actor !== from && actor !== target ? ` por ${actor}` : "";
+      body = `Conversa transferida de ${from} para ${target}${by}`;
+    } else if (!from) {
+      body = actor === target ? `${actor} assumiu a conversa` : `Conversa atribuída a ${target} por ${actor}`;
+    } else {
+      body = `Conversa atribuída a ${target}`;
+    }
+    void conversationActions.logEvent(conversation.id, body);
     toast.success(target ? `Atribuída a ${target}` : "Devolvida para a caixa do grupo");
   };
 
