@@ -654,11 +654,14 @@ export const conversationActions = {
   /** Define o responsável pela conversa; `null` devolve para a caixa do grupo. */
   async assign(conversationId: string, userId: string | null): Promise<boolean> {
     const supabase = createClient();
-    const { error } = await supabase
-      .from("conversations")
-      .update({ assigned_to: userId })
-      .eq("id", conversationId);
-    if (error) return false;
+    // Via função SECURITY DEFINER: reatribuir pelo UPDATE direto esbarra no
+    // WITH CHECK da RLS (a linha nova com outro dono é recusada). A função valida
+    // quem pode transferir e faz o update por fora da RLS (migração 0070).
+    const { data, error } = await supabase.rpc("transfer_conversation", {
+      conv_id: conversationId,
+      to_user: userId,
+    });
+    if (error || data === false) return false;
     const s = useConvStore.getState();
     s.patch({
       conversations: s.conversations.map((c) =>
