@@ -53,7 +53,7 @@ import {
   useScheduledMessages,
   useSnippets,
 } from "@/lib/data/repos/db/conversations";
-import { useTeam } from "@/lib/data/repos/db/team";
+import { useMyMembership, useTeam } from "@/lib/data/repos/db/team";
 import { brand } from "@/lib/config/brand";
 import type { Channel, ScheduleStatus } from "@/lib/data/types";
 
@@ -211,7 +211,16 @@ function NewConversationDialog({
 }) {
   const { contacts } = useDbContacts();
   const { channels } = useWhatsappChannels();
-  const activeChannels = channels.filter((c) => c.active);
+  const { isAdmin, department } = useMyMembership();
+  // Só os números do departamento do usuário aparecem — abrir conversa por um
+  // número de outro setor não faz sentido (e a RLS barraria). Admin, ou
+  // departamento sem número vinculado, veem todos (mesma regra do channel_allowed).
+  const deptChannelIds = department?.channelIds ?? [];
+  const activeChannels = channels.filter(
+    (c) =>
+      c.active &&
+      (isAdmin || deptChannelIds.length === 0 || deptChannelIds.includes(c.id)),
+  );
   const [contactId, setContactId] = useState("");
   const [contactQuery, setContactQuery] = useState("");
   const [contactOpen, setContactOpen] = useState(false);
