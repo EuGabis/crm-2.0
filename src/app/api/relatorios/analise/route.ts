@@ -43,9 +43,12 @@ export async function POST(request: Request) {
     "O JSON é o retrato real da empresa. O campo 'data_de_hoje' diz qual é o dia de hoje " +
     "(fuso de São Paulo); use-o para interpretar 'hoje', 'ontem' e 'esta semana'. Cada " +
     "atendente tem 'atendimentos_hoje' (conversas distintas que respondeu hoje) e " +
-    "'atividade_por_dia' (por data: atendimentos e mensagens) — some os dias certos para " +
-    "períodos como 'esta semana'. 'atendimento' = conversa que o atendente respondeu naquele " +
-    "dia. Se a informação pedida não estiver no JSON, diga claramente que não há dado " +
+    "'atividade_por_dia' (por data: atendimentos, mensagens e templates) — some os dias certos " +
+    "para períodos como 'esta semana'. 'atendimento' = conversa que o atendente respondeu " +
+    "naquele dia. Envio de templates: use 'mensagens.templates_hoje', 'mensagens.templates_30d' " +
+    "e 'mensagens.por_dia[data].templates'. Há ainda 'mensagens.recebidas_30d/enviadas_30d', " +
+    "'agenda' (compromissos: total/hoje/futuros) e 'tarefas' (pendentes/concluídas/vencidas). " +
+    "Se a informação pedida não estiver no JSON, diga claramente que não há dado " +
     "suficiente — nunca invente números. Ao citar atendentes, use os nomes exatamente como " +
     "aparecem. Tempos já vêm formatados (ex.: '12 min'). Valores em reais como R$ com duas " +
     "casas. Seja conciso; use listas curtas ao comparar pessoas. Não exponha ids nem campos " +

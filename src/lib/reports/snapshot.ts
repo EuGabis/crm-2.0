@@ -36,7 +36,7 @@ export interface AtendenteStat {
   respostas_medidas: number;
   atendimentos_hoje: number; // conversas distintas que ele respondeu hoje
   atendimentos_30d: number; // conversas distintas que respondeu no período
-  atividade_por_dia: Record<string, { atendimentos: number; mensagens: number }>;
+  atividade_por_dia: Record<string, { atendimentos: number; mensagens: number; templates: number }>;
   leads_em_posse: number;
   ganhos: number;
   perdidos: number;
@@ -58,6 +58,15 @@ export interface ReportSnapshot {
   };
   leads: { total: number; ganhos: number; perdidos: number; receita_ganha_total: number };
   pipeline_por_fase: Record<string, { leads: number; valor: number }>;
+  mensagens: {
+    recebidas_30d: number;
+    enviadas_30d: number;
+    templates_30d: number;
+    templates_hoje: number;
+    por_dia: Record<string, { recebidas: number; enviadas: number; templates: number }>;
+  };
+  agenda: { total: number; hoje: number; futuros: number };
+  tarefas: { total: number; pendentes: number; concluidas: number; vencidas: number };
 }
 
 export async function buildReportSnapshot(
@@ -65,16 +74,21 @@ export async function buildReportSnapshot(
   locationId: string,
 ): Promise<ReportSnapshot> {
   const since = new Date(Date.now() - REPORT_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const nowIso = new Date().toISOString();
+  const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
 
-  const [membersRes, convRes, msgRes, oppRes, pipeRes, stageRes, locRes] = await Promise.all([
-    supabase.from("location_members").select("user_id, role, department_id").eq("location_id", locationId),
-    supabase.from("conversations").select("id, assigned_to, channel_id, closed_at, awaiting_distribution, bot_paused").eq("location_id", locationId),
-    supabase.from("messages").select("conversation_id, direction, type, internal, created_at").eq("location_id", locationId).gte("created_at", since).order("created_at"),
-    supabase.from("opportunities").select("owner_id, status, value, stage_id, pipeline_id").eq("location_id", locationId),
-    supabase.from("pipelines").select("id, name").eq("location_id", locationId),
-    supabase.from("stages").select("id, name, pipeline_id"),
-    supabase.from("locations").select("name").eq("id", locationId).maybeSingle(),
-  ]);
+  const [membersRes, convRes, msgRes, oppRes, pipeRes, stageRes, locRes, apptRes, taskRes] =
+    await Promise.all([
+      supabase.from("location_members").select("user_id, role, department_id").eq("location_id", locationId),
+      supabase.from("conversations").select("id, assigned_to, channel_id, closed_at, awaiting_distribution, bot_paused").eq("location_id", locationId),
+      supabase.from("messages").select("conversation_id, direction, type, internal, template_name, created_at").eq("location_id", locationId).gte("created_at", since).order("created_at"),
+      supabase.from("opportunities").select("owner_id, status, value, stage_id, pipeline_id").eq("location_id", locationId),
+      supabase.from("pipelines").select("id, name").eq("location_id", locationId),
+      supabase.from("stages").select("id, name, pipeline_id"),
+      supabase.from("locations").select("name").eq("id", locationId).maybeSingle(),
+      supabase.from("appointments").select("starts_at").eq("location_id", locationId),
+      supabase.from("tasks").select("status, due_at").eq("location_id", locationId),
+    ]);
 
   const members = membersRes.data ?? [];
   const conversations = convRes.data ?? [];
@@ -82,6 +96,8 @@ export async function buildReportSnapshot(
   const opportunities = oppRes.data ?? [];
   const pipelines = pipeRes.data ?? [];
   const stages = stageRes.data ?? [];
+  const appointments = apptRes.data ?? [];
+  const tasks = taskRes.data ?? [];
 
   const userIds = members.map((m: any) => m.user_id);
   const [profRes, deptRes] = await Promise.all([
@@ -106,8 +122,8 @@ export async function buildReportSnapshot(
   }
   const respByUser = new Map<string, { total: number; count: number }>();
   const sentByUser = new Map<string, number>();
-  // owner -> dia (YYYY-MM-DD) -> { conversas atendidas (set), mensagens }
-  const dailyByUser = new Map<string, Map<string, { convs: Set<string>; msgs: number }>>();
+  // owner -> dia (YYYY-MM-DD) -> { conversas atendidas (set), mensagens, templates }
+  const dailyByUser = new Map<string, Map<string, { convs: Set<string>; msgs: number; templates: number }>>();
   for (const [convId, msgs] of byConv) {
     const owner = convOwner.get(convId);
     let lastIn: number | null = null;
@@ -127,11 +143,12 @@ export async function buildReportSnapshot(
           }
           let e = dm.get(day);
           if (!e) {
-            e = { convs: new Set(), msgs: 0 };
+            e = { convs: new Set(), msgs: 0, templates: 0 };
             dm.set(day, e);
           }
           e.convs.add(convId);
           e.msgs += 1;
+          if (m.template_name) e.templates += 1;
         }
         if (owner && lastIn != null) {
           const min = (t - lastIn) / 60000;
@@ -165,18 +182,16 @@ export async function buildReportSnapshot(
     oppByUser.set(o.owner_id, cur);
   }
 
-  const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
-
   const atendentes: AtendenteStat[] = members.map((m: any) => {
     const resp = respByUser.get(m.user_id);
     const opp = oppByUser.get(m.user_id);
     const avgMin = resp && resp.count ? resp.total / resp.count : null;
     const dm = dailyByUser.get(m.user_id);
-    const atividade_por_dia: Record<string, { atendimentos: number; mensagens: number }> = {};
+    const atividade_por_dia: Record<string, { atendimentos: number; mensagens: number; templates: number }> = {};
     const convs30d = new Set<string>();
     if (dm) {
       for (const [day, e] of dm) {
-        atividade_por_dia[day] = { atendimentos: e.convs.size, mensagens: e.msgs };
+        atividade_por_dia[day] = { atendimentos: e.convs.size, mensagens: e.msgs, templates: e.templates };
         for (const c of e.convs) convs30d.add(c);
       }
     }
@@ -209,6 +224,41 @@ export async function buildReportSnapshot(
     pipelineResumo[key] = cur;
   }
 
+  // Mensagens por dia (empresa toda): recebidas, enviadas e templates.
+  const mensagensPorDia: Record<string, { recebidas: number; enviadas: number; templates: number }> = {};
+  let templates30d = 0;
+  let recebidas30d = 0;
+  let enviadas30d = 0;
+  for (const m of messages) {
+    if (m.internal || m.type === "event") continue;
+    const day = brDay(m.created_at);
+    const e = (mensagensPorDia[day] ??= { recebidas: 0, enviadas: 0, templates: 0 });
+    if (m.direction === "in") {
+      e.recebidas += 1;
+      recebidas30d += 1;
+    } else if (m.direction === "out") {
+      e.enviadas += 1;
+      enviadas30d += 1;
+      if (m.template_name) {
+        e.templates += 1;
+        templates30d += 1;
+      }
+    }
+  }
+
+  // Agenda (compromissos) e tarefas.
+  const agenda = {
+    total: appointments.length,
+    hoje: appointments.filter((a: any) => brDay(a.starts_at) === hoje).length,
+    futuros: appointments.filter((a: any) => a.starts_at >= nowIso).length,
+  };
+  const tarefas = {
+    total: tasks.length,
+    pendentes: tasks.filter((t: any) => t.status === "pending").length,
+    concluidas: tasks.filter((t: any) => t.status === "done").length,
+    vencidas: tasks.filter((t: any) => t.status === "pending" && t.due_at && t.due_at < nowIso).length,
+  };
+
   return {
     empresa: (locRes.data as any)?.name ?? "Empresa",
     data_de_hoje: hoje,
@@ -231,5 +281,14 @@ export async function buildReportSnapshot(
         .reduce((s: number, o: any) => s + (Number(o.value) || 0), 0),
     },
     pipeline_por_fase: pipelineResumo,
+    mensagens: {
+      recebidas_30d: recebidas30d,
+      enviadas_30d: enviadas30d,
+      templates_30d: templates30d,
+      templates_hoje: mensagensPorDia[hoje]?.templates ?? 0,
+      por_dia: mensagensPorDia,
+    },
+    agenda,
+    tarefas,
   };
 }
