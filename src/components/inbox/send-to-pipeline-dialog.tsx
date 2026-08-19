@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { oppActions, usePipelineDb } from "@/lib/data/repos/db/pipeline";
+import { useConversation } from "@/lib/data/repos/db/conversations";
 import { formatBRL } from "@/lib/data/repos/opportunities";
 
 /**
@@ -36,13 +37,17 @@ export function SendToPipelineDialog({
   onOpenChange,
   contactId,
   contactName,
+  conversationId,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   contactId: string;
   contactName: string;
+  /** Se o card nasce de uma conversa, herda o responsável DELA (não quem cria). */
+  conversationId?: string;
 }) {
   const { pipelines, opportunities } = usePipelineDb();
+  const conversation = useConversation(conversationId ?? null);
   const [pipelineId, setPipelineId] = useState("");
   const [stageId, setStageId] = useState("");
   const [value, setValue] = useState("");
@@ -81,6 +86,9 @@ export function SendToPipelineDialog({
       stageId,
       value: Number(value.replace(",", ".")) || 0,
       source: "Conversas",
+      // Vindo da conversa: o card é do RESPONSÁVEL dela (null = grupo, se estiver
+      // no bot/sem dono). Fora de uma conversa, mantém o padrão (quem criou).
+      ...(conversationId ? { ownerId: conversation?.assignedTo ?? null } : {}),
     });
     setSaving(false);
     if (!ok) {

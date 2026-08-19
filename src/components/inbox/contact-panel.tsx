@@ -526,6 +526,7 @@ export function ContactPanel({
         onOpenChange={setPipelineOpen}
         contactId={contact.id}
         contactName={contactName(contact)}
+        conversationId={conversationId}
       />
     </div>
   );

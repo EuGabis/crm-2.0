@@ -206,6 +206,10 @@ export const oppActions = {
     stageId: string;
     value: number;
     source: string;
+    // Dono do card. Quando vem da conversa, é o RESPONSÁVEL dela (não quem
+    // clicou): um admin criando o card na conversa do Paulo cria PARA o Paulo.
+    // `null` = grupo (sem dono). Ausente = padrão (quem criou, via `uid()`).
+    ownerId?: string | null;
   }): Promise<boolean> {
     const location = loc();
     if (!location) return false;
@@ -220,7 +224,7 @@ export const oppActions = {
         name: input.contactName,
         source: input.source,
         value: input.value,
-        owner_id: uid(),
+        owner_id: input.ownerId !== undefined ? input.ownerId : uid(),
       })
       .select()
       .single();
