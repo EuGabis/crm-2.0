@@ -195,13 +195,20 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <div className="relative flex items-center gap-2 text-[11px] text-slate-500">
-          {["Conversas", "Pipeline", "Automações", "Relatórios"].map((m, i) => (
-            <span key={m} className="flex items-center gap-2">
-              {i > 0 && <span className="size-0.5 rounded-full bg-slate-600" />}
-              {m}
-            </span>
-          ))}
+        <div className="relative space-y-2">
+          <div className="flex items-center gap-2 text-[11px] text-slate-500">
+            {["Conversas", "Pipeline", "Automações", "Relatórios"].map((m, i) => (
+              <span key={m} className="flex items-center gap-2">
+                {i > 0 && <span className="size-0.5 rounded-full bg-slate-600" />}
+                {m}
+              </span>
+            ))}
+          </div>
+          <p className="text-[10px] leading-relaxed text-slate-600">
+            Desenvolvido por Gabriel Marcelo Pereira, com participação de João Lucas Mota.
+            <br />
+            Todos os direitos reservados · Aviões e Músicas.
+          </p>
         </div>
       </div>
 
