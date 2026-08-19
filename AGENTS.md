@@ -145,6 +145,28 @@ Supabase). Peças:
   O `onboarding@resend.dev` só era necessário antes da verificação (entregava só ao
   dono da conta) e não deve mais ser usado.
 
+## WhatsApp — Auto-responder
+
+Motor de resposta automática acionado quando entra uma mensagem de texto no webhook
+da Meta (Cloud API). Implementação (spec 2026-08-13):
+
+- `src/lib/whatsapp/auto-reply.ts` (`maybeAutoReply`) — chamado pelo webhook após
+  gravar mensagem de entrada de **texto** (mídia ignora). Best-effort: falhas não
+  quebram o 200 da webhook.
+- Regras de resposta:
+  - Só responde agente principal (`ai_agents.is_primary=true`) com `status='ativo'`.
+  - Não responde se a conversa tem `bot_paused=true` (humano assumiu — handoff via
+    `/api/whatsapp/send` quando um membro seta um response).
+  - Respeita o `daily_limit` do canal (conta saídas de hoje).
+  - Usa as últimas ~10 mensagens como contexto (ordem cronológica).
+- IA: chama OpenAI (`chat()`) com a personalidade, objetivo e info extra do agente,
+  gera resposta em tempo real, envia via Cloud API.
+- Registro: grava a mensagem de saída + `ai_logs` com feature `"whatsapp-auto"` e
+  `created_by=null` (máquina). Modelo e token counts capturam o uso real.
+- Env: `OPENAI_API_KEY` (já na Vercel). Sem nova variável.
+- Migração: `0031_whatsapp_autoreply.sql` — adiciona coluna `conversations.bot_paused`
+  (boolean, default false). **Próxima migração livre: 0032.**
+
 ## Automações — EM CONSTRUÇÃO (leia antes de continuar)
 
 Spec: `docs/superpowers/specs/2026-08-07-automacoes-design.md`
