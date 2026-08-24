@@ -21,6 +21,15 @@ export async function POST(request: Request) {
   } = await supabase.auth.getUser();
   if (!user) return Response.json({ error: "Não autenticado" }, { status: 401 });
 
+  // Nome do atendente que está enviando — vai como prefixo na mensagem para o
+  // cliente saber com quem está falando (ex.: "*Jenifer:* Olá!").
+  const { data: prof } = await supabase
+    .from("profiles")
+    .select("name")
+    .eq("id", user.id)
+    .maybeSingle();
+  const senderName = (prof?.name ?? "").trim();
+
   let body: any;
   try {
     body = await request.json();
@@ -100,8 +109,10 @@ export async function POST(request: Request) {
         );
       }
       if (!text?.trim()) return Response.json({ error: "Mensagem vazia" }, { status: 400 });
-      waResp = await sendText(channel.phone_number_id, to, text.trim());
-      bodyText = text.trim();
+      // Prefixa com o nome de quem enviou (o cliente vê quem está falando).
+      const outText = senderName ? `*${senderName}:* ${text.trim()}` : text.trim();
+      waResp = await sendText(channel.phone_number_id, to, outText);
+      bodyText = outText;
     }
   } catch (e) {
     return Response.json(
@@ -124,6 +135,7 @@ export async function POST(request: Request) {
       wa_message_id: waMessageId,
       status: "sent",
       template_name: template ? template.name : null,
+      created_by: user.id,
     })
     .select()
     .single();
