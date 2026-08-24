@@ -338,70 +338,41 @@ export const dbContactActions = {
     }[],
     onProgress?: (done: number, total: number) => void
   ): Promise<{ inserted: number; failed: number; error: string | null }> {
-    const { locationId, userId } = useDbStore.getState();
+    const { locationId } = useDbStore.getState();
     if (!locationId) return { inserted: 0, failed: rows.length, error: "Empresa não carregada — recarregue a página" };
     if (rows.length === 0) return { inserted: 0, failed: 0, error: "Nada para importar" };
 
-    const CHUNK = 500;
-    const POOL = 4;
-    const supabase = createClient();
-
-    const payload = rows.map((r) => ({
-      location_id: locationId,
-      first_name: r.firstName.slice(0, 200),
-      last_name: (r.lastName ?? "").slice(0, 200),
-      email: (r.email ?? "").slice(0, 320),
-      phone: (r.phone ?? "").slice(0, 60),
-      doc: r.doc?.trim() ? r.doc.trim().slice(0, 32) : null,
-      company: r.company?.trim() ? r.company.trim().slice(0, 200) : null,
-      tags: (r.tags ?? []).slice(0, 30),
-      owner_id: userId,
-    }));
-
+    // Os inserts acontecem no SERVIDOR (/api/contacts/import): o cliente só envia
+    // os dados em poucos blocos curtos. Assim a aba não trava nem é suspensa no
+    // meio de dezenas de milhares de inserts (era o ERR_NETWORK_IO_SUSPENDED).
+    const CHUNK = 5000;
     let inserted = 0;
     let failed = 0;
     let firstError: string | null = null;
 
-    const bump = (n: number) => {
-      onProgress?.(inserted + failed, payload.length);
-      return n;
-    };
-
-    /** Insere um lote; se falhar, reparte ao meio até isolar a(s) linha(s) ruim(ns). */
-    const push = async (batch: typeof payload, attempt = 0): Promise<void> => {
-      const { error } = await supabase.from("contacts").insert(batch);
-      if (!error) {
-        inserted += batch.length;
-        bump(0);
-        return;
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const chunk = rows.slice(i, i + CHUNK);
+      try {
+        const res = await fetch("/api/contacts/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rows: chunk }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          failed += chunk.length;
+          firstError ??= json?.error ?? `Falha HTTP ${res.status}`;
+        } else {
+          inserted += json.inserted ?? 0;
+          failed += json.failed ?? 0;
+          firstError ??= json.error ?? null;
+        }
+      } catch (e) {
+        failed += chunk.length;
+        firstError ??= e instanceof Error ? e.message : "Falha de conexão";
       }
-      // Timeout/rede: uma segunda tentativa resolve o lote inteiro na maioria dos casos.
-      if (attempt === 0 && batch.length > 1) {
-        await new Promise((r) => setTimeout(r, 400));
-        return push(batch, 1);
-      }
-      if (batch.length > 1) {
-        const mid = Math.ceil(batch.length / 2);
-        await push(batch.slice(0, mid));
-        await push(batch.slice(mid));
-        return;
-      }
-      failed += 1;
-      firstError ??= error.message;
-      bump(0);
-    };
-
-    const batches: (typeof payload)[] = [];
-    for (let i = 0; i < payload.length; i += CHUNK) batches.push(payload.slice(i, i + CHUNK));
-
-    let cursor = 0;
-    const workers = Array.from({ length: Math.min(POOL, batches.length) }, async () => {
-      while (cursor < batches.length) {
-        const mine = batches[cursor++];
-        await push(mine);
-      }
-    });
-    await Promise.all(workers);
+      onProgress?.(inserted + failed, rows.length);
+    }
 
     // Relê a lista (não prepend): 50 mil linhas no store por `setContacts` travava a aba.
     await useDbStore.getState().reload();
