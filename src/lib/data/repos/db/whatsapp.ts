@@ -174,6 +174,8 @@ export const whatsappActions = {
     channelId?: string;
     text?: string;
     template?: { name: string; language: string; components?: unknown[] };
+    /** Responder (0077): id local da mensagem sendo citada. */
+    replyTo?: string;
   }): Promise<{ ok: boolean; needsTemplate?: boolean; error?: string; message?: any }> {
     const res = await fetch("/api/whatsapp/send", {
       method: "POST",

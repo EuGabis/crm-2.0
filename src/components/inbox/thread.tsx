@@ -9,6 +9,7 @@ import {
   Check,
   CheckCheck,
   CheckCircle2,
+  CornerUpLeft,
   Download,
   FileText,
   Loader2,
@@ -45,6 +46,7 @@ import {
   useConvStore,
   useMessages,
   useMessagesLoading,
+  useReplyStore,
 } from "@/lib/data/repos/db/conversations";
 import { useMyMembership, useTeam } from "@/lib/data/repos/db/team";
 import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
@@ -156,6 +158,16 @@ function AssignPicker({
       </DropdownMenuContent>
     </DropdownMenu>
   );
+}
+
+/** Resumo curto de uma mensagem para a prévia da citação (texto ou mídia). */
+function quoteSnippet(m: Message): string {
+  if (m.type === "image") return "🖼️ Imagem";
+  if (m.type === "video") return "🎬 Vídeo";
+  if (m.type === "audio") return "🎧 Áudio";
+  if (m.type === "file") return `📎 ${m.mediaName ?? "Arquivo"}`;
+  const t = (m.body ?? "").replace(/\s+/g, " ").trim();
+  return t.length > 90 ? `${t.slice(0, 90)}…` : t || "Mensagem";
 }
 
 function fmtBytes(n?: number) {
@@ -352,9 +364,28 @@ function ScheduleTag({ message }: { message: Message }) {
   );
 }
 
-function MessageBubble({ message }: { message: Message }) {
+function MessageBubble({
+  message,
+  conversationId,
+  quoted,
+  contactFirstName,
+}: {
+  message: Message;
+  conversationId: string;
+  quoted?: Message | null;
+  contactFirstName?: string;
+}) {
   if (message.type === "event") return <PipelineEvent message={message} />;
   const isOut = message.direction === "out";
+  const replyBtn = (
+    <button
+      onClick={() => useReplyStore.getState().setReply(conversationId, message)}
+      title="Responder a esta mensagem"
+      className="flex size-6 shrink-0 items-center justify-center self-center rounded-full text-slate-400 opacity-0 transition hover:bg-slate-200 hover:text-slate-600 group-hover:opacity-100"
+    >
+      <CornerUpLeft className="size-3.5" />
+    </button>
+  );
   // Rótulo explícito do rastreio (WhatsApp): aparece no hover do checkzinho, com
   // a hora de entrega/leitura quando a Meta informou.
   const at = (iso?: string) =>
@@ -368,7 +399,8 @@ function MessageBubble({ message }: { message: Message }) {
           ? "Falhou ao enviar"
           : "Enviado";
   return (
-    <div className={cn("flex", isOut ? "justify-end" : "justify-start")}>
+    <div className={cn("group flex items-center gap-1", isOut ? "justify-end" : "justify-start")}>
+      {isOut && replyBtn}
       <div
         className={cn(
           "max-w-[70%] overflow-hidden break-words rounded-2xl px-3.5 py-2 text-[13px]",
@@ -383,6 +415,21 @@ function MessageBubble({ message }: { message: Message }) {
           <p className="mb-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-600">
             Comentário interno
           </p>
+        )}
+        {quoted && (
+          <div
+            className={cn(
+              "mb-1.5 rounded-md border-l-2 px-2 py-1 text-[11px]",
+              isOut
+                ? "border-white/60 bg-white/15 text-indigo-50"
+                : "border-indigo-400 bg-black/5 text-slate-600"
+            )}
+          >
+            <span className="block font-semibold">
+              {quoted.direction === "in" ? contactFirstName ?? "Contato" : "Você"}
+            </span>
+            <span className="block truncate opacity-90">{quoteSnippet(quoted)}</span>
+          </div>
         )}
         {message.scheduleStatus && <ScheduleTag message={message} />}
         {message.type === "audio" ||
@@ -415,6 +462,7 @@ function MessageBubble({ message }: { message: Message }) {
           )}
         </p>
       </div>
+      {!isOut && replyBtn}
     </div>
   );
 }
@@ -812,7 +860,12 @@ export function Thread({
                   </span>
                 </div>
               )}
-              <MessageBubble message={m} />
+              <MessageBubble
+                message={m}
+                conversationId={conversationId}
+                quoted={m.replyTo ? messages.find((x) => x.id === m.replyTo) ?? null : null}
+                contactFirstName={contact.firstName}
+              />
             </div>
           );
         })}

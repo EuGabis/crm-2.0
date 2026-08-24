@@ -220,13 +220,15 @@ export function OpportunityCard({
     const conversationId = (await conversationActions.openForContact(contact.id)).id;
     const ok =
       !!conversationId &&
-      (await conversationActions.send(conversationId, {
-        direction: "out",
-        type: "text",
-        channel: "whatsapp",
-        body,
-        internal: true,
-      }));
+      (
+        await conversationActions.send(conversationId, {
+          direction: "out",
+          type: "text",
+          channel: "whatsapp",
+          body,
+          internal: true,
+        })
+      ).ok;
     setBusy(false);
     if (!ok) {
       toast.error("Não foi possível salvar a nota");

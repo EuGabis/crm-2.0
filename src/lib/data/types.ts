@@ -80,6 +80,8 @@ export interface Message {
   mediaName?: string;
   mediaMime?: string;
   mediaSize?: number;
+  /** Responder (citação, migração 0077): id da mensagem sendo respondida. */
+  replyTo?: string;
   /** WhatsApp: id da mensagem na Meta (casa status) e estado de entrega. */
   waMessageId?: string;
   status?: "sent" | "delivered" | "read" | "failed";

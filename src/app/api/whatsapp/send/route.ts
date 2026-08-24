@@ -36,7 +36,7 @@ export async function POST(request: Request) {
   } catch {
     return Response.json({ error: "payload inválido" }, { status: 400 });
   }
-  const { conversationId, channelId, text, template } = body ?? {};
+  const { conversationId, channelId, text, template, replyTo } = body ?? {};
   if (!conversationId) return Response.json({ error: "conversationId ausente" }, { status: 400 });
 
   // conversa (RLS filtra por membership)
@@ -89,6 +89,22 @@ export async function POST(request: Request) {
   const within24h =
     !!lastIn && Date.now() - new Date(lastIn.created_at).getTime() < DAY_MS;
 
+  // Responder (0077): resolve a mensagem citada. Guarda o id local (para gravar
+  // o vínculo) e o id na Meta (para o WhatsApp mostrar a citação ao cliente).
+  let replyToLocal: string | null = null;
+  let replyToWaId: string | null = null;
+  if (replyTo) {
+    const { data: target } = await supabase
+      .from("messages")
+      .select("id, wa_message_id")
+      .eq("id", replyTo)
+      .maybeSingle();
+    if (target) {
+      replyToLocal = target.id;
+      replyToWaId = target.wa_message_id ?? null;
+    }
+  }
+
   let waResp: any;
   let bodyText: string;
   try {
@@ -113,7 +129,7 @@ export async function POST(request: Request) {
       // Nome numa linha, linha em branco, e a mensagem embaixo. As quebras que o
       // atendente digitou são preservadas (só tira espaço das pontas).
       const outText = senderName ? `*${senderName}:*\n\n${text.trim()}` : text.trim();
-      waResp = await sendText(channel.phone_number_id, to, outText);
+      waResp = await sendText(channel.phone_number_id, to, outText, replyToWaId ?? undefined);
       bodyText = outText;
     }
   } catch (e) {
@@ -137,6 +153,9 @@ export async function POST(request: Request) {
       wa_message_id: waMessageId,
       status: "sent",
       template_name: template ? template.name : null,
+      // Responder (0077): só grava a coluna quando há citação — mantém o insert
+      // funcional mesmo antes de a migração 0077 ser aplicada.
+      ...(replyToLocal ? { reply_to: replyToLocal } : {}),
       created_by: user.id,
     })
     .select()

@@ -49,13 +49,21 @@ async function graph(path: string, init?: RequestInit): Promise<any> {
   return json;
 }
 
-export function sendText(phoneNumberId: string, to: string, body: string) {
+export function sendText(
+  phoneNumberId: string,
+  to: string,
+  body: string,
+  replyToWaId?: string,
+) {
   return graph(`${phoneNumberId}/messages`, {
     method: "POST",
     body: JSON.stringify({
       messaging_product: "whatsapp",
       to,
       type: "text",
+      // Responder (0077): cita a mensagem original — o cliente vê a citação
+      // nativa do WhatsApp. Só entra quando temos o id da mensagem na Meta.
+      ...(replyToWaId ? { context: { message_id: replyToWaId } } : {}),
       text: { body, preview_url: false },
     }),
   });

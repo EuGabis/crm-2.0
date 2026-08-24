@@ -62,6 +62,7 @@ const mapMessage = (r: any): Message => ({
   mediaName: r.media_name ?? undefined,
   mediaMime: r.media_mime ?? undefined,
   mediaSize: r.media_size ?? undefined,
+  replyTo: r.reply_to ?? undefined,
   waMessageId: r.wa_message_id ?? undefined,
   status: r.status ?? undefined,
   deliveredAt: r.delivered_at ?? undefined,
@@ -166,6 +167,30 @@ export const useConvStore = create<ConvState>((set, get) => ({
 
   patch: (p) => set(p),
 }));
+
+/**
+ * Alvo de "responder" (citação): a mensagem que o atendente marcou para
+ * responder. Vive fora do store das conversas porque é UI efêmera, e é
+ * compartilhado entre a bolha (que marca) e o composer (que envia). Guardamos o
+ * conversationId junto para nunca vazar um alvo de uma conversa para outra.
+ */
+interface ReplyState {
+  target: { conversationId: string; message: Message } | null;
+  setReply: (conversationId: string, message: Message) => void;
+  clearReply: () => void;
+}
+export const useReplyStore = create<ReplyState>((set) => ({
+  target: null,
+  setReply: (conversationId, message) => set({ target: { conversationId, message } }),
+  clearReply: () => set({ target: null }),
+}));
+
+/** Alvo de resposta ativo PARA esta conversa (ou null). */
+export function useReplyTarget(conversationId: string): Message | null {
+  return useReplyStore((s) =>
+    s.target && s.target.conversationId === conversationId ? s.target.message : null
+  );
+}
 
 /**
  * Assina o Realtime da caixa de entrada — e pode ser chamada DE NOVO.
@@ -502,9 +527,9 @@ export const conversationActions = {
   async send(
     conversationId: string,
     msg: Omit<Message, "id" | "conversationId" | "at">
-  ): Promise<boolean> {
+  ): Promise<{ ok: boolean; error?: string }> {
     const location = loc();
-    if (!location) return false;
+    if (!location) return { ok: false, error: "Sem empresa ativa" };
     const supabase = createClient();
     // Agendou? Registra quem e entra na fila como pendente (migração 0028).
     const scheduling = msg.scheduledFor
@@ -524,13 +549,20 @@ export const conversationActions = {
         channel: msg.channel,
         body: msg.body,
         internal: msg.internal ?? false,
+        // Responder (0077): só manda a coluna quando há citação — assim o insert
+        // continua funcionando mesmo antes de a migração ser aplicada.
+        ...(msg.replyTo ? { reply_to: msg.replyTo } : {}),
         // Autor (0051): é o que permite o próprio excluir a nota que escreveu.
         created_by: useDbStore.getState().userId,
         ...scheduling,
       })
       .select()
       .single();
-    if (error || !data) return false;
+    if (error || !data) {
+      // Antes engolíamos o erro e mostrávamos só "tente novamente" — sem pista da
+      // causa (RLS, coluna, FK). Agora devolvemos a mensagem real do Postgres.
+      return { ok: false, error: error?.message ?? "Falha ao gravar a mensagem" };
+    }
 
     const preview = msg.internal
       ? "Comentário interno"
@@ -572,7 +604,7 @@ export const conversationActions = {
           : c
       ),
     });
-    return true;
+    return { ok: true };
   },
 
   /** Insere otimisticamente uma mensagem já gravada no servidor (envio WhatsApp),

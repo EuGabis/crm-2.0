@@ -334,13 +334,15 @@ export function NotesPanel({ contactId }: { contactId: string }) {
     const conversationId = (await conversationActions.openForContact(contactId)).id;
     const ok =
       !!conversationId &&
-      (await conversationActions.send(conversationId, {
-        direction: "out",
-        type: "text",
-        channel: "whatsapp",
-        body: text,
-        internal: true,
-      }));
+      (
+        await conversationActions.send(conversationId, {
+          direction: "out",
+          type: "text",
+          channel: "whatsapp",
+          body: text,
+          internal: true,
+        })
+      ).ok;
     setBusy(false);
     if (!ok) {
       toast.error("Não foi possível salvar a observação");

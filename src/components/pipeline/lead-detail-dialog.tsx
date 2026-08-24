@@ -131,13 +131,15 @@ function LeadDetailBody({
     const conversationId = (await conversationActions.openForContact(contact.id)).id;
     const ok =
       !!conversationId &&
-      (await conversationActions.send(conversationId, {
-        direction: "out",
-        type: "text",
-        channel: "whatsapp",
-        body,
-        internal: true,
-      }));
+      (
+        await conversationActions.send(conversationId, {
+          direction: "out",
+          type: "text",
+          channel: "whatsapp",
+          body,
+          internal: true,
+        })
+      ).ok;
     setSavingNote(false);
     if (!ok) {
       toast.error("Não foi possível salvar o comentário");

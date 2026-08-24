@@ -260,6 +260,19 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
     await db.from("bot_sessions").delete().eq("conversation_id", conv.id);
   }
 
+  // Responder (0077): o cliente citou uma mensagem? A Meta manda o id dela em
+  // context.id — resolvemos para o id local para mostrar a citação na bolha.
+  let inReplyToLocal: string | null = null;
+  const ctxWaId: string | null = (m as any).context?.id ?? null;
+  if (ctxWaId) {
+    const { data: quoted } = await db
+      .from("messages")
+      .select("id")
+      .eq("wa_message_id", ctxWaId)
+      .maybeSingle();
+    inReplyToLocal = quoted?.id ?? null;
+  }
+
   const { error: insErr } = await db.from("messages").insert({
     location_id: channel.location_id,
     conversation_id: conv.id,
@@ -270,6 +283,8 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
     channel_id: channel.id,
     wa_message_id: waId,
     status: "delivered",
+    // Só grava quando há citação — mantém o insert válido antes da migração 0077.
+    ...(inReplyToLocal ? { reply_to: inReplyToLocal } : {}),
     ...media,
   });
   if (insErr) {

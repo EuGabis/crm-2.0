@@ -5,6 +5,7 @@ import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
   Clock,
+  CornerUpLeft,
   Lock,
   DollarSign,
   Eye,
@@ -17,6 +18,7 @@ import {
   Square,
   Tag,
   Trash2,
+  X,
   Zap,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -42,6 +44,8 @@ import {
   conversationActions,
   useConversation,
   useMessages,
+  useReplyStore,
+  useReplyTarget,
   useSnippets,
 } from "@/lib/data/repos/db/conversations";
 import { whatsappActions } from "@/lib/data/repos/db/whatsapp";
@@ -56,7 +60,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { Channel } from "@/lib/data/types";
+import type { Channel, Message } from "@/lib/data/types";
 import { cn } from "@/lib/utils";
 
 const CHANNELS: Channel[] = ["whatsapp", "sms", "email"];
@@ -70,6 +74,16 @@ const QUICK_REPLIES = [
   "Perfeito! Vou dar andamento.",
   "Qualquer dúvida, estou à disposição. 😊",
 ];
+
+/** Resumo de uma mensagem para a prévia da citação (texto ou rótulo de mídia). */
+function msgSnippet(m: Message): string {
+  if (m.type === "image") return "🖼️ Imagem";
+  if (m.type === "video") return "🎬 Vídeo";
+  if (m.type === "audio") return "🎧 Áudio";
+  if (m.type === "file") return `📎 ${m.mediaName ?? "Arquivo"}`;
+  const t = (m.body ?? "").replace(/\s+/g, " ").trim();
+  return t.length > 120 ? `${t.slice(0, 120)}…` : t || "Mensagem";
+}
 
 export function Composer({ conversationId }: { conversationId: string }) {
   const [channel, setChannel] = useState<Channel>("whatsapp");
@@ -99,6 +113,13 @@ export function Composer({ conversationId }: { conversationId: string }) {
   const contactId = conversation?.contactId ?? null;
   const { contact } = useDbContact(contactId);
   const isWhatsapp = conversation?.channel === "whatsapp" && !!conversation?.channelId;
+  // Responder (citação): mensagem marcada na bolha para esta conversa.
+  const replyTarget = useReplyTarget(conversationId);
+  const clearReply = useReplyStore((s) => s.clearReply);
+  // Trocar de conversa descarta um alvo de citação pendente (não vaza entre elas).
+  useEffect(() => {
+    clearReply();
+  }, [conversationId, clearReply]);
   const messages = useMessages(conversationId);
 
   /**
@@ -296,10 +317,12 @@ export function Composer({ conversationId }: { conversationId: string }) {
         conversationId,
         channelId: conversation?.channelId,
         text,
+        replyTo: replyTarget?.id,
       });
       setSending(false);
       if (res.ok) {
         setBody("");
+        clearReply();
         conversationActions.pushSent(res.message);
         toast.success("Mensagem enviada via WhatsApp");
       } else if (res.needsTemplate) {
@@ -316,21 +339,24 @@ export function Composer({ conversationId }: { conversationId: string }) {
       return;
     }
     setSending(true);
-    const ok = await conversationActions.send(conversationId, {
+    const res = await conversationActions.send(conversationId, {
       direction: "out",
       type: "text",
       channel,
       body: text.trim(),
       internal: internal || undefined,
       scheduledFor,
+      replyTo: replyTarget?.id,
     });
     setSending(false);
-    if (!ok) {
-      toast.error("Não foi possível enviar — tente novamente");
+    if (!res.ok) {
+      // Mostra o motivo real (RLS, coluna, FK) em vez do genérico "tente novamente".
+      toast.error(res.error ?? "Não foi possível enviar — tente novamente");
       return;
     }
     setBody("");
     setSubject("");
+    clearReply();
     if (scheduledFor) {
       toast.success("Mensagem agendada — acompanhe na aba Agendadas");
       // Agendar sem canal conectado é permitido (dá tempo de conectar até lá),
@@ -418,6 +444,26 @@ export function Composer({ conversationId }: { conversationId: string }) {
               Escrever comentário interno
             </button>
           </div>
+        </div>
+      )}
+      {replyTarget && (
+        <div className="mb-2 flex items-stretch gap-2 rounded-lg border border-indigo-200 bg-indigo-50/70 p-2">
+          <span className="w-1 shrink-0 rounded-full bg-indigo-400" />
+          <div className="min-w-0 flex-1">
+            <p className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-indigo-600">
+              <CornerUpLeft className="size-3" />
+              Respondendo a{" "}
+              {replyTarget.direction === "in" ? contact?.firstName ?? "contato" : "você"}
+            </p>
+            <p className="mt-0.5 truncate text-xs text-slate-600">{msgSnippet(replyTarget)}</p>
+          </div>
+          <button
+            onClick={clearReply}
+            title="Cancelar resposta"
+            className="flex size-6 shrink-0 items-center justify-center self-center rounded-md text-slate-400 hover:bg-slate-200 hover:text-slate-600"
+          >
+            <X className="size-3.5" />
+          </button>
         </div>
       )}
       <Textarea
