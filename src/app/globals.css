@@ -131,43 +131,43 @@
   outline: none;
 }
 
-/* ====== DARK "brilhante" — navy profundo, superfícies em camadas ====== */
+/* ====== DARK grafite (estilo Linear/Vercel) — neutro, limpo, índigo vibrante ====== */
 .dark {
-  --background: #080d1a;
-  --foreground: #eaeefb;
-  --card: #151d34;
-  --card-foreground: #eaeefb;
-  --popover: #151d34;
-  --popover-foreground: #eaeefb;
+  --background: #0a0b0f;
+  --foreground: #e7e9ef;
+  --card: #16181f;
+  --card-foreground: #e7e9ef;
+  --popover: #16181f;
+  --popover-foreground: #e7e9ef;
   --primary: #6366f1;
   --primary-foreground: #ffffff;
-  --secondary: #1b2540;
-  --secondary-foreground: #eaeefb;
-  --muted: #1b2540;
-  --muted-foreground: #9aa6c6;
-  --accent: #232f52;
-  --accent-foreground: #eaeefb;
+  --secondary: #1c1f27;
+  --secondary-foreground: #e7e9ef;
+  --muted: #1c1f27;
+  --muted-foreground: #969ba8;
+  --accent: #22262f;
+  --accent-foreground: #e7e9ef;
   --destructive: #f87171;
-  --border: #2a3860;
-  --input: #2a3860;
-  --ring: #818cf8;
+  --border: #262a34;
+  --input: #262a34;
+  --ring: #6366f1;
   --chart-1: #818cf8;
   --chart-2: #22d3ee;
   --chart-3: #34d399;
   --chart-4: #fbbf24;
   --chart-5: #f472b6;
-  --sidebar: #0a1122;
-  --sidebar-foreground: #eaeefb;
+  --sidebar: #0c0d12;
+  --sidebar-foreground: #e7e9ef;
   --sidebar-primary: #6366f1;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #1b2540;
-  --sidebar-accent-foreground: #eaeefb;
-  --sidebar-border: #2a3860;
-  --sidebar-ring: #818cf8;
+  --sidebar-accent: #1c1f27;
+  --sidebar-accent-foreground: #e7e9ef;
+  --sidebar-border: #262a34;
+  --sidebar-ring: #6366f1;
 
   /* Marca no dark */
-  --lito-sidebar: #0a1122;
-  --lito-sidebar-hover: #1a2444;
+  --lito-sidebar: #0c0d12;
+  --lito-sidebar-hover: #1c1f27;
   --lito-sidebar-accent: #818cf8;
 }
 
@@ -188,35 +188,35 @@
    text-slate-*, badges...) para a paleta navy+índigo. `.dark .x`
    tem especificidade maior que a utility, então vence sem !important.
    ============================================================ */
-.dark body { background-color: #080d1a; color: #eaeefb; }
+.dark body { background-color: #0a0b0f; color: #e7e9ef; }
 
-/* Superfícies em CAMADAS: fundo escuro → painéis → cards que se destacam. */
-.dark .bg-white { background-color: #151d34; }        /* cards, balão recebido */
-.dark .bg-slate-50, .dark .bg-gray-50 { background-color: #0c1428; }  /* painéis/thread */
-.dark .bg-slate-100, .dark .bg-gray-100 { background-color: #1c2748; }
-.dark .bg-slate-200 { background-color: #26355c; }
-.dark .bg-slate-800, .dark .bg-slate-900, .dark .bg-black { background-color: #0a1122; }
+/* Superfícies em CAMADAS: fundo grafite → painéis → cards que se destacam. */
+.dark .bg-white { background-color: #16181f; }        /* cards */
+.dark .bg-slate-50, .dark .bg-gray-50 { background-color: #101116; }  /* painéis/thread */
+.dark .bg-slate-100, .dark .bg-gray-100 { background-color: #20232d; }  /* balão recebido */
+.dark .bg-slate-200 { background-color: #2a2e3a; }
+.dark .bg-slate-800, .dark .bg-slate-900, .dark .bg-black { background-color: #0c0d12; }
 
-/* Texto */
-.dark .text-slate-900, .dark .text-gray-900, .dark .text-black { color: #eef2fb; }
-.dark .text-slate-800, .dark .text-gray-800 { color: #dbe2f2; }
-.dark .text-slate-700, .dark .text-gray-700 { color: #c6d0e6; }
-.dark .text-slate-600, .dark .text-gray-600 { color: #aab7d4; }
-.dark .text-slate-500, .dark .text-gray-500 { color: #94a3c2; }
-.dark .text-slate-400, .dark .text-gray-400 { color: #7b8ab0; }
+/* Texto (neutro) */
+.dark .text-slate-900, .dark .text-gray-900, .dark .text-black { color: #f0f1f5; }
+.dark .text-slate-800, .dark .text-gray-800 { color: #dfe1e8; }
+.dark .text-slate-700, .dark .text-gray-700 { color: #c9ccd6; }
+.dark .text-slate-600, .dark .text-gray-600 { color: #aeb2bf; }
+.dark .text-slate-500, .dark .text-gray-500 { color: #969ba8; }
+.dark .text-slate-400, .dark .text-gray-400 { color: #7c8290; }
 .dark .text-white { color: #ffffff; }
 
 /* Bordas explícitas */
 .dark .border-slate-100, .dark .border-slate-200, .dark .border-slate-300,
-.dark .border-gray-100, .dark .border-gray-200, .dark .border-gray-300 { border-color: #27324f; }
+.dark .border-gray-100, .dark .border-gray-200, .dark .border-gray-300 { border-color: #262a34; }
 
 /* Divisores/hover */
-.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: #27324f; }
-.dark .hover\:bg-slate-50:hover, .dark .hover\:bg-gray-50:hover { background-color: #1a2440; }
-.dark .hover\:bg-slate-100:hover, .dark .hover\:bg-gray-100:hover { background-color: #22304f; }
+.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: #262a34; }
+.dark .hover\:bg-slate-50:hover, .dark .hover\:bg-gray-50:hover { background-color: #1c1f27; }
+.dark .hover\:bg-slate-100:hover, .dark .hover\:bg-gray-100:hover { background-color: #262a34; }
 
 /* Placeholder */
-.dark ::placeholder { color: #6b7a9c; }
+.dark ::placeholder { color: #6b7080; }
 
 /* Badges/realces tonais — fundo translúcido + texto claro (mantém a "cor") */
 .dark .bg-indigo-50, .dark .bg-indigo-100 { background-color: rgba(129,140,248,0.16); }
