@@ -25,13 +25,18 @@ import {
   dbWorkflowActions,
   EXECUTABLE_ACTIONS,
 } from "@/lib/data/repos/db/workflows";
+import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
 import type { NodeCategory, WorkflowNode } from "@/lib/data/types";
+
+/** Gatilhos que operam sobre mensagens de WhatsApp — podem escolher o número. */
+const CHANNEL_TRIGGERS = new Set(["cliente-respondeu"]);
 
 /** Campos de configuração por ação (o que o executor lê em `steps[].config`). */
 const CONFIG_FIELDS: Record<
   string,
   { name: string; label: string; type: "text" | "textarea" | "number"; placeholder?: string }[]
 > = {
+  "enviar-whatsapp": [{ name: "message", label: "Mensagem", type: "textarea", placeholder: "Ex.: Oi {{nome}}! Recebemos sua mensagem, já te respondemos 😊" }],
   "nota-interna": [{ name: "body", label: "Texto da nota", type: "textarea", placeholder: "Ex.: Cliente respondeu — dar atenção" }],
   "adicionar-tag": [{ name: "tag", label: "Tag", type: "text", placeholder: "Ex.: respondeu" }],
   "remover-tag": [{ name: "tag", label: "Tag", type: "text", placeholder: "Ex.: frio" }],
@@ -71,13 +76,16 @@ function NodeCard({
   onRemove,
   onSaveConfig,
   isTrigger,
+  channels,
 }: {
   node: WorkflowNode;
   onRemove: () => void;
   onSaveConfig?: (config: Record<string, unknown>) => void;
   isTrigger?: boolean;
+  channels?: { id: string; name: string; phoneE164?: string | null }[];
 }) {
   const Icon = CATEGORY_ICON[node.category];
+  const showChannel = isTrigger && CHANNEL_TRIGGERS.has(node.key);
   const fields = !isTrigger ? CONFIG_FIELDS[node.key] : undefined;
   const [cfg, setCfg] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
@@ -116,6 +124,30 @@ function NodeCard({
           <p className="truncate text-xs font-semibold text-slate-800">{node.label}</p>
         </div>
       </div>
+
+      {showChannel && (
+        <div className="mt-3 border-t pt-3">
+          <span className="mb-0.5 block text-[10px] font-medium text-slate-500">
+            Número do WhatsApp
+          </span>
+          <select
+            value={String((node.config ?? {}).channelId ?? "")}
+            onChange={(e) => onSaveConfig?.({ ...(node.config ?? {}), channelId: e.target.value })}
+            className="w-full rounded-md border px-2 py-1 text-xs outline-none focus:border-indigo-400"
+          >
+            <option value="">Todos os números</option>
+            {(channels ?? []).map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+                {c.phoneE164 ? ` · ${c.phoneE164}` : ""}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-[10px] text-slate-400">
+            O fluxo só dispara para mensagens deste número.
+          </p>
+        </div>
+      )}
 
       {fields && (
         <div className="mt-3 space-y-2 border-t pt-3">
@@ -180,6 +212,8 @@ function Connector({ onAdd }: { onAdd: () => void }) {
 export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const workflow = useDbWorkflow(id);
+  const { channels } = useWhatsappChannels();
+  const activeChannels = channels.filter((c) => c.active);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerMode, setPickerMode] = useState<"trigger" | "action">("trigger");
 
@@ -274,7 +308,11 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
           <NodeCard
             node={workflow.trigger}
             isTrigger
+            channels={activeChannels}
             onRemove={() => void dbWorkflowActions.removeNode(id, workflow.trigger!.id)}
+            onSaveConfig={(config) =>
+              void dbWorkflowActions.updateNodeConfig(id, workflow.trigger!.id, config)
+            }
           />
         ) : (
           <button

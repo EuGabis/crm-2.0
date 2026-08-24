@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sendText } from "@/lib/whatsapp/client";
 import { brand } from "@/lib/config/brand";
 import { senderAddress, replyToAddress } from "@/lib/email/sender";
 import { renderCampaignEmail } from "@/lib/email/marketing-template";
@@ -141,14 +142,75 @@ export async function runAction(step: Step, ctx: RunContext): Promise<ActionResu
     return { status: "ok", message: `Aguardando até ${waitUntil}`, waitUntil };
   }
 
-  if (step.key === "enviar-whatsapp" || step.key === "enviar-sms") {
-    return { status: "skipped", message: "Canal não conectado" };
+  if (step.key === "enviar-sms") {
+    return { status: "skipped", message: "SMS ainda não conectado" };
   }
 
   const contact = await loadContact(db, ctx.contactId);
   const vars = templateVars(contact);
 
   switch (step.key) {
+    case "enviar-whatsapp": {
+      if (!contact) return { status: "skipped", message: "Sem contato no run" };
+      if (contact.dnd) return { status: "skipped", message: "Contato marcado como não perturbe" };
+      if (!contact.phone) return { status: "skipped", message: "Contato sem telefone" };
+
+      const text = renderTemplate(
+        str(config, "message") || str(config, "text") || str(config, "body"),
+        vars,
+      );
+      if (!text) return { status: "skipped", message: "Mensagem não configurada" };
+
+      // Responde no MESMO número que o cliente escreveu (a conversa de WhatsApp
+      // mais recente do contato — que é a do gatilho quando ele acabou de mandar).
+      const { data: conv } = await db
+        .from("conversations")
+        .select("id, channel_id")
+        .eq("contact_id", contact.id)
+        .eq("channel", "whatsapp")
+        .order("last_message_at", { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle();
+      const conversation = conv as { id: string; channel_id: string | null } | null;
+      if (!conversation?.channel_id) {
+        return { status: "skipped", message: "Contato sem conversa de WhatsApp" };
+      }
+      const { data: ch } = await db
+        .from("whatsapp_channels")
+        .select("phone_number_id")
+        .eq("id", conversation.channel_id)
+        .maybeSingle();
+      const phoneNumberId = (ch as { phone_number_id: string } | null)?.phone_number_id;
+      if (!phoneNumberId) return { status: "skipped", message: "Número de WhatsApp não encontrado" };
+
+      try {
+        const resp = await sendText(phoneNumberId, contact.phone, text);
+        const waId = (resp as any)?.messages?.[0]?.id ?? null;
+        await db.from("messages").insert({
+          location_id: ctx.locationId,
+          conversation_id: conversation.id,
+          direction: "out",
+          type: "text",
+          channel: "whatsapp",
+          channel_id: conversation.channel_id,
+          body: text,
+          wa_message_id: waId,
+          status: "sent",
+          automated: true,
+        });
+        await db
+          .from("conversations")
+          .update({ last_message_at: new Date().toISOString(), last_message_preview: text })
+          .eq("id", conversation.id);
+        return { status: "ok", message: `WhatsApp enviado para ${contact.phone}` };
+      } catch (error) {
+        return {
+          status: "error",
+          message: error instanceof Error ? error.message : "Falha ao enviar WhatsApp",
+        };
+      }
+    }
+
     case "adicionar-tag": {
       if (!contact) return { status: "skipped", message: "Sem contato no run" };
       const toAdd = tagList(config);
