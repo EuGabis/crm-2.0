@@ -31,7 +31,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useWebphone } from "@/components/layout/webphone-store";
 import { LeadDetailDialog } from "@/components/pipeline/lead-detail-dialog";
 import { dbContactActions, useDbContact, useDbTeam } from "@/lib/data/repos/db/contacts";
 import { conversationActions } from "@/lib/data/repos/db/conversations";
@@ -41,6 +40,7 @@ import { appointmentActions } from "@/lib/data/repos/db/appointments";
 import { formatBRL } from "@/lib/data/repos/opportunities";
 import type { Opportunity, User } from "@/lib/data/types";
 import { cn } from "@/lib/utils";
+import { telHref } from "@/lib/phone";
 
 /**
  * Ações rápidas do card. Antes eram seis ícones que só chamavam
@@ -137,7 +137,6 @@ export function OpportunityCard({
   const router = useRouter();
   const { contact } = useDbContact(opportunity.contactId);
   const team = useDbTeam();
-  const callContact = useWebphone((s) => s.callContact);
 
   const [openAction, setOpenAction] = useState<string | null>(null);
   const [tagInput, setTagInput] = useState("");
@@ -164,8 +163,9 @@ export function OpportunityCard({
       toast.error("Contato sem telefone cadastrado");
       return;
     }
-    // Abre o webphone da topbar com o número já no visor.
-    callContact(contact.phone, `${contact.firstName} ${contact.lastName}`.trim());
+    // O webphone saiu da barra superior (não completava chamada); quem liga de
+    // verdade é o discador do aparelho.
+    window.location.href = telHref(contact.phone);
   };
 
   const openConversation = async () => {

@@ -3,9 +3,14 @@
 import { create } from "zustand";
 
 /**
- * O webphone vive num popover da topbar, mas quem manda ligar está espalhado
- * pelo app (card do kanban, cabeçalho da conversa). Estado global porque o
- * gatilho e o painel não têm relação de pai/filho.
+ * Estado do teclado do webphone (Configurações → Telefonia).
+ *
+ * Já foi um popover da barra superior acionado de longe — do card do funil e do
+ * cabeçalho da conversa —, e o estado é global por causa disso. O popover saiu
+ * em 2026-08-24 (prometia ligação e não completava nenhuma) e esses dois botões
+ * passaram a abrir o discador do aparelho, então hoje só o próprio painel lê
+ * daqui. `open`/`setOpen`/`callContact` continuam aqui para o dia em que houver
+ * provedor de voz e o painel voltar a ser chamado de fora.
  */
 interface WebphoneState {
   open: boolean;

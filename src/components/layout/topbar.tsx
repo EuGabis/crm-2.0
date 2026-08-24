@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Headset, LifeBuoy, LogOut, Phone } from "lucide-react";
+import { LogOut } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -11,18 +11,25 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { createClient } from "@/lib/supabase/client";
 import { clearBrowserSession } from "@/lib/auth/session-marker";
 import { NotificationsPanel } from "./notifications-panel";
-import { SupportPanel } from "./support-panel";
-import { WebphonePanel } from "./webphone-panel";
-import { useWebphone } from "./webphone-store";
 
+/**
+ * Suporte, Webphone e o botão verde de ligar SAÍRAM da barra superior
+ * (2026-08-24, a pedido do Gabriel): eram os três primeiros elementos da tela e
+ * nenhum dos três fazia o que prometia — o Suporte abria um painel de contato
+ * que não abre ticket, e o webphone não completa chamada (não há provedor de
+ * voz; o botão verde só reabria o MESMO painel do Webphone).
+ *
+ * O painel do webphone continua existindo em Configurações → Telefonia, que é
+ * onde ele volta a ser oferecido no dia em que houver VoIP de verdade. Quem
+ * dependia do popover da topbar para ligar — o card do funil e o cabeçalho da
+ * conversa — passou a abrir o discador do aparelho (`tel:`), que é o caminho
+ * que de fato completa a ligação hoje.
+ */
 export function Topbar() {
-  const [supportOpen, setSupportOpen] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
-  const { open: webphoneOpen, setOpen: setWebphoneOpen } = useWebphone();
 
   useEffect(() => {
     const supabase = createClient();
@@ -46,36 +53,6 @@ export function Topbar() {
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-end gap-2 border-b bg-[#0d1117] px-4">
-      <button
-        onClick={() => setSupportOpen(true)}
-        className="flex items-center gap-1.5 rounded-full bg-lime-400 px-3 py-1 text-xs font-bold text-lime-950 hover:bg-lime-300"
-      >
-        <LifeBuoy className="size-3.5" />
-        Suporte
-      </button>
-      {/* Popover controlado: "Ligar" no card do kanban e no cabeçalho da
-          conversa abrem ESTE painel, com o número do contato já no visor. */}
-      <Popover open={webphoneOpen} onOpenChange={setWebphoneOpen}>
-        <PopoverTrigger
-          render={
-            <button className="flex items-center gap-1.5 rounded-full bg-slate-700 px-3 py-1 text-xs font-semibold text-white hover:bg-slate-600" />
-          }
-        >
-          <Headset className="size-3.5" />
-          Webphone
-        </PopoverTrigger>
-        <PopoverContent align="end" className="p-0">
-          <WebphonePanel />
-        </PopoverContent>
-      </Popover>
-      {/* Abria um segundo popover com o MESMO painel; agora só chama o de cima. */}
-      <button
-        onClick={() => setWebphoneOpen(true)}
-        title="Abrir o webphone"
-        className="flex size-7 items-center justify-center rounded-full bg-emerald-500 text-white hover:bg-emerald-400"
-      >
-        <Phone className="size-3.5" />
-      </button>
       {/* O sino agora abre a central de verdade (avisos derivados de conversas,
           agenda e agendamentos que falharam), no lugar do toast "chega em breve". */}
       <NotificationsPanel />
@@ -97,7 +74,6 @@ export function Topbar() {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <SupportPanel open={supportOpen} onOpenChange={setSupportOpen} />
     </header>
   );
 }

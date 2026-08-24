@@ -37,7 +37,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SlaBadge } from "@/components/shared/sla-badge";
-import { useWebphone } from "@/components/layout/webphone-store";
 import { contactName } from "@/lib/data/repos/contacts";
 import { useDbContact } from "@/lib/data/repos/db/contacts";
 import {
@@ -51,6 +50,7 @@ import { useMyMembership, useTeam } from "@/lib/data/repos/db/team";
 import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
 import type { Conversation, Message } from "@/lib/data/types";
 import { cn } from "@/lib/utils";
+import { telHref } from "@/lib/phone";
 
 /** Responsável pelo atendimento — grava em `conversations.assigned_to` (0024). */
 function AssignPicker({
@@ -490,7 +490,6 @@ export function Thread({
   const { contact } = useDbContact(conversation?.contactId ?? null);
   const messages = useMessages(conversationId);
   const loadingMessages = useMessagesLoading(conversationId);
-  const callContact = useWebphone((s) => s.callContact);
   const { isAdmin } = useMyMembership();
   const { channels } = useWhatsappChannels();
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -665,9 +664,11 @@ export function Thread({
                 toast.error("Contato sem telefone cadastrado");
                 return;
               }
-              callContact(contact.phone, contactName(contact));
+              // O webphone saiu da barra superior (não completava chamada), e
+              // quem de fato liga é o discador do aparelho.
+              window.location.href = telHref(contact.phone);
             }}
-            title="Abrir o webphone com este número"
+            title="Ligar para este número"
             className="flex items-center gap-1.5 rounded-full bg-[var(--lito-wa-green)] px-3 py-1 text-xs font-bold text-white hover:opacity-90"
           >
             <Phone className="size-3.5" /> Ligar
