@@ -141,6 +141,11 @@ function matchOption(options: BotOption[], replyId: string | null, text: string)
   }
   const t = normalize(text);
   if (!t) return null;
+  // Resposta por NÚMERO (quando a lista veio como texto numerado: "1", "2"...).
+  if (/^\d{1,2}$/.test(t)) {
+    const idx = Number(t) - 1;
+    if (idx >= 0 && idx < options.length) return options[idx];
+  }
   return (
     options.find((o) => normalize(o.value ?? o.title) === t || normalize(o.title) === t) ?? null
   );
@@ -185,21 +190,38 @@ async function botSendList(
   buttonLabel: string | undefined,
   options: { id: string; title: string; description?: string }[],
 ) {
+  // Só manda opções com título — a Meta rejeita a lista inteira se houver linha
+  // vazia. Se sobrar 0, cai direto no texto.
+  const clean = options.filter((o) => (o.title ?? "").trim());
   let waId: string | null = null;
-  try {
-    const resp: any = await sendInteractiveList(
-      ctx.channel.phone_number_id,
-      toWhatsAppNumber(ctx.contact.phone),
-      text,
-      buttonLabel ?? "Ver opções",
-      options,
-    );
-    waId = resp?.messages?.[0]?.id ?? null;
-  } catch {
-    // idem
+  if (clean.length > 0) {
+    try {
+      const resp: any = await sendInteractiveList(
+        ctx.channel.phone_number_id,
+        toWhatsAppNumber(ctx.contact.phone),
+        text,
+        buttonLabel ?? "Ver opções",
+        clean,
+      );
+      waId = resp?.messages?.[0]?.id ?? null;
+    } catch {
+      // interativo rejeitado → cai no fallback de texto abaixo
+    }
   }
-  // No inbox mostra a pergunta (as opções são clicáveis no WhatsApp do cliente).
-  await recordOut(ctx, text, waId);
+  if (waId) {
+    // No inbox mostra a pergunta (as opções são clicáveis no WhatsApp do cliente).
+    await recordOut(ctx, text, waId);
+    return;
+  }
+  // FALLBACK: o interativo falhou — manda as opções como TEXTO numerado, para o
+  // cliente NUNCA ficar sem ver a lista (e ele responde pelo número ou pelo nome).
+  const lines = clean
+    .map((o, i) => `${i + 1}. ${o.title}${o.description ? ` — ${o.description}` : ""}`)
+    .join("\n");
+  const fallback = lines
+    ? `${text}\n\n${lines}\n\nResponda com o número ou o nome da opção.`
+    : text;
+  await botSend(ctx, fallback);
 }
 
 async function saveSession(

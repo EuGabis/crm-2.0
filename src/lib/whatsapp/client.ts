@@ -219,11 +219,19 @@ export function sendInteractiveList(
   buttonLabel: string,
   options: InteractiveOption[],
 ) {
-  const rows = options.slice(0, 10).map((o) => ({
-    id: o.id.slice(0, 200),
-    title: o.title.slice(0, 24), // limite da Meta
-    ...(o.description ? { description: o.description.slice(0, 72) } : {}),
-  }));
+  // A Meta rejeita a lista inteira se houver título vazio ou ids repetidos.
+  const seen = new Set<string>();
+  const rows = options.slice(0, 10).map((o, i) => {
+    let id = (o.id || `opt_${i}`).slice(0, 200);
+    let n = 1;
+    while (seen.has(id)) id = `${(o.id || `opt_${i}`).slice(0, 190)}_${n++}`;
+    seen.add(id);
+    return {
+      id,
+      title: ((o.title || "").trim() || `Opção ${i + 1}`).slice(0, 24), // limite da Meta
+      ...(o.description ? { description: o.description.slice(0, 72) } : {}),
+    };
+  });
   return graph(`${phoneNumberId}/messages`, {
     method: "POST",
     body: JSON.stringify({
