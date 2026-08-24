@@ -45,11 +45,13 @@ export function setFontPx(px: number) {
   applyFont(px);
 }
 
-/** Script (string) executado inline no <head> para aplicar sem flash. */
+/**
+ * Script (string) executado inline no <head> para aplicar sem flash.
+ * OBS: o TEMA (dark) está DESLIGADO por enquanto — o dark será refeito tela por
+ * tela, de forma profissional. Por ora só aplica o tamanho de fonte.
+ */
 export const PREFS_BOOT_SCRIPT = `
 (function(){try{
-  var t = localStorage.getItem('${THEME_KEY}');
-  if (t === 'dark') document.documentElement.classList.add('dark');
   var f = Number(localStorage.getItem('${FONT_KEY}'));
   if ([${FONT_SIZES.join(",")}].indexOf(f) !== -1) document.documentElement.style.fontSize = f + 'px';
 }catch(e){}})();

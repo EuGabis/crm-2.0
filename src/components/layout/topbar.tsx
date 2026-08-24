@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { LogOut, Minus, Moon, Plus, SunMedium } from "lucide-react";
+import { LogOut, Minus, Plus, Type } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -14,14 +14,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { createClient } from "@/lib/supabase/client";
 import { clearBrowserSession } from "@/lib/auth/session-marker";
-import {
-  FONT_SIZES,
-  getFontPx,
-  getTheme,
-  setFontPx,
-  setTheme,
-  type ThemePref,
-} from "@/lib/ui/prefs";
+import { FONT_SIZES, getFontPx, setFontPx } from "@/lib/ui/prefs";
 import { NotificationsPanel } from "./notifications-panel";
 
 /**
@@ -80,20 +73,15 @@ export function Topbar() {
   );
 }
 
-/** Controle de aparência: tema claro/escuro + tamanho da fonte (por usuário). */
+/** Controle de aparência: tamanho da fonte (por usuário). O tema escuro está
+ *  temporariamente desligado — será refeito tela por tela. */
 function AppearancePopover() {
-  const [theme, setThemeState] = useState<ThemePref>("light");
   const [fontPx, setFontState] = useState<number>(16);
 
   useEffect(() => {
-    setThemeState(getTheme());
     setFontState(getFontPx());
   }, []);
 
-  const changeTheme = (t: ThemePref) => {
-    setTheme(t);
-    setThemeState(t);
-  };
   const stepFont = (dir: 1 | -1) => {
     const idx = FONT_SIZES.indexOf(fontPx);
     const next = FONT_SIZES[Math.min(FONT_SIZES.length - 1, Math.max(0, idx + dir))];
@@ -106,34 +94,14 @@ function AppearancePopover() {
       <PopoverTrigger
         render={
           <button
-            title="Aparência (tema e fonte)"
+            title="Tamanho da fonte"
             className="flex size-7 items-center justify-center rounded-full bg-slate-700 text-white hover:bg-slate-600"
           />
         }
       >
-        {theme === "dark" ? <Moon className="size-3.5" /> : <SunMedium className="size-3.5" />}
+        <Type className="size-3.5" />
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 p-3">
-        <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Tema</p>
-        <div className="mb-3 grid grid-cols-2 gap-1.5">
-          <button
-            onClick={() => changeTheme("light")}
-            className={`flex items-center justify-center gap-1.5 rounded-lg border py-1.5 text-xs font-medium ${
-              theme === "light" ? "border-indigo-400 bg-indigo-50 text-indigo-700" : "text-slate-600"
-            }`}
-          >
-            <SunMedium className="size-3.5" /> Claro
-          </button>
-          <button
-            onClick={() => changeTheme("dark")}
-            className={`flex items-center justify-center gap-1.5 rounded-lg border py-1.5 text-xs font-medium ${
-              theme === "dark" ? "border-indigo-400 bg-indigo-50 text-indigo-700" : "text-slate-600"
-            }`}
-          >
-            <Moon className="size-3.5" /> Escuro
-          </button>
-        </div>
-
         <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">
           Tamanho da fonte
         </p>

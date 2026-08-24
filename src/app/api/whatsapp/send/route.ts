@@ -110,7 +110,9 @@ export async function POST(request: Request) {
       }
       if (!text?.trim()) return Response.json({ error: "Mensagem vazia" }, { status: 400 });
       // Prefixa com o nome de quem enviou (o cliente vê quem está falando).
-      const outText = senderName ? `*${senderName}:* ${text.trim()}` : text.trim();
+      // Nome numa linha, linha em branco, e a mensagem embaixo. As quebras que o
+      // atendente digitou são preservadas (só tira espaço das pontas).
+      const outText = senderName ? `*${senderName}:*\n\n${text.trim()}` : text.trim();
       waResp = await sendText(channel.phone_number_id, to, outText);
       bodyText = outText;
     }
