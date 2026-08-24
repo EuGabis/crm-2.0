@@ -139,8 +139,11 @@ Supabase). Peças:
 - Env: `RESEND_API_KEY` (privada), `EMAIL_FROM`, `NEXT_PUBLIC_APP_URL`.
   Provisionado via Vercel Marketplace (`vercel integration add resend/resend-email`);
   `vercel env pull` traz a chave. Projeto Vercel: `lito-crm`.
-- Sem domínio verificado no Resend, use `onboarding@resend.dev` (só entrega para o
-  e-mail dono da conta) — para produção, verificar domínio no painel do Resend.
+- Domínio verificado no Resend: **`news.litoaviation.com`** (região sa-east-1,
+  DNS na Hostinger). `EMAIL_FROM` usa esse domínio (ex.:
+  `Lito CRM <nao-responder@news.litoaviation.com>`) e o envio funciona para
+  qualquer destinatário. Registros DKIM/SPF/MX vivem na zona `litoaviation.com`
+  com host `resend._domainkey.news` e `send.news`.
 
 ## Automações — EM CONSTRUÇÃO (leia antes de continuar)
 
@@ -208,6 +211,9 @@ os módulos ainda não migrados continuam importando dos repos mock em
   gestão de pipelines e fases, mover/excluir em massa
 - `db/conversations.ts` — conversas/mensagens + Realtime, trechos
 - `db/appointments.ts` — compromissos do calendário
+- `db/workflows.ts` — fluxos de automação (lista + builder): CRUD de fluxo,
+  trigger/actions (jsonb) persistentes, publicar/despublicar. O mapeamento para
+  o motor real (`trigger_key`/`steps`) ainda é das Tarefas 5–7.
 - `db/team.ts` — membros, convites, permissões; `useMyMembership().can(moduleKey)`
   é o guard de navegação (admin sempre true; usuário: só bloqueia se explicitamente
   `false` — membros antigos com `{}` continuam vendo tudo)

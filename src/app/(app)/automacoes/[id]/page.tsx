@@ -19,7 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { NodePicker } from "@/components/automations/node-picker";
 import type { CatalogNode } from "@/components/automations/node-catalog";
-import { useWorkflow, workflowActions } from "@/lib/data/repos/workflows";
+import { useDbWorkflow, workflowDbActions } from "@/lib/data/repos/db/workflows";
 import type { NodeCategory, WorkflowNode } from "@/lib/data/types";
 
 const CATEGORY_ICON: Record<NodeCategory, typeof Zap> = {
@@ -91,9 +91,13 @@ function Connector({ onAdd }: { onAdd: () => void }) {
 
 export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const workflow = useWorkflow(id);
+  const { workflow, loading } = useDbWorkflow(id);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerMode, setPickerMode] = useState<"trigger" | "action">("trigger");
+
+  if (loading) {
+    return <div className="p-6 text-sm text-slate-500">Carregando fluxo…</div>;
+  }
 
   if (!workflow) {
     return (
@@ -111,7 +115,7 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
     setPickerOpen(true);
   };
 
-  const onPick = (node: CatalogNode, kind: "trigger" | "action") => {
+  const onPick = async (node: CatalogNode, kind: "trigger" | "action") => {
     const wfNode: WorkflowNode = {
       id: `n-${nodeSeq++}`,
       kind,
@@ -119,13 +123,22 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
       label: node.label,
       category: node.category,
     };
-    if (kind === "trigger") {
-      workflowActions.setTrigger(id, wfNode);
-      toast.success(`Acionador "${node.label}" definido`);
-    } else {
-      workflowActions.addAction(id, wfNode);
-      toast.success(`Ação "${node.label}" adicionada`);
+    const ok =
+      kind === "trigger"
+        ? await workflowDbActions.setTrigger(id, wfNode)
+        : await workflowDbActions.addAction(id, wfNode);
+    if (!ok) {
+      toast.error("Não foi possível salvar o fluxo");
+      return;
     }
+    toast.success(
+      kind === "trigger" ? `Acionador "${node.label}" definido` : `Ação "${node.label}" adicionada`
+    );
+  };
+
+  const removeNode = async (nodeId: string) => {
+    const ok = await workflowDbActions.removeNode(id, nodeId);
+    if (!ok) toast.error("Não foi possível remover o nó");
   };
 
   return (
@@ -154,8 +167,12 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
             {workflow.status === "published" ? "Publicado" : "Rascunho"}
             <Switch
               checked={workflow.status === "published"}
-              onCheckedChange={() => {
-                workflowActions.toggleStatus(id);
+              onCheckedChange={async () => {
+                const ok = await workflowDbActions.toggleStatus(id);
+                if (!ok) {
+                  toast.error("Não foi possível atualizar o status");
+                  return;
+                }
                 toast.success(
                   workflow.status === "published"
                     ? "Fluxo despublicado (rascunho)"
@@ -178,7 +195,7 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
           <NodeCard
             node={workflow.trigger}
             isTrigger
-            onRemove={() => workflowActions.removeNode(id, workflow.trigger!.id)}
+            onRemove={() => removeNode(workflow.trigger!.id)}
           />
         ) : (
           <button
@@ -192,7 +209,7 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
         {workflow.actions.map((action) => (
           <div key={action.id} className="flex flex-col items-center">
             <Connector onAdd={() => openPicker("action")} />
-            <NodeCard node={action} onRemove={() => workflowActions.removeNode(id, action.id)} />
+            <NodeCard node={action} onRemove={() => removeNode(action.id)} />
           </div>
         ))}
 

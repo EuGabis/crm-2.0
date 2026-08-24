@@ -2,8 +2,9 @@
 // Uso: node scripts/test-email.mjs destinatario@exemplo.com
 //
 // Lê RESEND_API_KEY e EMAIL_FROM do .env.local.
-// Sem domínio verificado no Resend, o remetente precisa ser
-// "onboarding@resend.dev" e o destinatário o e-mail dono da conta.
+// O domínio news.litoaviation.com está verificado no Resend, então o
+// remetente (EMAIL_FROM) deve usar esse domínio e o e-mail pode ir para
+// qualquer destinatário.
 import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

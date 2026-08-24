@@ -10,7 +10,16 @@ import { SubNav } from "@/components/layout/subnav";
 import { DataTable, type Column } from "@/components/shared/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
   Select,
@@ -19,7 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useWorkflows, workflowActions } from "@/lib/data/repos/workflows";
+import { useDbWorkflows, workflowDbActions } from "@/lib/data/repos/db/workflows";
 import type { Workflow } from "@/lib/data/types";
 
 const TABS = [{ label: "Fluxos de trabalho" }, { label: "Configurações globais" }];
@@ -27,7 +36,11 @@ const TABS = [{ label: "Fluxos de trabalho" }, { label: "Configurações globais
 export default function AutomacoesPage() {
   const router = useRouter();
   const [tab, setTab] = useState("Fluxos de trabalho");
-  const workflows = useWorkflows();
+  const { workflows, loading } = useDbWorkflows();
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [creating, setCreating] = useState(false);
 
   const folders = useMemo(() => {
     const set = new Set<string>();
@@ -35,10 +48,22 @@ export default function AutomacoesPage() {
     return [...set].sort();
   }, [workflows]);
 
-  const create = () => {
-    const name = window.prompt("Nome do novo fluxo de trabalho:", "Novo fluxo");
-    if (!name?.trim()) return;
-    const id = workflowActions.create(name.trim());
+  const openCreate = () => {
+    setName("");
+    setCreateOpen(true);
+  };
+
+  const submitCreate = async () => {
+    const trimmed = name.trim();
+    if (!trimmed || creating) return;
+    setCreating(true);
+    const id = await workflowDbActions.create(trimmed);
+    setCreating(false);
+    if (!id) {
+      toast.error("Não foi possível criar o fluxo");
+      return;
+    }
+    setCreateOpen(false);
     toast.success("Fluxo criado como rascunho");
     router.push(`/automacoes/${id}`);
   };
@@ -129,22 +154,67 @@ export default function AutomacoesPage() {
                 >
                   <Sparkles className="size-3.5" /> Construa usando IA
                 </Button>
-                <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={create}>
+                <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={openCreate}>
                   <Plus className="size-3.5" /> Criar fluxo de trabalho
                 </Button>
               </div>
             </div>
-            <DataTable
-              data={workflows}
-              columns={columns}
-              searchPlaceholder="Pesquisar fluxos"
-              searchFn={(w, q) => `${w.name} ${w.folder ?? ""}`.toLowerCase().includes(q)}
-              pageSize={10}
-              onRowClick={(w) => router.push(`/automacoes/${w.id}`)}
-            />
+            {loading ? (
+              <div className="rounded-xl border bg-white p-10 text-center text-sm text-slate-500">
+                Carregando fluxos…
+              </div>
+            ) : (
+              <DataTable
+                data={workflows}
+                columns={columns}
+                searchPlaceholder="Pesquisar fluxos"
+                searchFn={(w, q) => `${w.name} ${w.folder ?? ""}`.toLowerCase().includes(q)}
+                pageSize={10}
+                onRowClick={(w) => router.push(`/automacoes/${w.id}`)}
+              />
+            )}
           </>
         )}
       </div>
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Criar fluxo de trabalho</DialogTitle>
+            <DialogDescription>
+              Dê um nome ao fluxo. Ele começa como rascunho e só passa a rodar
+              quando você publicar.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              submitCreate();
+            }}
+            className="space-y-1.5"
+          >
+            <Label htmlFor="workflow-name" className="text-xs">
+              Nome do fluxo
+            </Label>
+            <Input
+              id="workflow-name"
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Ex.: Boas-vindas para novos leads"
+              className="h-9"
+            />
+          </form>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setCreateOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={submitCreate} disabled={!name.trim() || creating}>
+              {creating ? "Criando..." : "Criar fluxo"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
