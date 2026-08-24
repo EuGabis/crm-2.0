@@ -38,6 +38,7 @@ export const ACTIONS: CatalogNode[] = [
   { key: "enviar-whatsapp", label: "Enviar WhatsApp", category: "comunicacao" },
   { key: "enviar-sms", label: "Enviar SMS", category: "comunicacao" },
   { key: "enviar-email", label: "Enviar e-mail", category: "comunicacao" },
+  { key: "nota-interna", label: "Nota interna", category: "comunicacao" },
   { key: "if-else", label: "If/Else", category: "logica" },
   { key: "esperar", label: "Esperar", category: "logica" },
   { key: "ir-para", label: "Ir para", category: "logica" },

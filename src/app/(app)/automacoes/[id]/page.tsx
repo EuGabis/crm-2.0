@@ -16,11 +16,44 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { NodePicker } from "@/components/automations/node-picker";
 import type { CatalogNode } from "@/components/automations/node-catalog";
-import { useWorkflow, workflowActions } from "@/lib/data/repos/workflows";
+import {
+  useDbWorkflow,
+  dbWorkflowActions,
+  EXECUTABLE_ACTIONS,
+} from "@/lib/data/repos/db/workflows";
 import type { NodeCategory, WorkflowNode } from "@/lib/data/types";
+
+/** Campos de configuração por ação (o que o executor lê em `steps[].config`). */
+const CONFIG_FIELDS: Record<
+  string,
+  { name: string; label: string; type: "text" | "textarea" | "number"; placeholder?: string }[]
+> = {
+  "nota-interna": [{ name: "body", label: "Texto da nota", type: "textarea", placeholder: "Ex.: Cliente respondeu — dar atenção" }],
+  "adicionar-tag": [{ name: "tag", label: "Tag", type: "text", placeholder: "Ex.: respondeu" }],
+  "remover-tag": [{ name: "tag", label: "Tag", type: "text", placeholder: "Ex.: frio" }],
+  "adicionar-tarefa": [
+    { name: "title", label: "Título da tarefa", type: "text", placeholder: "Ex.: Ligar para {{nome}}" },
+    { name: "dueInDays", label: "Vence em (dias)", type: "number", placeholder: "1" },
+  ],
+  "enviar-email": [
+    { name: "subject", label: "Assunto", type: "text", placeholder: "Ex.: Obrigado, {{nome}}!" },
+    { name: "body", label: "Corpo", type: "textarea", placeholder: "Escreva o e-mail..." },
+  ],
+  "atualizar-campo": [
+    { name: "field", label: "Campo", type: "text", placeholder: "nome do campo" },
+    { name: "value", label: "Valor", type: "text", placeholder: "novo valor" },
+  ],
+  esperar: [
+    { name: "days", label: "Dias", type: "number", placeholder: "0" },
+    { name: "hours", label: "Horas", type: "number", placeholder: "0" },
+    { name: "minutes", label: "Minutos", type: "number", placeholder: "0" },
+  ],
+  webhook: [{ name: "url", label: "URL do webhook", type: "text", placeholder: "https://..." }],
+};
 
 const CATEGORY_ICON: Record<NodeCategory, typeof Zap> = {
   contato: User,
@@ -36,13 +69,32 @@ let nodeSeq = 5000;
 function NodeCard({
   node,
   onRemove,
+  onSaveConfig,
   isTrigger,
 }: {
   node: WorkflowNode;
   onRemove: () => void;
+  onSaveConfig?: (config: Record<string, unknown>) => void;
   isTrigger?: boolean;
 }) {
   const Icon = CATEGORY_ICON[node.category];
+  const fields = !isTrigger ? CONFIG_FIELDS[node.key] : undefined;
+  const [cfg, setCfg] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    for (const f of fields ?? []) {
+      const v = (node.config ?? {})[f.name];
+      init[f.name] = v == null ? "" : String(v);
+    }
+    return init;
+  });
+  // Ação sem equivalente no motor ainda (ex.: split test, agente IA).
+  const notExecutable = !isTrigger && !EXECUTABLE_ACTIONS.has(node.key);
+
+  const saveField = (name: string) => {
+    if (!onSaveConfig) return;
+    onSaveConfig({ ...(node.config ?? {}), ...cfg, [name]: cfg[name] });
+  };
+
   return (
     <div
       className={`group relative w-72 rounded-xl border-2 bg-white p-3 shadow-sm ${
@@ -64,6 +116,42 @@ function NodeCard({
           <p className="truncate text-xs font-semibold text-slate-800">{node.label}</p>
         </div>
       </div>
+
+      {fields && (
+        <div className="mt-3 space-y-2 border-t pt-3">
+          {fields.map((f) => (
+            <label key={f.name} className="block">
+              <span className="mb-0.5 block text-[10px] font-medium text-slate-500">{f.label}</span>
+              {f.type === "textarea" ? (
+                <textarea
+                  value={cfg[f.name] ?? ""}
+                  onChange={(e) => setCfg((c) => ({ ...c, [f.name]: e.target.value }))}
+                  onBlur={() => saveField(f.name)}
+                  placeholder={f.placeholder}
+                  rows={2}
+                  className="w-full resize-none rounded-md border px-2 py-1 text-xs outline-none focus:border-indigo-400"
+                />
+              ) : (
+                <Input
+                  type={f.type === "number" ? "number" : "text"}
+                  value={cfg[f.name] ?? ""}
+                  onChange={(e) => setCfg((c) => ({ ...c, [f.name]: e.target.value }))}
+                  onBlur={() => saveField(f.name)}
+                  placeholder={f.placeholder}
+                  className="h-7 text-xs"
+                />
+              )}
+            </label>
+          ))}
+        </div>
+      )}
+
+      {notExecutable && (
+        <p className="mt-2 rounded bg-amber-50 px-2 py-1 text-[10px] text-amber-700">
+          Esta ação ainda não é executada pelo motor — será ignorada ao rodar.
+        </p>
+      )}
+
       <button
         onClick={onRemove}
         className="absolute -right-2 -top-2 hidden size-5 items-center justify-center rounded-full bg-red-500 text-white group-hover:flex"
@@ -91,7 +179,7 @@ function Connector({ onAdd }: { onAdd: () => void }) {
 
 export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const workflow = useWorkflow(id);
+  const workflow = useDbWorkflow(id);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerMode, setPickerMode] = useState<"trigger" | "action">("trigger");
 
@@ -118,14 +206,32 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
       key: node.key,
       label: node.label,
       category: node.category,
+      config: {},
     };
     if (kind === "trigger") {
-      workflowActions.setTrigger(id, wfNode);
+      void dbWorkflowActions.setTrigger(id, wfNode);
       toast.success(`Acionador "${node.label}" definido`);
     } else {
-      workflowActions.addAction(id, wfNode);
+      void dbWorkflowActions.addAction(id, wfNode);
       toast.success(`Ação "${node.label}" adicionada`);
     }
+  };
+
+  const togglePublish = () => {
+    if (workflow.status !== "published") {
+      if (!workflow.trigger) {
+        toast.error("Defina um acionador antes de publicar");
+        return;
+      }
+      if (workflow.actions.length === 0) {
+        toast.error("Adicione ao menos uma ação antes de publicar");
+        return;
+      }
+    }
+    void dbWorkflowActions.toggleStatus(id);
+    toast.success(
+      workflow.status === "published" ? "Fluxo despublicado (rascunho)" : "Fluxo publicado",
+    );
   };
 
   return (
@@ -152,17 +258,7 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
           </button>
           <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
             {workflow.status === "published" ? "Publicado" : "Rascunho"}
-            <Switch
-              checked={workflow.status === "published"}
-              onCheckedChange={() => {
-                workflowActions.toggleStatus(id);
-                toast.success(
-                  workflow.status === "published"
-                    ? "Fluxo despublicado (rascunho)"
-                    : "Fluxo publicado"
-                );
-              }}
-            />
+            <Switch checked={workflow.status === "published"} onCheckedChange={togglePublish} />
           </label>
         </div>
       </div>
@@ -178,7 +274,7 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
           <NodeCard
             node={workflow.trigger}
             isTrigger
-            onRemove={() => workflowActions.removeNode(id, workflow.trigger!.id)}
+            onRemove={() => void dbWorkflowActions.removeNode(id, workflow.trigger!.id)}
           />
         ) : (
           <button
@@ -192,7 +288,11 @@ export default function WorkflowBuilderPage({ params }: { params: Promise<{ id: 
         {workflow.actions.map((action) => (
           <div key={action.id} className="flex flex-col items-center">
             <Connector onAdd={() => openPicker("action")} />
-            <NodeCard node={action} onRemove={() => workflowActions.removeNode(id, action.id)} />
+            <NodeCard
+              node={action}
+              onRemove={() => void dbWorkflowActions.removeNode(id, action.id)}
+              onSaveConfig={(config) => void dbWorkflowActions.updateNodeConfig(id, action.id, config)}
+            />
           </div>
         ))}
 

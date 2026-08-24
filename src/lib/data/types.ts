@@ -164,6 +164,8 @@ export interface WorkflowNode {
   key: string;
   label: string;
   category: NodeCategory;
+  /** Parâmetros da ação/gatilho (texto da nota, tag, assunto do e-mail, etc.). */
+  config?: Record<string, unknown>;
 }
 
 export interface Workflow {

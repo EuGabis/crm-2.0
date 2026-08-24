@@ -27,7 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useWorkflows, workflowActions } from "@/lib/data/repos/workflows";
+import { useDbWorkflows, dbWorkflowActions } from "@/lib/data/repos/db/workflows";
 import type { Workflow } from "@/lib/data/types";
 
 const TABS = [{ label: "Fluxos de trabalho" }, { label: "Configurações globais" }];
@@ -35,9 +35,10 @@ const TABS = [{ label: "Fluxos de trabalho" }, { label: "Configurações globais
 export default function AutomacoesPage() {
   const router = useRouter();
   const [tab, setTab] = useState("Fluxos de trabalho");
-  const workflows = useWorkflows();
+  const workflows = useDbWorkflows();
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
+  const [creating, setCreating] = useState(false);
 
   const folders = useMemo(() => {
     const set = new Set<string>();
@@ -49,13 +50,19 @@ export default function AutomacoesPage() {
     setNewName("");
     setCreateOpen(true);
   };
-  const confirmCreate = () => {
+  const confirmCreate = async () => {
     const name = newName.trim();
     if (!name) {
       toast.error("Dê um nome ao fluxo");
       return;
     }
-    const id = workflowActions.create(name);
+    setCreating(true);
+    const id = await dbWorkflowActions.create(name);
+    setCreating(false);
+    if (!id) {
+      toast.error("Não foi possível criar o fluxo");
+      return;
+    }
     setCreateOpen(false);
     toast.success("Fluxo criado como rascunho");
     router.push(`/automacoes/${id}`);
@@ -175,7 +182,7 @@ export default function AutomacoesPage() {
               autoFocus
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && confirmCreate()}
+              onKeyDown={(e) => e.key === "Enter" && void confirmCreate()}
               placeholder="Ex.: Boas-vindas ao novo lead"
               className="h-9 text-sm"
             />
@@ -184,7 +191,9 @@ export default function AutomacoesPage() {
             <Button variant="ghost" onClick={() => setCreateOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={confirmCreate}>Criar fluxo</Button>
+            <Button onClick={() => void confirmCreate()} disabled={creating}>
+              {creating ? "Criando..." : "Criar fluxo"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
