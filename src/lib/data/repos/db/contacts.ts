@@ -309,37 +309,103 @@ export const dbContactActions = {
     return true;
   },
 
-  /** Importação em massa (CSV). Retorna o nº de contatos inseridos, ou -1 em erro. */
+  /**
+   * Importação em massa (CSV) — feita em LOTES de propósito.
+   *
+   * ⚠️ Um único INSERT com as 50 mil linhas do CRM antigo NÃO passa:
+   * o papel `authenticated` tem `statement_timeout = 8s` no Supabase, a RLS
+   * roda o `with check` linha a linha e o `.select()` mandava as 50 mil de
+   * volta pela rede. O erro chegava como 57014 (canceling statement due to
+   * statement timeout) — e a tela só dizia "a importação falhou".
+   *
+   * Agora: lotes de `CHUNK`, no máximo `POOL` em paralelo, SEM `.select()`
+   * (a resposta vazia é o que mantém o tráfego pequeno), lote que falha é
+   * repartido ao meio até isolar a linha ruim, e o resto entra. Devolve o
+   * que entrou, o que ficou de fora e a MENSAGEM real do banco.
+   *
+   * A lista da tela é relida no fim (`reload()`) em vez de receber 50 mil
+   * linhas por `setContacts` — prepend desse tamanho travava a aba.
+   */
   async bulkInsert(
     rows: {
       firstName: string;
       lastName: string;
       email: string;
       phone: string;
+      doc?: string;
       company?: string;
       tags: string[];
-    }[]
-  ): Promise<number> {
-    const { locationId, userId, setContacts } = useDbStore.getState();
-    if (!locationId || rows.length === 0) return -1;
+    }[],
+    onProgress?: (done: number, total: number) => void
+  ): Promise<{ inserted: number; failed: number; error: string | null }> {
+    const { locationId, userId } = useDbStore.getState();
+    if (!locationId) return { inserted: 0, failed: rows.length, error: "Empresa não carregada — recarregue a página" };
+    if (rows.length === 0) return { inserted: 0, failed: 0, error: "Nada para importar" };
+
+    const CHUNK = 500;
+    const POOL = 4;
     const supabase = createClient();
-    const { data, error } = await supabase
-      .from("contacts")
-      .insert(
-        rows.map((r) => ({
-          location_id: locationId,
-          first_name: r.firstName,
-          last_name: r.lastName,
-          email: r.email,
-          phone: r.phone,
-          company: r.company ?? null,
-          tags: r.tags,
-          owner_id: userId,
-        }))
-      )
-      .select();
-    if (error || !data) return -1;
-    setContacts((prev) => [...data.map(mapContact), ...prev]);
-    return data.length;
+
+    const payload = rows.map((r) => ({
+      location_id: locationId,
+      first_name: r.firstName.slice(0, 200),
+      last_name: (r.lastName ?? "").slice(0, 200),
+      email: (r.email ?? "").slice(0, 320),
+      phone: (r.phone ?? "").slice(0, 60),
+      doc: r.doc?.trim() ? r.doc.trim().slice(0, 32) : null,
+      company: r.company?.trim() ? r.company.trim().slice(0, 200) : null,
+      tags: (r.tags ?? []).slice(0, 30),
+      owner_id: userId,
+    }));
+
+    let inserted = 0;
+    let failed = 0;
+    let firstError: string | null = null;
+
+    const bump = (n: number) => {
+      onProgress?.(inserted + failed, payload.length);
+      return n;
+    };
+
+    /** Insere um lote; se falhar, reparte ao meio até isolar a(s) linha(s) ruim(ns). */
+    const push = async (batch: typeof payload, attempt = 0): Promise<void> => {
+      const { error } = await supabase.from("contacts").insert(batch);
+      if (!error) {
+        inserted += batch.length;
+        bump(0);
+        return;
+      }
+      // Timeout/rede: uma segunda tentativa resolve o lote inteiro na maioria dos casos.
+      if (attempt === 0 && batch.length > 1) {
+        await new Promise((r) => setTimeout(r, 400));
+        return push(batch, 1);
+      }
+      if (batch.length > 1) {
+        const mid = Math.ceil(batch.length / 2);
+        await push(batch.slice(0, mid));
+        await push(batch.slice(mid));
+        return;
+      }
+      failed += 1;
+      firstError ??= error.message;
+      bump(0);
+    };
+
+    const batches: (typeof payload)[] = [];
+    for (let i = 0; i < payload.length; i += CHUNK) batches.push(payload.slice(i, i + CHUNK));
+
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(POOL, batches.length) }, async () => {
+      while (cursor < batches.length) {
+        const mine = batches[cursor++];
+        await push(mine);
+      }
+    });
+    await Promise.all(workers);
+
+    // Relê a lista (não prepend): 50 mil linhas no store por `setContacts` travava a aba.
+    await useDbStore.getState().reload();
+
+    return { inserted, failed, error: firstError };
   },
 };

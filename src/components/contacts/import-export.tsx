@@ -12,7 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { contactName } from "@/lib/data/repos/contacts";
-import { dbContactActions } from "@/lib/data/repos/db/contacts";
+import { dbContactActions, useDbStore } from "@/lib/data/repos/db/contacts";
 import { logBulk } from "@/lib/data/repos/db/contacts-module";
 import type { Contact } from "@/lib/data/types";
 
@@ -21,77 +21,211 @@ interface ParsedRow {
   lastName: string;
   email: string;
   phone: string;
+  doc?: string;
   company?: string;
   tags: string[];
 }
 
-/** Parser CSV simples: detecta , ou ; e respeita aspas duplas. */
-function parseCsv(text: string): ParsedRow[] {
-  const lines = text
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
-  if (lines.length < 2) return [];
+interface ParseResult {
+  rows: ParsedRow[];
+  total: number;
+  /** Linhas sem nome/e-mail/telefone — não dá para virar contato. */
+  ignored: number;
+  /** Repetidas DENTRO do arquivo (mesmo telefone, documento ou e-mail). */
+  duplicates: number;
+  /** Já existem no CRM (comparado com os contatos carregados). */
+  existing: number;
+  /** Cabeçalhos lidos — é o que a mensagem de erro mostra quando nada casa. */
+  headers: string[];
+}
 
-  const delim = (lines[0].match(/;/g)?.length ?? 0) > (lines[0].match(/,/g)?.length ?? 0) ? ";" : ",";
+/**
+ * Mesma chave canônica de `private.phone_key` (migração 0047): só dígitos, sem o
+ * 55 e ignorando o 9º dígito de celular. Repetida aqui porque a deduplicação do
+ * arquivo acontece ANTES de qualquer ida ao banco — 50 mil consultas de "esse
+ * telefone já existe?" seriam 50 mil viagens de rede.
+ */
+function phoneKey(raw: string): string {
+  const digits = (raw ?? "").replace(/\D/g, "");
+  const n = digits.length >= 12 && digits.startsWith("55") ? digits.slice(2) : digits;
+  return n.length < 10 ? n : n.slice(0, 2) + n.slice(-8);
+}
 
-  const splitLine = (line: string): string[] => {
-    const out: string[] = [];
-    let cur = "";
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
+const docKey = (raw: string) => (raw ?? "").replace(/\D/g, "");
+
+/** Chaves de identidade da linha, em ordem de confiança. Sem nenhuma, não dedupa. */
+function identityKeys(r: { doc?: string; phone: string; email: string }): string[] {
+  const out: string[] = [];
+  const d = docKey(r.doc ?? "");
+  if (d.length >= 11) out.push("d:" + d);
+  const p = phoneKey(r.phone);
+  if (p.length >= 10) out.push("p:" + p);
+  const e = (r.email ?? "").trim().toLowerCase();
+  if (e.includes("@")) out.push("e:" + e);
+  return out;
+}
+
+const deaccent = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .trim();
+
+/**
+ * Tokeniza o CSV inteiro de uma vez (não linha a linha).
+ *
+ * ⚠️ A versão anterior fazia `text.split(/\r?\n/)` antes de olhar as aspas: um
+ * endereço com quebra de linha dentro de `"..."` — comum em exportação de CRM —
+ * virava duas linhas quebradas e arrastava todas as colunas seguintes.
+ * Também remove o BOM: planilha salva como CSV pelo Excel começa com `﻿`,
+ * o cabeçalho `nome` virava `﻿nome`, nenhuma coluna casava e a tela
+ * respondia "CSV inválido" num arquivo perfeito.
+ */
+function tokenize(text: string, delim: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
       if (ch === '"') {
-        if (inQuotes && line[i + 1] === '"') {
+        if (text[i + 1] === '"') {
           cur += '"';
           i++;
-        } else {
-          inQuotes = !inQuotes;
-        }
-      } else if (ch === delim && !inQuotes) {
-        out.push(cur);
-        cur = "";
-      } else {
-        cur += ch;
-      }
+        } else inQuotes = false;
+      } else cur += ch;
+      continue;
     }
-    out.push(cur);
-    return out.map((s) => s.trim());
-  };
+    if (ch === '"') inQuotes = true;
+    else if (ch === delim) {
+      row.push(cur);
+      cur = "";
+    } else if (ch === "\n") {
+      row.push(cur);
+      cur = "";
+      rows.push(row);
+      row = [];
+    } else if (ch !== "\r") cur += ch;
+  }
+  row.push(cur);
+  rows.push(row);
+  return rows
+    .map((r) => r.map((c) => c.trim()))
+    .filter((r) => r.some((c) => c !== ""));
+}
 
-  const header = splitLine(lines[0]).map((h) =>
-    h
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[̀-ͯ]/g, "")
-  );
+function parseCsv(text: string, known: Set<string>): ParseResult {
+  const clean = text.replace(/^﻿/, "");
+  const firstLine = clean.slice(0, clean.indexOf("\n") === -1 ? clean.length : clean.indexOf("\n"));
+  const count = (re: RegExp) => firstLine.match(re)?.length ?? 0;
+  // Tabulação entra na conta: exportação colada do Excel vem separada por TAB.
+  const delim =
+    count(/\t/g) > count(/;/g) && count(/\t/g) > count(/,/g)
+      ? "\t"
+      : count(/;/g) > count(/,/g)
+        ? ";"
+        : ",";
+
+  const table = tokenize(clean, delim);
+  const empty: ParseResult = {
+    rows: [],
+    total: 0,
+    ignored: 0,
+    duplicates: 0,
+    existing: 0,
+    headers: [],
+  };
+  if (table.length < 2) return empty;
+
+  const header = table[0].map(deaccent);
   const idx = (...names: string[]) => header.findIndex((h) => names.includes(h));
 
-  const iFirst = idx("nome", "first_name", "firstname", "name");
-  const iLast = idx("sobrenome", "last_name", "lastname");
-  const iEmail = idx("email", "e-mail");
-  const iPhone = idx("telefone", "phone", "celular", "whatsapp");
-  const iCompany = idx("empresa", "company", "nome comercial");
-  const iTags = idx("tags", "etiquetas");
+  const iFull = idx("nome completo", "nome_completo", "full name", "fullname", "contato", "cliente");
+  const iFirst = idx("nome", "primeiro nome", "first_name", "firstname", "first name", "name");
+  const iLast = idx("sobrenome", "ultimo nome", "last_name", "lastname", "last name", "apelido");
+  const iEmail = idx("email", "e-mail", "e mail", "mail", "email principal");
+  const iPhone = idx("telefone", "phone", "celular", "whatsapp", "fone", "telefone principal", "mobile");
+  const iDoc = idx("documento", "cpf", "cnpj", "cpf/cnpj", "cpf_cnpj", "doc");
+  const iCompany = idx("empresa", "company", "nome comercial", "organizacao", "organization");
+  const iTags = idx("tags", "etiquetas", "marcadores", "tag");
 
-  if (iFirst === -1) return [];
+  // Sem NENHUMA coluna de identificação não há contato para criar.
+  if (iFull === -1 && iFirst === -1 && iEmail === -1 && iPhone === -1) {
+    return { ...empty, headers: table[0] };
+  }
 
-  return lines.slice(1).map((line) => {
-    const cols = splitLine(line);
-    const get = (i: number) => (i >= 0 ? (cols[i] ?? "") : "");
-    return {
-      firstName: get(iFirst),
-      lastName: get(iLast),
-      email: get(iEmail),
-      phone: get(iPhone),
+  const rows: ParsedRow[] = [];
+  const seen = new Set<string>();
+  let ignored = 0;
+  let duplicates = 0;
+  let existing = 0;
+
+  for (const cols of table.slice(1)) {
+    const get = (i: number) => (i >= 0 ? (cols[i] ?? "").trim() : "");
+
+    let firstName = get(iFirst);
+    let lastName = get(iLast);
+    const full = get(iFull);
+    if (full && !firstName) {
+      const parts = full.split(/\s+/);
+      firstName = parts[0];
+      lastName = parts.slice(1).join(" ");
+      // "nome" + "nome completo" no mesmo arquivo: o completo só preenche o vazio.
+    } else if (full && !lastName && full !== firstName) {
+      lastName = full.slice(firstName.length).trim();
+    }
+
+    const email = get(iEmail);
+    const phone = get(iPhone);
+    const doc = get(iDoc);
+
+    // Nome vazio mas com e-mail/telefone é contato de verdade (a coluna `first_name`
+    // é NOT NULL, então precisa de ALGO): usa o e-mail/telefone como nome. Descartar
+    // era jogar fora lead com contato válido — o oposto de "deixar no histórico".
+    if (!firstName) firstName = email || phone;
+    if (!firstName) {
+      ignored++;
+      continue;
+    }
+
+    const keys = identityKeys({ doc, phone, email });
+    if (keys.some((k) => known.has(k))) {
+      existing++;
+      continue;
+    }
+    if (keys.length > 0 && keys.some((k) => seen.has(k))) {
+      duplicates++;
+      continue;
+    }
+    keys.forEach((k) => seen.add(k));
+
+    rows.push({
+      firstName,
+      lastName,
+      email,
+      phone,
+      doc: doc || undefined,
       company: get(iCompany) || undefined,
       tags: get(iTags)
-        .split(/[|,]/)
+        .split(/[|,;]/)
         .map((t) => t.trim().toLowerCase())
         .filter(Boolean),
-    };
-  });
+    });
+  }
+
+  return {
+    rows,
+    total: table.length - 1,
+    ignored,
+    duplicates,
+    existing,
+    headers: table[0],
+  };
 }
+
+const nf = new Intl.NumberFormat("pt-BR");
 
 export function ImportDialog({
   open,
@@ -101,82 +235,165 @@ export function ImportDialog({
   onOpenChange: (o: boolean) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [rows, setRows] = useState<ParsedRow[]>([]);
+  const contacts = useDbStore((s) => s.contacts);
+  const [result, setResult] = useState<ParseResult | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [done, setDone] = useState(0);
+  const [parsing, setParsing] = useState(false);
+
+  const reset = () => {
+    setResult(null);
+    setFileName(null);
+    setDone(0);
+  };
 
   const onFile = async (file: File) => {
-    const text = await file.text();
-    const parsed = parseCsv(text);
-    if (parsed.length === 0) {
-      toast.error(
-        'CSV inválido. A primeira linha precisa ter cabeçalhos (ex.: "nome;sobrenome;email;telefone;empresa;tags")'
-      );
-      return;
+    setParsing(true);
+    try {
+      const text = await file.text();
+      // Os contatos JÁ carregados servem de filtro: reimportar o mesmo arquivo
+      // não duplica o histórico.
+      const known = new Set<string>();
+      for (const c of contacts) {
+        identityKeys({ doc: c.doc, phone: c.phone, email: c.email }).forEach((k) => known.add(k));
+      }
+      const parsed = parseCsv(text, known);
+      if (parsed.rows.length === 0) {
+        toast.error(
+          parsed.headers.length > 0
+            ? `Nenhuma coluna reconhecida. O arquivo tem: ${parsed.headers.slice(0, 8).join(", ")}. Renomeie o cabeçalho para nome, sobrenome, email, telefone, documento, empresa ou tags.`
+            : "Não encontrei linhas no arquivo. A 1ª linha precisa ser o cabeçalho (ex.: nome;sobrenome;email;telefone)."
+        );
+        return;
+      }
+      setFileName(file.name);
+      setResult(parsed);
+      setDone(0);
+    } finally {
+      setParsing(false);
     }
-    setFileName(file.name);
-    setRows(parsed.filter((r) => r.firstName));
   };
 
   const run = async () => {
+    if (!result) return;
     setImporting(true);
-    const inserted = await dbContactActions.bulkInsert(rows);
+    setDone(0);
+    const r = await dbContactActions.bulkInsert(result.rows, (d) => setDone(d));
     setImporting(false);
-    if (inserted < 0) {
-      toast.error("A importação falhou — verifique o arquivo e tente novamente");
+
+    if (r.inserted > 0) {
+      await logBulk(`Importação CSV — ${fileName ?? "arquivo"}`, r.inserted);
+    }
+    if (r.inserted === 0) {
+      toast.error(`A importação falhou${r.error ? `: ${r.error}` : ""}`);
       return;
     }
-    await logBulk(`Importação CSV — ${fileName ?? "arquivo"}`, inserted);
-    toast.success(`${inserted} contato(s) importado(s)`);
-    setRows([]);
-    setFileName(null);
+    if (r.failed > 0) {
+      toast.warning(
+        `${nf.format(r.inserted)} contato(s) importado(s); ${nf.format(r.failed)} ficaram de fora${r.error ? ` (${r.error})` : ""}`
+      );
+    } else {
+      toast.success(`${nf.format(r.inserted)} contato(s) importado(s)`);
+    }
+    reset();
     onOpenChange(false);
   };
 
+  const total = result?.rows.length ?? 0;
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        // Fechar no meio não cancela os lotes já em voo — melhor não deixar fechar.
+        if (importing) return;
+        if (!o) reset();
+        onOpenChange(o);
+      }}
+    >
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Importar contatos (CSV)</DialogTitle>
         </DialogHeader>
         <input
           ref={fileRef}
           type="file"
-          accept=".csv,text/csv"
+          accept=".csv,.txt,text/csv,text/plain"
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0];
+            e.target.value = "";
             if (f) void onFile(f);
           }}
         />
-        {rows.length === 0 ? (
+        {!result ? (
           <button
+            disabled={parsing}
             onClick={() => fileRef.current?.click()}
-            className="flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/40 py-10 text-indigo-600 hover:bg-indigo-50"
+            className="flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/40 py-10 text-indigo-600 hover:bg-indigo-50 disabled:opacity-60"
           >
             <UploadCloud className="size-8" />
-            <span className="text-sm font-semibold">Escolher arquivo CSV</span>
-            <span className="text-[11px] text-indigo-400">
-              Cabeçalhos aceitos: nome, sobrenome, email, telefone, empresa, tags
+            <span className="text-sm font-semibold">
+              {parsing ? "Lendo o arquivo..." : "Escolher arquivo CSV"}
+            </span>
+            <span className="px-6 text-center text-[11px] text-indigo-400">
+              Cabeçalhos aceitos: nome, sobrenome (ou nome completo), email, telefone,
+              documento (CPF/CNPJ), empresa, tags. Separador , ; ou tabulação.
             </span>
           </button>
         ) : (
-          <div className="rounded-lg border bg-slate-50 p-4 text-sm">
+          <div className="space-y-3 rounded-lg border bg-slate-50 p-4 text-sm">
             <p className="font-semibold text-slate-800">{fileName}</p>
-            <p className="text-xs text-slate-500">
-              {rows.length} contato(s) prontos para importar. Exemplo:{" "}
+            <p className="text-xs text-slate-600">
+              <span className="font-semibold text-slate-900">{nf.format(total)}</span> contato(s)
+              prontos de {nf.format(result.total)} linha(s). Exemplo:{" "}
               <span className="font-medium text-slate-700">
-                {rows[0].firstName} {rows[0].lastName} · {rows[0].email || rows[0].phone || "—"}
+                {result.rows[0].firstName} {result.rows[0].lastName} ·{" "}
+                {result.rows[0].email || result.rows[0].phone || "—"}
               </span>
             </p>
+            {(result.existing > 0 || result.duplicates > 0 || result.ignored > 0) && (
+              <ul className="space-y-0.5 text-[11px] text-slate-500">
+                {result.existing > 0 && (
+                  <li>{nf.format(result.existing)} já existem no CRM (ignorados)</li>
+                )}
+                {result.duplicates > 0 && (
+                  <li>{nf.format(result.duplicates)} repetidos no próprio arquivo</li>
+                )}
+                {result.ignored > 0 && (
+                  <li>{nf.format(result.ignored)} sem nome, e-mail e telefone</li>
+                )}
+              </ul>
+            )}
+            {importing && (
+              <div className="space-y-1">
+                <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                  <div
+                    className="h-full rounded-full bg-indigo-500 transition-all"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  {nf.format(done)} de {nf.format(total)} — não feche esta janela.
+                </p>
+              </div>
+            )}
+            {!importing && total > 5000 && (
+              <p className="text-[11px] text-amber-700">
+                Arquivo grande: a importação vai em lotes e pode levar alguns minutos.
+                Deixe a aba aberta.
+              </p>
+            )}
           </div>
         )}
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+          <Button variant="ghost" disabled={importing} onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
-          <Button disabled={rows.length === 0 || importing} onClick={run}>
-            {importing ? "Importando..." : `Importar ${rows.length || ""}`.trim()}
+          <Button disabled={total === 0 || importing} onClick={run}>
+            {importing ? `Importando ${pct}%` : `Importar ${total ? nf.format(total) : ""}`.trim()}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -191,9 +408,9 @@ export function exportContactsCsv(contacts: Contact[]) {
     return;
   }
   const esc = (v: string) => `"${(v ?? "").replaceAll('"', '""')}"`;
-  const header = "nome;sobrenome;email;telefone;empresa;tags";
+  const header = "nome;sobrenome;email;telefone;documento;empresa;tags";
   const lines = contacts.map((c) =>
-    [c.firstName, c.lastName, c.email, c.phone, c.company ?? "", c.tags.join("|")]
+    [c.firstName, c.lastName, c.email, c.phone, c.doc ?? "", c.company ?? "", c.tags.join("|")]
       .map(esc)
       .join(";")
   );
