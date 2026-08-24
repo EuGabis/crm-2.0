@@ -136,6 +136,20 @@ src/
    usa badges de texto para essas redes.
 6. Páginas são client components (`"use client"`) — ícones Lucide não podem ser
    passados de Server para Client component como prop.
+7. **O PostgREST corta a resposta no "Max rows" do projeto (1000) sem erro e sem
+   aviso.** `select("*")` numa tabela que cresceu devolve UMA PÁGINA e o app acha
+   que é tudo. Foi o que apagou o nome do contato em TODAS as conversas depois da
+   importação do CRM antigo (365 → 5.615 contatos: o `order by created_at desc`
+   trouxe os 1000 importados e nenhum dos antigos, que são os que têm conversa;
+   `contacts.find(...)` no inbox caía no fallback "Contato"). Ao carregar tabela
+   que pode passar de mil linhas, pagine com `.range()` — e **desempate a ordem
+   por `id`**: importação grava 500 linhas por transação, então as 500 saem com o
+   MESMO `created_at` e ordem instável faz a paginação pular linhas. Ver
+   `fetchAllContacts` em `db/contacts.ts`.
+8. **Importação em massa vai em LOTES.** O papel `authenticated` tem
+   `statement_timeout = 8s`: um `insert` único com dezenas de milhares de linhas
+   morre em 57014 (a RLS roda o `with check` linha a linha). Ver `bulkInsert`
+   (lotes de 500, sem `.select()`, lote que falha reparte ao meio).
 
 ## Revalidação ao trocar de página (`RouteRevalidator`)
 

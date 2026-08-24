@@ -6,6 +6,53 @@ import { createClient } from "@/lib/supabase/client";
 import type { Channel, Contact, User } from "@/lib/data/types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
+/**
+ * O PostgREST corta a resposta em `PAGE` linhas (o "Max rows" do projeto no
+ * Supabase) — SEM erro e SEM aviso: vem menos gente e o app acha que é tudo.
+ *
+ * ⚠️ Isso derrubou o nome do contato em TODAS as conversas depois da
+ * importação do CRM antigo. Eram 365 contatos (caber em 1000 era acidente);
+ * ao passar de 5 mil, o `order by created_at desc` devolveu os 1000 MAIS
+ * NOVOS — os importados — e nenhum dos antigos, que são justamente os que têm
+ * conversa. `contacts.find(...)` na lista do inbox não achava ninguém e as
+ * 361 linhas caíam no fallback "Contato". Nada havia sido perdido no banco.
+ *
+ * Aqui a busca anda de página em página até a última vir incompleta. Continua
+ * carregando a empresa inteira na memória: em 5 mil são 6 requisições e passa
+ * batido, mas na casa das 50 mil isso é dezenas de MB por navegação (o
+ * `RouteRevalidator` chama `reload()` a cada troca de rota) e a saída passa a
+ * ser busca/paginação no servidor.
+ */
+async function fetchAllContacts(supabase: any, locationId: string) {
+  const PAGE = 1000;
+  const all: any[] = [];
+  for (let from = 0; ; ) {
+    const { data, error } = await supabase
+      .from("contacts")
+      .select("*")
+      .eq("location_id", locationId)
+      // ⚠️ O desempate por `id` não é enfeite: a importação grava 500 linhas por
+      // transação, então as 500 saem com o MESMO `created_at` (o `now()` é o da
+      // transação). Ordem instável entre páginas repetiria uns contatos e
+      // pularia outros — e o pulado volta a ser "Contato" na conversa.
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, from + PAGE - 1);
+    // Erro no MEIO da paginação devolve erro em vez de meia lista: meia lista é
+    // pior, porque parece completa.
+    if (error) return { data: null, error };
+    const got = data?.length ?? 0;
+    all.push(...(data ?? []));
+    // Avança pelo que REALMENTE veio, e para só na página vazia: se o "Max rows"
+    // do projeto for menor que PAGE, comparar com PAGE pararia na 1ª página e o
+    // bug voltaria calado.
+    if (got === 0) break;
+    from += got;
+  }
+  return { data: all, error: null };
+}
+
 function mapContact(row: any): Contact {
   return {
     id: row.id,
@@ -77,11 +124,7 @@ export const useDbStore = create<DbState>((set, get) => ({
     }
 
     const [{ data: contacts }, { data: profiles }] = await Promise.all([
-      supabase
-        .from("contacts")
-        .select("*")
-        .eq("location_id", membership.location_id)
-        .order("created_at", { ascending: false }),
+      fetchAllContacts(supabase, membership.location_id),
       supabase.from("profiles").select("*"),
     ]);
 
@@ -115,11 +158,7 @@ export const useDbStore = create<DbState>((set, get) => ({
     const supabase = createClient();
     const [{ data: contacts, error }, { data: memberships }, { data: profiles }] =
       await Promise.all([
-        supabase
-          .from("contacts")
-          .select("*")
-          .eq("location_id", locationId)
-          .order("created_at", { ascending: false }),
+        fetchAllContacts(supabase, locationId),
         supabase.from("location_members").select("user_id, role"),
         supabase.from("profiles").select("*"),
       ]);
