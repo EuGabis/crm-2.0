@@ -10,7 +10,15 @@ import { SubNav } from "@/components/layout/subnav";
 import { DataTable, type Column } from "@/components/shared/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
   Select,
@@ -28,6 +36,8 @@ export default function AutomacoesPage() {
   const router = useRouter();
   const [tab, setTab] = useState("Fluxos de trabalho");
   const workflows = useWorkflows();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newName, setNewName] = useState("");
 
   const folders = useMemo(() => {
     const set = new Set<string>();
@@ -35,10 +45,18 @@ export default function AutomacoesPage() {
     return [...set].sort();
   }, [workflows]);
 
-  const create = () => {
-    const name = window.prompt("Nome do novo fluxo de trabalho:", "Novo fluxo");
-    if (!name?.trim()) return;
-    const id = workflowActions.create(name.trim());
+  const openCreate = () => {
+    setNewName("");
+    setCreateOpen(true);
+  };
+  const confirmCreate = () => {
+    const name = newName.trim();
+    if (!name) {
+      toast.error("Dê um nome ao fluxo");
+      return;
+    }
+    const id = workflowActions.create(name);
+    setCreateOpen(false);
     toast.success("Fluxo criado como rascunho");
     router.push(`/automacoes/${id}`);
   };
@@ -129,7 +147,7 @@ export default function AutomacoesPage() {
                 >
                   <Sparkles className="size-3.5" /> Construa usando IA
                 </Button>
-                <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={create}>
+                <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={openCreate}>
                   <Plus className="size-3.5" /> Criar fluxo de trabalho
                 </Button>
               </div>
@@ -145,6 +163,31 @@ export default function AutomacoesPage() {
           </>
         )}
       </div>
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Novo fluxo de trabalho</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Nome do fluxo</Label>
+            <Input
+              autoFocus
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && confirmCreate()}
+              placeholder="Ex.: Boas-vindas ao novo lead"
+              className="h-9 text-sm"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setCreateOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={confirmCreate}>Criar fluxo</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
