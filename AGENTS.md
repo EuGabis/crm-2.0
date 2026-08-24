@@ -193,6 +193,27 @@ repetidas que a janela traz são descartadas pelo filtro de id. E o cursor compa
 sempre `at` (created_at) — misturar `dispatchedAt` o empurraria além da coluna
 consultada, criando o salto que se quer evitar.
 
+## Barra superior — Suporte, Webphone e o botão verde SAÍRAM
+
+Os três primeiros elementos da tela (2026-08-24, a pedido do Gabriel) eram os
+três que menos entregavam: **Suporte** abria um painel de contato que não abre
+ticket nenhum, **Webphone** é um teclado sem provedor de voz (não completa
+chamada) e o **botão verde** só reabria o MESMO popover do Webphone.
+
+- O **painel do webphone continua** em Configurações → Telefonia — é onde ele
+  volta a ser oferecido no dia em que houver VoIP. `SupportPanel` e
+  `WebphonePanel` continuam no repositório; só deixaram de ser montados na
+  topbar.
+- Quem **ligava pelo popover** — o botão "Ligar" do card do funil e o do
+  cabeçalho da conversa — passou a abrir o **discador do aparelho**
+  (`telHref()`, em `src/lib/phone.ts`). Não é degradação: é o único caminho que
+  hoje completa a ligação. O helper mora em `lib/` porque os dois botões
+  normalizariam o telefone digitado à mão (parênteses, hífen, "+55") cada um do
+  seu jeito.
+- `useWebphone` mantém `open`/`setOpen`/`callContact` mesmo sem quem chame de
+  fora: o estado é global justamente por causa desses gatilhos remotos, e
+  removê-los agora seria refazer tudo quando o provedor de voz entrar.
+
 ## Sidebar minimizável
 
 Botão **"Minimizar menu"** no pé da barra (junto de Configurações — é ajuste de
