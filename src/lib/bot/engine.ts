@@ -617,6 +617,17 @@ export async function maybeRunBot(
     flow = await getFlow(db, channel.location_id, channel.bot_flow);
     if (!flow) return false;
     startNode = flow.start;
+    // Sessão NOVA: semeia o estado do contato para a Condição inicial poder
+    // ramificar (ex.: já cadastrado?). `tem_cadastro` = "sim" se o contato tem a
+    // etiqueta "cadastrado". `email` fica disponível nas mensagens ({{email}}).
+    const { data: c } = await db
+      .from("contacts")
+      .select("tags, email")
+      .eq("id", contact.id)
+      .maybeSingle();
+    const tags: string[] = Array.isArray(c?.tags) ? c!.tags : [];
+    vars.tem_cadastro = tags.some((t) => normalize(t) === "cadastrado") ? "sim" : "nao";
+    vars.email = c?.email ?? "";
   }
 
   const ctx: Ctx = { db, channel, contact, conversationId, flowKey: flow.key };
