@@ -123,6 +123,11 @@ export interface Conversation {
   awaitingDistribution?: boolean;
   /** Lead distribuído a este atendente enquanto TODOS estavam offline (0060). */
   assignedOffline?: boolean;
+  /** Nome/telefone do contato EMBUTIDOS na consulta — para a lista mostrar o nome
+   *  sem depender do store inteiro de contatos (não escala com 50 mil). */
+  contactFirstName?: string;
+  contactLastName?: string;
+  contactPhone?: string;
 }
 
 /** Abas de filtro da caixa de entrada. */

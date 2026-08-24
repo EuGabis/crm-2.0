@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { create } from "zustand";
 import { createClient } from "@/lib/supabase/client";
 import type { Channel, Contact, User } from "@/lib/data/types";
@@ -191,7 +191,27 @@ export function useDbContacts() {
 
 export function useDbContact(id: string | null) {
   const { contacts, loading } = useDbContacts();
-  return { contact: id ? contacts.find((c) => c.id === id) ?? null : null, loading };
+  const fromStore = id ? contacts.find((c) => c.id === id) ?? null : null;
+  // O store carrega no máx. 1000 contatos (limite do PostgREST). Se o contato não
+  // está lá (ex.: empresa com 50 mil), busca ELE sob demanda pelo id — assim a
+  // conversa/painel abrem com os dados certos independente do tamanho da base.
+  const [fetched, setFetched] = useState<Contact | null>(null);
+  useEffect(() => {
+    if (!id || fromStore) {
+      setFetched(null);
+      return;
+    }
+    let active = true;
+    void (async () => {
+      const supabase = createClient();
+      const { data } = await supabase.from("contacts").select("*").eq("id", id).maybeSingle();
+      if (active && data) setFetched(mapContact(data));
+    })();
+    return () => {
+      active = false;
+    };
+  }, [id, fromStore]);
+  return { contact: fromStore ?? fetched, loading };
 }
 
 export function useDbTeam() {

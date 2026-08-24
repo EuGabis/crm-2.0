@@ -176,7 +176,9 @@ export function ConversationList({
           const contact = contacts.find((x) => x.id === conv.contactId);
           return {
             conversationId: conv.id,
-            contactName: contact ? contactName(contact) : "Contato",
+            contactName: contact
+              ? contactName(contact)
+              : `${conv.contactFirstName ?? "Contato"} ${conv.contactLastName ?? ""}`.trim(),
             channelId: conv.channel === "whatsapp" ? conv.channelId ?? null : null,
           };
         })
@@ -188,8 +190,14 @@ export function ConversationList({
   const visible = q
     ? sorted.filter((conv) => {
         const c = contacts.find((x) => x.id === conv.contactId);
-        const name = c ? `${c.firstName} ${c.lastName}`.toLowerCase() : "";
-        return name.includes(q) || (conv.lastMessagePreview ?? "").toLowerCase().includes(q);
+        const name = (
+          c ? `${c.firstName} ${c.lastName}` : `${conv.contactFirstName ?? ""} ${conv.contactLastName ?? ""}`
+        ).toLowerCase();
+        return (
+          name.includes(q) ||
+          (conv.contactPhone ?? "").includes(q) ||
+          (conv.lastMessagePreview ?? "").toLowerCase().includes(q)
+        );
       })
     : sorted;
 
@@ -458,8 +466,11 @@ export function ConversationList({
           // pode sumir (senão a conversa não aparece). Mostra "Contato" até vir.
           const contact =
             contacts.find((c) => c.id === conv.contactId) ??
-            ({ id: conv.contactId, firstName: "Contato", lastName: "" } as unknown as
-              (typeof contacts)[number]);
+            ({
+              id: conv.contactId,
+              firstName: conv.contactFirstName || "Contato",
+              lastName: conv.contactLastName || "",
+            } as unknown as (typeof contacts)[number]);
           return (
             <div
               key={conv.id}
