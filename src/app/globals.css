@@ -196,6 +196,9 @@
 .dark .bg-slate-100, .dark .bg-gray-100 { background-color: #20232d; }  /* balão recebido */
 .dark .bg-slate-200 { background-color: #2a2e3a; }
 .dark .bg-slate-800, .dark .bg-slate-900, .dark .bg-black { background-color: #0c0d12; }
+/* variantes com opacidade dessas superfícies (ex.: coluna do kanban bg-slate-100/70) */
+.dark .bg-slate-100\/70 { background-color: #191c24; }
+.dark .bg-slate-50\/70, .dark .bg-white\/70 { background-color: #101116; }
 
 /* Texto (neutro) */
 .dark .text-slate-900, .dark .text-gray-900, .dark .text-black { color: #f0f1f5; }
@@ -221,7 +224,9 @@
 /* Badges/realces tonais — fundo translúcido + texto claro (mantém a "cor") */
 .dark .bg-indigo-50, .dark .bg-indigo-100 { background-color: rgba(129,140,248,0.16); }
 /* variantes com opacidade (ex.: seleção da conversa usa bg-indigo-50/70) */
-.dark .bg-indigo-50\/70, .dark .bg-indigo-50\/60, .dark .bg-indigo-50\/50 { background-color: rgba(99,102,241,0.16); }
+.dark .bg-indigo-50\/70, .dark .bg-indigo-50\/60, .dark .bg-indigo-50\/50,
+.dark .bg-indigo-50\/40, .dark .bg-indigo-100\/70 { background-color: rgba(99,102,241,0.16); }
+.dark .bg-amber-50\/60 { background-color: rgba(251,191,36,0.12); }
 .dark .text-indigo-600, .dark .text-indigo-700 { color: #a5b4fc; }
 .dark .hover\:bg-indigo-50:hover { background-color: rgba(129,140,248,0.16); }
 .dark .bg-emerald-50, .dark .bg-emerald-100 { background-color: rgba(52,211,153,0.16); }
