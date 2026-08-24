@@ -193,8 +193,11 @@
 /* Superfícies em CAMADAS: fundo grafite → painéis → cards que se destacam. */
 .dark .bg-white { background-color: #16181f; }        /* cards */
 .dark .bg-slate-50, .dark .bg-gray-50 { background-color: #101116; }  /* painéis/thread */
-.dark .bg-slate-100, .dark .bg-gray-100 { background-color: #20232d; }  /* balão recebido */
+.dark .bg-slate-100, .dark .bg-gray-100 { background-color: #20232d; }
 .dark .bg-slate-200 { background-color: #2a2e3a; }
+/* Balão recebido: cor própria, bem mais clara que o fundo do chat (#101116)
+   para não "apagar". Vem depois de .bg-slate-100 para vencer na cascata. */
+.dark .msg-in { background-color: #2b3040; color: #eceef4; }
 .dark .bg-slate-800, .dark .bg-slate-900, .dark .bg-black { background-color: #0c0d12; }
 /* variantes com opacidade dessas superfícies (ex.: coluna do kanban bg-slate-100/70) */
 .dark .bg-slate-100\/70 { background-color: #191c24; }

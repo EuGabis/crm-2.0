@@ -408,7 +408,7 @@ function MessageBubble({
             ? "border border-amber-200 bg-amber-50 text-amber-900"
             : isOut
               ? "rounded-br-sm bg-indigo-500 text-white"
-              : "rounded-bl-sm bg-slate-100 text-slate-800"
+              : "msg-in rounded-bl-sm bg-slate-100 text-slate-800"
         )}
       >
         {message.internal && (
