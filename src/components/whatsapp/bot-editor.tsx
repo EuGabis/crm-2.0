@@ -134,6 +134,12 @@ export function BotEditor({
                 {i + 1}
               </span>
               <span className="text-xs font-semibold text-slate-800">{nodeLabel(node)}</span>
+              <span
+                title="Identificação do passo (mostra a qual ramo pertence)"
+                className="ml-auto shrink-0 rounded bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] text-slate-400"
+              >
+                {node.id}
+              </span>
             </div>
             <NodeEditor node={node} nodes={draft!.nodes} onPatch={patchNode} />
           </li>
