@@ -5,7 +5,7 @@ import { ChannelsTable } from "@/components/whatsapp/channels-table";
 import { CreateChannelDialog } from "@/components/whatsapp/create-channel-dialog";
 import { TemplatesTab } from "@/components/whatsapp/templates-tab";
 import { TemplateLogsTab } from "@/components/whatsapp/template-logs-tab";
-import { BotEditor } from "@/components/whatsapp/bot-editor";
+import { BotsManager } from "@/components/whatsapp/bots-manager";
 
 type Tab = "canais" | "templates" | "logs" | "bot";
 const TABS: [Tab, string][] = [
@@ -48,7 +48,7 @@ export default function WhatsappPage() {
       {tab === "canais" && <ChannelsTable />}
       {tab === "templates" && <TemplatesTab />}
       {tab === "logs" && <TemplateLogsTab />}
-      {tab === "bot" && <BotEditor />}
+      {tab === "bot" && <BotsManager />}
     </div>
   );
 }

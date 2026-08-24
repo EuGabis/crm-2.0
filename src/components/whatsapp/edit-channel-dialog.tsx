@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { whatsappActions } from "@/lib/data/repos/db/whatsapp";
+import { useBotFlowOptions } from "@/lib/data/repos/db/bot-flows";
 
 interface Channel {
   id: string;
@@ -24,10 +25,6 @@ interface Channel {
 }
 
 // Fluxos de bot disponíveis (config-driven por enquanto).
-const BOT_FLOWS: { value: string; label: string }[] = [
-  { value: "", label: "Nenhum (sem bot)" },
-  { value: "triagem", label: "Triagem Comercial" },
-];
 
 /**
  * Edita nome, setor e limite diário de um canal. Os identificadores da Meta
@@ -45,6 +42,7 @@ export function EditChannelDialog({
 }) {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ name: "", sector: "", dailyLimit: "1000", botFlow: "" });
+  const { options: botOptions } = useBotFlowOptions();
 
   useEffect(() => {
     if (channel) {
@@ -120,7 +118,8 @@ export function EditChannelDialog({
               onChange={(e) => setForm((f) => ({ ...f, botFlow: e.target.value }))}
               className="h-8 rounded-md border bg-white px-2 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-300"
             >
-              {BOT_FLOWS.map((b) => (
+              <option value="">Nenhum (sem bot)</option>
+              {botOptions.map((b) => (
                 <option key={b.value} value={b.value}>
                   {b.label}
                 </option>

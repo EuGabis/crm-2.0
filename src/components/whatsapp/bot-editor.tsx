@@ -44,8 +44,14 @@ function nodeLabel(node: BotNode): string {
   }
 }
 
-export function BotEditor() {
-  const { flow, ready, saving, save, reset } = useBotFlow(FLOW_KEY);
+export function BotEditor({
+  flowKey = FLOW_KEY,
+  onBack,
+}: {
+  flowKey?: string;
+  onBack?: () => void;
+} = {}) {
+  const { flow, ready, saving, save, reset } = useBotFlow(flowKey);
   const [draft, setDraft] = useState<BotFlow | null>(null);
 
   // Sincroniza o rascunho local quando o fluxo carrega/salva/reseta.
@@ -95,11 +101,21 @@ export function BotEditor() {
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3 rounded-xl border bg-indigo-50/50 p-3">
-        <p className="text-xs text-slate-600">
-          Edite o que a <strong>Lita</strong> fala e pergunta, as opções das listas, o peso de
-          cada resposta na qualificação e para qual etapa do funil o card vai. As mudanças valem
-          para os números de WhatsApp com o bot <strong>Triagem Comercial</strong> ligado.
-        </p>
+        <div className="min-w-0">
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="mb-1 flex items-center gap-1 text-[11px] font-medium text-indigo-600 hover:underline"
+            >
+              ← Voltar aos bots
+            </button>
+          )}
+          <p className="text-sm font-bold text-slate-800">{draft.name}</p>
+          <p className="text-xs text-slate-600">
+            Edite o que o bot fala e pergunta, as opções das listas e para quem transfere ao final.
+            Ligue este bot a um número em <strong>Canais → editar → Bot de atendimento</strong>.
+          </p>
+        </div>
         <div className="flex shrink-0 gap-2">
           <Button variant="outline" className="h-8 text-xs" onClick={handleReset}>
             <RotateCcw className="mr-1 h-3.5 w-3.5" /> Padrão
