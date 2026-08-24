@@ -5,6 +5,7 @@ import { Plus, Trash2, RotateCcw, Save, GripVertical } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useBotFlow } from "@/lib/data/repos/db/bot-flows";
+import { useDbTeam } from "@/lib/data/repos/db/contacts";
 import { normalize, type BotFlow, type BotNode, type BotOption } from "@/lib/bot/types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -33,7 +34,9 @@ function nodeLabel(node: BotNode): string {
     case "handoff":
       return node.to === "ia"
         ? "Encerramento — Agente de IA assume"
-        : "Encerramento — distribui pro atendente (rodízio)";
+        : node.to === "usuario"
+          ? "Encerramento — transfere para um atendente específico"
+          : "Encerramento — distribui pro atendente (rodízio)";
     case "distribute":
       return "Encerramento — distribui por rodízio";
     case "end":
@@ -373,6 +376,7 @@ function TerminalSelect({
   node: Extract<BotNode, { type: "handoff" | "end" | "distribute" }>;
   onPatch: (id: string, patch: Partial<any>) => void;
 }) {
+  const team = useDbTeam();
   const value =
     node.type === "end"
       ? "encerrar"
@@ -380,27 +384,51 @@ function TerminalSelect({
         ? "distribuir"
         : node.to === "ia"
           ? "ia"
-          : "humano";
+          : node.to === "usuario"
+            ? "usuario"
+            : "humano";
+  const assignTo = node.type === "handoff" ? node.assignTo ?? "" : "";
   return (
-    <label className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-      Ao terminar:
-      <select
-        className="h-8 rounded-lg border px-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-400"
-        value={value}
-        onChange={(e) => {
-          const v = e.target.value;
-          if (v === "humano") onPatch(node.id, { type: "handoff", to: "humano" });
-          else if (v === "ia") onPatch(node.id, { type: "handoff", to: "ia" });
-          else if (v === "distribuir") onPatch(node.id, { type: "distribute" });
-          else onPatch(node.id, { type: "end" });
-        }}
-      >
-        <option value="humano">Passar pro atendente (rodízio)</option>
-        <option value="distribuir">Distribuir por rodízio (atendentes online)</option>
-        <option value="ia">Deixar o Agente de IA responder</option>
-        <option value="encerrar">Só enviar a mensagem e encerrar</option>
-      </select>
-    </label>
+    <div className="space-y-2">
+      <label className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+        Ao terminar:
+        <select
+          className="h-8 rounded-lg border px-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+          value={value}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "humano") onPatch(node.id, { type: "handoff", to: "humano", assignTo: undefined });
+            else if (v === "ia") onPatch(node.id, { type: "handoff", to: "ia", assignTo: undefined });
+            else if (v === "usuario") onPatch(node.id, { type: "handoff", to: "usuario" });
+            else if (v === "distribuir") onPatch(node.id, { type: "distribute" });
+            else onPatch(node.id, { type: "end" });
+          }}
+        >
+          <option value="humano">Passar pro atendente (rodízio)</option>
+          <option value="distribuir">Distribuir por rodízio (atendentes online)</option>
+          <option value="usuario">Transferir para um atendente específico</option>
+          <option value="ia">Deixar o Agente de IA responder</option>
+          <option value="encerrar">Só enviar a mensagem e encerrar</option>
+        </select>
+      </label>
+      {value === "usuario" && (
+        <label className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+          Atendente:
+          <select
+            className="h-8 rounded-lg border px-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            value={assignTo}
+            onChange={(e) => onPatch(node.id, { type: "handoff", to: "usuario", assignTo: e.target.value })}
+          >
+            <option value="">Escolher atendente...</option>
+            {team.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+    </div>
   );
 }
 

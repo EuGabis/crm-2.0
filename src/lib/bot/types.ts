@@ -87,7 +87,15 @@ export type BotNode =
   // Encerra o script e entrega a conversa. `to`:
   //  - "humano" (padrão): pausa o bot (bot_paused = true), um atendente assume.
   //  - "ia": deixa o Agente de IA principal responder as próximas mensagens.
-  | { id: string; type: "handoff"; text?: string; to?: "humano" | "ia" }
+  | {
+      id: string;
+      type: "handoff";
+      text?: string;
+      /** "humano" (rodízio), "ia" (agente de IA) ou "usuario" (atendente fixo). */
+      to?: "humano" | "ia" | "usuario";
+      /** Quando `to = "usuario"`: id do atendente que recebe a conversa + o card. */
+      assignTo?: string;
+    }
   // Distribui o lead por RODÍZIO entre os atendentes do pool do número que estão
   // online (≤ 5 min). Atribui a conversa + dono do card. Se ninguém online, marca
   // "aguardando distribuição" para o admin distribuir depois (Etapa B).

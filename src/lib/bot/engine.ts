@@ -7,7 +7,7 @@
 import { sendText, sendInteractiveList } from "@/lib/whatsapp/client";
 import { toWhatsAppNumber } from "@/lib/whatsapp/phone";
 import { chat } from "@/lib/ai/openai";
-import { channelDepartmentId, distributeOne } from "@/lib/leads/distribution";
+import { channelDepartmentId, distributeOne, assignLeadTo } from "@/lib/leads/distribution";
 import { normalize, type BotFlow, type BotNode, type BotOption } from "./types";
 import { triagemFlow } from "./flows/triagem";
 
@@ -492,9 +492,22 @@ async function advance(
       return;
     } else if (node.type === "handoff") {
       if (node.text) await botSend(ctx, render(node.text, vars));
-      if ((node.to ?? "humano") === "ia") {
+      const to = node.to ?? "humano";
+      if (to === "ia") {
         // IA principal responde as próximas mensagens (auto-reply).
         await botLogEvent(ctx, "Conversa transferida de Bot para o Agente de IA");
+      } else if (to === "usuario" && node.assignTo) {
+        // Atendente FIXO escolhido no fluxo: recebe a conversa + o card e o bot
+        // pausa (mesma mecânica do rodízio, mas sem rodízio).
+        await assignLeadTo(
+          ctx.db,
+          {
+            conversationId: ctx.conversationId,
+            contactId: ctx.contact.id,
+            locationId: ctx.channel.location_id,
+          },
+          node.assignTo,
+        );
       } else {
         // "humano" = passar pro atendimento: distribui por rodízio (escolhe UM
         // atendente e registra pra quem foi), igual ao nó "distribuir". Assim o
