@@ -18,7 +18,7 @@ export const CATEGORY_LABEL: Record<NodeCategory, string> = {
 export const TRIGGERS: CatalogNode[] = [
   { key: "etapa-alterada", label: "Etapa do funil alterada", category: "oportunidade" },
   { key: "tag-contato", label: "Tag de contato", category: "contato" },
-  { key: "cliente-respondeu", label: "Cliente respondeu", category: "contato" },
+  { key: "cliente-respondeu", label: "Cliente enviou mensagem", category: "contato" },
   { key: "compromisso-agendado", label: "Compromisso agendado", category: "contato" },
   { key: "contato-criado", label: "Contato criado", category: "contato" },
   { key: "aniversario", label: "Lembrete de aniversário", category: "contato" },
