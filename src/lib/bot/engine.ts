@@ -10,11 +10,13 @@ import { chat } from "@/lib/ai/openai";
 import { channelDepartmentId, distributeOne, assignLeadTo } from "@/lib/leads/distribution";
 import { normalize, type BotFlow, type BotNode, type BotOption } from "./types";
 import { triagemFlow } from "./flows/triagem";
+import { secretariaFlow } from "./flows/secretaria";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 const FLOWS: Record<string, BotFlow> = {
   [triagemFlow.key]: triagemFlow,
+  [secretariaFlow.key]: secretariaFlow,
 };
 
 /** Carrega a definição editável do banco (bot_flows); cai no fluxo embutido. */

@@ -5,12 +5,14 @@ import { createClient } from "@/lib/supabase/client";
 import { useDbStore } from "./contacts";
 import type { BotFlow } from "@/lib/bot/types";
 import { triagemFlow } from "@/lib/bot/flows/triagem";
+import { secretariaFlow } from "@/lib/bot/flows/secretaria";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /** Fluxos embutidos usados como padrão até a empresa salvar uma versão editada. */
 const DEFAULTS: Record<string, BotFlow> = {
   [triagemFlow.key]: triagemFlow,
+  [secretariaFlow.key]: secretariaFlow,
 };
 
 /**
