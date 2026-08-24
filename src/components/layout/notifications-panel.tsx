@@ -225,9 +225,27 @@ export function NotificationsPanel() {
    */
   const seeded = useRef(false);
   const locationId = useDbStore((s) => s.locationId);
-  // Venda é assunto de quem enxerga Pagamentos — mesmo guard da sidebar.
-  const { can } = useMyMembership();
-  const canPayments = can("pagamentos");
+  /**
+   * Venda é assunto de quem enxerga Pagamentos — mesmo guard da sidebar.
+   *
+   * ⚠️ Aqui o aviso exige a linha do membro CARREGADA, e não é zelo excessivo:
+   * `canAccess` devolve `true` quando não acha o membro (`if (!member) return
+   * true` — o legado dos membros com `{}`), e no primeiro `refresh` o
+   * `useTeamStore` ainda está carregando, então `me` é null e TODO mundo passa
+   * por "pode ver Pagamentos" por um instante. Esse instante bastava: a
+   * varredura consultava `payment_new_sales` (a RLS de `payment_events` libera
+   * qualquer membro da empresa — quem esconde a aba é o app), gravava as vendas
+   * no arquivo do localStorage, e o arquivo é PERMANENTE. Quando a permissão
+   * real chegava, `mergeArchive` só atualiza e acrescenta: as vendas ficavam no
+   * sino de quem não vê a aba, para sempre.
+   *
+   * O teste é `me`, não o `loaded` da store: `useTeamStore.load()` marca
+   * `loaded: true` mesmo quando a consulta falha, e aí `members` fica vazio,
+   * `me` volta a ser null e a janela permissiva reabriria calada. Sem saber
+   * quem é, o sino NÃO avisa — falha tem que fechar, não abrir.
+   */
+  const { can, me, isAdmin } = useMyMembership();
+  const canPayments = isAdmin || (!!me && can("pagamentos"));
 
   const refresh = useCallback(async () => {
     await useDbStore.getState().load();
@@ -444,7 +462,13 @@ export function NotificationsPanel() {
     ].sort((x, y) => y.at.localeCompare(x.at));
 
     // O arquivo é a fonte da tela; a consulta só atualiza e acrescenta.
-    const before = loadArchive();
+    // Exceção: aviso de venda de quem NÃO vê Pagamentos é apagado do arquivo.
+    // Só deixar de acrescentar não bastava — o que a janela permissiva já
+    // gravou (ver `permLoaded` acima) ficaria no sino para sempre. Também
+    // limpa sozinho quem PERDEU o acesso depois.
+    const before = canPayments
+      ? loadArchive()
+      : loadArchive().filter((i) => i.kind !== "venda");
     const merged = mergeArchive(before, next);
     saveArchive(merged);
     setItems(merged);
