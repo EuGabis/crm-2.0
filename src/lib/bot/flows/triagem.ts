@@ -7,14 +7,19 @@ import type { BotFlow } from "../types";
  *   - já CADASTRADO (etiqueta "cadastrado")  → pede e-mail → atualiza e-mail
  *   - NÃO cadastrado                          → pede nome  → pede e-mail → atualiza
  *   → pergunta o curso
- *   → lista de ASSUNTO (Documentos/Prova Sub · Imersão Pres. MMA · Outros)
- *   → "como posso te ajudar" → mensagem de fila
- *   → TRANSFERE para um atendente específico (escolhido na aba Bot por assunto).
+ *   → lista de ASSUNTO — CADA opção segue pro SEU ramo:
+ *        "como posso te ajudar" → mensagem de fila → TRANSFERE para um atendente
+ *        específico (escolhido na aba Bot).
  *
  * As transferências nascem SEM atendente escolhido (`assignTo` vazio) — abra a
- * aba Bot, escolha a pessoa em cada "Transferir para atendente específico" e
- * salve. Enquanto não escolher, cai no rodízio do setor.
+ * aba WhatsApp → Bot, escolha a pessoa em cada "Transferir para atendente
+ * específico" e salve. Enquanto não escolher, cai no rodízio do setor.
  */
+const FILA =
+  "Estamos com um número maior de atendimentos, o tempo de resposta aumentou. Por favor, não envie novas mensagens até você ser respondido, para não mudar seu lugar na fila de espera. Basta aguardar que em breve iremos te atender.";
+
+const AJUDA = "Agora, me diga como posso te ajudar.";
+
 export const triagemFlow: BotFlow = {
   key: "triagem",
   name: "Triagem por assunto",
@@ -26,7 +31,6 @@ export const triagemFlow: BotFlow = {
       text: "Saudações Aeronáuticas! 🛩️ Eu sou a Lita, assistente virtual da Lito Academy.",
       next: "cria_card",
     },
-    // Garante um card do lead em NOVO LEAD já na 1ª mensagem.
     cria_card: {
       id: "cria_card",
       type: "ensure_card",
@@ -53,12 +57,7 @@ export const triagemFlow: BotFlow = {
       validate: "name",
       next: "salva_nome",
     },
-    salva_nome: {
-      id: "salva_nome",
-      type: "set_name",
-      fromVar: "nome",
-      next: "pede_email",
-    },
+    salva_nome: { id: "salva_nome", type: "set_name", fromVar: "nome", next: "pede_email" },
 
     // ---- Ambos: e-mail cadastrado → atualiza no sistema ----
     pede_email: {
@@ -85,7 +84,7 @@ export const triagemFlow: BotFlow = {
       next: "pede_assunto",
     },
 
-    // ---- Assunto (lista de opções) ----
+    // ---- Assunto: cada opção vai pro SEU ramo (sem condição no meio) ----
     pede_assunto: {
       id: "pede_assunto",
       type: "ask",
@@ -93,64 +92,26 @@ export const triagemFlow: BotFlow = {
       var: "assunto",
       listButton: "Ver opções",
       options: [
-        { id: "docs", title: "Documentos/Prova Sub", value: "docs" },
-        { id: "imersao", title: "Imersão Pres. MMA", value: "imersao" },
-        { id: "outros", title: "Outros", value: "outros" },
+        { id: "docs", title: "Documentos/Prova Sub", value: "docs", next: "ajuda_docs" },
+        { id: "imersao", title: "Imersão Pres. MMA", value: "imersao", next: "ajuda_imersao" },
+        { id: "outros", title: "Outros", value: "outros", next: "ajuda_outros" },
       ],
-      next: "pede_ajuda",
+      next: "ajuda_outros",
     },
 
-    // ---- Comum a todos os assuntos ----
-    pede_ajuda: {
-      id: "pede_ajuda",
-      type: "ask",
-      text: "Agora, me diga como posso te ajudar.",
-      var: "detalhe",
-      next: "msg_fila",
-    },
-    msg_fila: {
-      id: "msg_fila",
-      type: "message",
-      text: "Estamos com um número maior de atendimentos, o tempo de resposta aumentou. Por favor, não envie novas mensagens até você ser respondido, para não mudar seu lugar na fila de espera. Basta aguardar que em breve iremos te atender.",
-      next: "rota_transfer_1",
-    },
+    // ---- Ramo Documentos/Prova Sub ----
+    ajuda_docs: { id: "ajuda_docs", type: "ask", text: AJUDA, var: "detalhe", next: "fila_docs" },
+    fila_docs: { id: "fila_docs", type: "message", text: FILA, next: "transfere_docs" },
+    transfere_docs: { id: "transfere_docs", type: "handoff", to: "usuario", assignTo: "" },
 
-    // ---- Roteia a transferência pelo assunto ----
-    rota_transfer_1: {
-      id: "rota_transfer_1",
-      type: "condition",
-      var: "assunto",
-      equals: "docs",
-      ifTrue: "transfere_docs",
-      ifFalse: "rota_transfer_2",
-    },
-    rota_transfer_2: {
-      id: "rota_transfer_2",
-      type: "condition",
-      var: "assunto",
-      equals: "imersao",
-      ifTrue: "transfere_imersao",
-      ifFalse: "transfere_outros",
-    },
+    // ---- Ramo Imersão Pres. MMA ----
+    ajuda_imersao: { id: "ajuda_imersao", type: "ask", text: AJUDA, var: "detalhe", next: "fila_imersao" },
+    fila_imersao: { id: "fila_imersao", type: "message", text: FILA, next: "transfere_imersao" },
+    transfere_imersao: { id: "transfere_imersao", type: "handoff", to: "usuario", assignTo: "" },
 
-    // ---- Transferências (escolha o atendente de cada uma na aba Bot) ----
-    transfere_docs: {
-      id: "transfere_docs",
-      type: "handoff",
-      to: "usuario",
-      assignTo: "",
-    },
-    transfere_imersao: {
-      id: "transfere_imersao",
-      type: "handoff",
-      to: "usuario",
-      assignTo: "",
-    },
-    transfere_outros: {
-      id: "transfere_outros",
-      type: "handoff",
-      to: "usuario",
-      assignTo: "",
-    },
+    // ---- Ramo Outros ----
+    ajuda_outros: { id: "ajuda_outros", type: "ask", text: AJUDA, var: "detalhe", next: "fila_outros" },
+    fila_outros: { id: "fila_outros", type: "message", text: FILA, next: "transfere_outros" },
+    transfere_outros: { id: "transfere_outros", type: "handoff", to: "usuario", assignTo: "" },
   },
 };

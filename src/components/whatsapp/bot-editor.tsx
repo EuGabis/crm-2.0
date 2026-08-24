@@ -30,7 +30,7 @@ function nodeLabel(node: BotNode): string {
     case "sync_card":
       return "Atualiza o card no funil";
     case "condition":
-      return "Roteia conforme a qualificação";
+      return `Desvio: se "${node.var}" = "${node.equals}"`;
     case "handoff":
       return node.to === "ia"
         ? "Encerramento — Agente de IA assume"
@@ -204,7 +204,7 @@ function NodeEditor({
           <span className="font-mono">{node.var}</span>
         </p>
         {node.options?.length ? (
-          <OptionsEditor node={node} onPatch={onPatch} />
+          <OptionsEditor node={node} nodes={nodes} onPatch={onPatch} />
         ) : null}
       </div>
     );
@@ -255,14 +255,23 @@ function NodeEditor({
   );
 }
 
+function shortNodeLabel(n: BotNode): string {
+  const txt = (n as any).text as string | undefined;
+  const base = txt ? txt.replace(/\s+/g, " ").slice(0, 32) : nodeLabel(n);
+  return `${n.id} — ${base}`;
+}
+
 function OptionsEditor({
   node,
+  nodes,
   onPatch,
 }: {
   node: Extract<BotNode, { type: "ask" }>;
+  nodes: Record<string, BotNode>;
   onPatch: (id: string, patch: Partial<any>) => void;
 }) {
   const options = node.options ?? [];
+  const nodeList = Object.values(nodes);
   function setOptions(next: BotOption[]) {
     onPatch(node.id, { options: next });
   }
@@ -303,6 +312,23 @@ function OptionsEditor({
             onChange={(e) => update(idx, { description: e.target.value })}
             placeholder="Descrição (texto secundário — opcional)"
           />
+          <label className="ml-5 flex items-center gap-1.5 text-[10px] text-slate-500">
+            Ao escolher, ir para:
+            <select
+              className="h-7 flex-1 rounded-lg border px-1.5 text-[11px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+              value={opt.next ?? ""}
+              onChange={(e) => update(idx, { next: e.target.value || undefined })}
+            >
+              <option value="">(seguir o próximo passo padrão)</option>
+              {nodeList
+                .filter((n) => n.id !== node.id)
+                .map((n) => (
+                  <option key={n.id} value={n.id}>
+                    {shortNodeLabel(n)}
+                  </option>
+                ))}
+            </select>
+          </label>
         </div>
       ))}
       {options.length < 10 && (

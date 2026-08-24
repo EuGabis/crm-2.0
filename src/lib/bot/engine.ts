@@ -569,6 +569,7 @@ export async function maybeRunBot(
     vars = session.vars ?? {};
     const node = flow.nodes[session.node_id ?? ""] as any;
     if (session.status === "aguardando" && node?.type === "ask") {
+      let optNext: string | undefined;
       const ctx: Ctx = {
         db,
         channel,
@@ -585,6 +586,8 @@ export async function maybeRunBot(
           return true;
         }
         vars[node.var] = opt.value ?? opt.title;
+        // Ramifica por opção: se a opção tem destino próprio, vai por ele.
+        if (opt.next) optNext = opt.next;
       } else if (node.validate === "name") {
         const name = await extractName(args.text);
         if (name) {
@@ -610,7 +613,7 @@ export async function maybeRunBot(
       } else {
         vars[node.var] = args.text;
       }
-      startNode = node.next;
+      startNode = optNext ?? node.next;
     } else {
       startNode = session.node_id ?? flow.start;
     }

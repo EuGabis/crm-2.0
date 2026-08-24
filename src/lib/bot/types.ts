@@ -14,6 +14,9 @@ export interface BotOption {
   description?: string;
   /** Valor guardado na variável (default = title). Usado no score/condição. */
   value?: string;
+  /** Para onde ir quando ESTA opção é escolhida (ramifica por opção). Sem isso,
+   *  segue o `next` da pergunta. */
+  next?: string;
 }
 
 export type BotNode =
