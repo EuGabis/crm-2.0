@@ -371,7 +371,7 @@ function MessageBubble({ message }: { message: Message }) {
     <div className={cn("flex", isOut ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[70%] rounded-2xl px-3.5 py-2 text-[13px]",
+          "max-w-[70%] overflow-hidden break-words rounded-2xl px-3.5 py-2 text-[13px]",
           message.internal
             ? "border border-amber-200 bg-amber-50 text-amber-900"
             : isOut
@@ -391,7 +391,7 @@ function MessageBubble({ message }: { message: Message }) {
         message.type === "file" ? (
           <MediaContent message={message} out={isOut && !message.internal} />
         ) : (
-          message.body
+          <span className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</span>
         )}
         <p
           className={cn(
@@ -791,7 +791,7 @@ export function Thread({
           const el = e.currentTarget;
           pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
         }}
-        className="min-h-0 flex-1 overflow-y-auto bg-slate-50 p-4 [scrollbar-width:thin]"
+        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-slate-50 p-4 [scrollbar-width:thin]"
       >
         <div ref={contentRef} className="space-y-2">
         {loadingMessages && messages.length === 0 && (
