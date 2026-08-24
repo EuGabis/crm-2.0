@@ -253,6 +253,18 @@
   --tw-shadow-color: rgba(0,0,0,0.5);
 }
 
+/* Scrollbars discretas no dark */
+.dark * { scrollbar-color: #2a2e3a transparent; }
+.dark ::-webkit-scrollbar { width: 10px; height: 10px; }
+.dark ::-webkit-scrollbar-track { background: transparent; }
+.dark ::-webkit-scrollbar-thumb {
+  background: #2a2e3a; border-radius: 8px; border: 2px solid transparent; background-clip: padding-box;
+}
+.dark ::-webkit-scrollbar-thumb:hover { background: #3a4050; background-clip: padding-box; }
+
+/* Anel de foco/seleção de texto no tom da marca */
+.dark ::selection { background: rgba(99,102,241,0.35); }
+
 /* Transição suave ao alternar tema */
 html { transition: background-color 0.2s ease; }
 body { transition: background-color 0.2s ease, color 0.2s ease; }
