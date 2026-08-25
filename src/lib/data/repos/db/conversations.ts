@@ -881,31 +881,40 @@ export const conversationActions = {
   async close(conversationId: string, done: boolean): Promise<boolean> {
     const supabase = createClient();
     const { data: auth } = await supabase.auth.getUser();
+    const uid = auth.user?.id ?? null;
+    const closedAt = done ? new Date().toISOString() : null;
     const patch = done
       ? {
-          closed_at: new Date().toISOString(),
-          closed_by: auth.user?.id ?? null,
+          closed_at: closedAt,
+          closed_by: uid,
           // Finalizou = atendimento encerrado: solta o responsável (volta pra fila
           // sem dono). Se o cliente voltar, é redistribuído/reassumido.
           assigned_to: null,
         }
       : { closed_at: null, closed_by: null };
-    const { data, error } = await supabase
+    // SEM .select(): ao soltar o responsável, o próprio usuário pode perder a
+    // visibilidade da linha pela RLS e o select voltaria vazio — fazendo o close
+    // reportar falha mesmo tendo funcionado. Atualizamos o store localmente.
+    const { error } = await supabase
       .from("conversations")
       .update(patch)
-      .eq("id", conversationId)
-      .select()
-      .single();
-    if (error || !data) return false;
+      .eq("id", conversationId);
+    if (error) return false;
     const s = useConvStore.getState();
     s.patch({
       conversations: s.conversations.map((c) =>
-        c.id === conversationId ? mapConversation(data) : c
+        c.id === conversationId
+          ? {
+              ...c,
+              closedAt,
+              closedBy: done ? uid : null,
+              ...(done ? { assignedTo: null } : {}),
+            }
+          : c
       ),
     });
     // Log inline (pílula cinza) que fica no histórico mesmo depois de reabrir — o
     // banner do topo some ao reabrir; o log permanece.
-    const uid = useDbStore.getState().userId;
     const actor = useTeamStore.getState().members.find((m) => m.userId === uid)?.name ?? "Alguém";
     void conversationActions.logEvent(
       conversationId,

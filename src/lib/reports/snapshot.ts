@@ -6,6 +6,8 @@
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import { statusForStageName } from "@/lib/leads/distribution";
+
 export const REPORT_WINDOW_DAYS = 30;
 // Deltas cliente→resposta acima disso são "no dia seguinte"/ruído.
 const MAX_RESPONSE_MIN = 24 * 60;
@@ -112,6 +114,13 @@ export async function buildReportSnapshot(
   const nameOf = new Map((profRes.data ?? []).map((p: any) => [p.id, p.name]));
   const deptOf = new Map((deptRes.data ?? []).map((d: any) => [d.id, d.name]));
   const stageName = new Map(stages.map((s: any) => [s.id, s.name]));
+  // Ganho/perda é definido pela FASE (ex.: "Ganho", "Perdido") — mais confiável
+  // que o campo status (que pode ficar defasado em cards criados por bot/import).
+  const oppStatus = (o: any): "open" | "won" | "lost" => {
+    const byStage = statusForStageName(String(stageName.get(o.stage_id) ?? ""));
+    if (byStage !== "open") return byStage;
+    return o.status === "won" || o.status === "lost" ? o.status : "open";
+  };
   const pipeName = new Map(pipelines.map((p: any) => [p.id, p.name]));
   // Atividade de ENVIO é atribuída a quem realmente enviou (messages.created_by),
   // não ao dono da conversa — assim disparos de template feitos em conversa sem
@@ -175,10 +184,11 @@ export async function buildReportSnapshot(
     if (!o.owner_id) continue;
     const cur = oppByUser.get(o.owner_id) ?? { total: 0, won: 0, lost: 0, revenue: 0 };
     cur.total += 1;
-    if (o.status === "won") {
+    const st = oppStatus(o);
+    if (st === "won") {
       cur.won += 1;
       cur.revenue += Number(o.value) || 0;
-    } else if (o.status === "lost") {
+    } else if (st === "lost") {
       cur.lost += 1;
     }
     oppByUser.set(o.owner_id, cur);
@@ -281,10 +291,10 @@ export async function buildReportSnapshot(
     },
     leads: {
       total: opportunities.length,
-      ganhos: opportunities.filter((o: any) => o.status === "won").length,
-      perdidos: opportunities.filter((o: any) => o.status === "lost").length,
+      ganhos: opportunities.filter((o: any) => oppStatus(o) === "won").length,
+      perdidos: opportunities.filter((o: any) => oppStatus(o) === "lost").length,
       receita_ganha_total: opportunities
-        .filter((o: any) => o.status === "won")
+        .filter((o: any) => oppStatus(o) === "won")
         .reduce((s: number, o: any) => s + (Number(o.value) || 0), 0),
     },
     pipeline_por_fase: pipelineResumo,
