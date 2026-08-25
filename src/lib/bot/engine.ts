@@ -588,6 +588,28 @@ export async function maybeRunBot(
   if (session) {
     flow = await getFlow(db, channel.location_id, session.flow_key);
     if (!flow || session.status === "concluido") return false;
+    // "ativo" = OUTRO run está processando esta conversa agora (a saudação/uma
+    // resposta anterior ainda não terminou). Sai sem reprocessar — senão uma 3ª
+    // mensagem rápida re-saudaria. Proteção: se ficou "ativo" há mais de 30s,
+    // é um run que travou → assume e continua do nó atual.
+    if (session.status === "ativo") {
+      const age = Date.now() - new Date(session.updated_at ?? 0).getTime();
+      if (age < 30_000) return true;
+    }
+    // Serializa o turno: se a conversa está esperando resposta, só UM run
+    // processa esta pergunta. Vira "ativo" de forma condicional (mesmo nó); o
+    // run que perder a corrida (resposta dupla e rápida) sai sem reprocessar.
+    if (session.status === "aguardando" && session.node_id) {
+      const { data: claimed } = await db
+        .from("bot_sessions")
+        .update({ status: "ativo", updated_at: new Date().toISOString() })
+        .eq("conversation_id", conversationId)
+        .eq("status", "aguardando")
+        .eq("node_id", session.node_id)
+        .select("conversation_id")
+        .maybeSingle();
+      if (!claimed) return true;
+    }
     vars = session.vars ?? {};
     const node = flow.nodes[session.node_id ?? ""] as any;
     if (session.status === "aguardando" && node?.type === "ask") {
@@ -605,6 +627,9 @@ export async function maybeRunBot(
           // Resposta fora da lista → repergunta (essencial pra qualificação).
           await botSend(ctx, "Para eu continuar, escolha uma das opções da lista, por favor. 🙂");
           await botSendList(ctx, render(node.text, vars), node.listButton, node.options);
+          // Volta a sessão para "aguardando" no mesmo nó (a guarda de corrida a
+          // deixou "ativo"); senão a próxima resposta não seria processada.
+          await saveSession(ctx, session.node_id ?? null, "aguardando", vars);
           return true;
         }
         vars[node.var] = opt.value ?? opt.title;
@@ -643,6 +668,22 @@ export async function maybeRunBot(
     if (!channel.bot_flow) return false;
     flow = await getFlow(db, channel.location_id, channel.bot_flow);
     if (!flow) return false;
+    // Reivindicação ATÔMICA: o Meta manda um webhook POR mensagem, então duas
+    // mensagens seguidas ("oii" + "olá") chegam em execuções PARALELAS que, sem
+    // isso, ambas achavam "sem sessão" e saudavam. O índice único em
+    // conversation_id garante que só UM insert vence; o outro leva 23505 e sai
+    // sem saudar de novo (a mensagem dele já ficou salva no histórico).
+    const { error: claimErr } = await db.from("bot_sessions").insert({
+      conversation_id: conversationId,
+      location_id: channel.location_id,
+      contact_id: contact.id,
+      flow_key: channel.bot_flow,
+      node_id: null,
+      status: "ativo",
+      vars: {},
+      updated_at: new Date().toISOString(),
+    });
+    if (claimErr) return true;
     startNode = flow.start;
     // Sessão NOVA: semeia o estado do contato para a Condição inicial poder
     // ramificar (ex.: já cadastrado?). `tem_cadastro` = "sim" se o contato tem a
