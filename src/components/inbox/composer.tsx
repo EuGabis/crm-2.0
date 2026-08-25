@@ -94,6 +94,18 @@ export function Composer({ conversationId }: { conversationId: string }) {
   const [sending, setSending] = useState(false);
   const [tagInput, setTagInput] = useState("");
   const [uploading, setUploading] = useState(false);
+  // Imagem colada (Ctrl+V) aguardando confirmação — mostra a prévia e só envia
+  // no botão Enviar (usando o texto como legenda).
+  const [pendingImage, setPendingImage] = useState<File | null>(null);
+  const pendingUrl = useMemo(
+    () => (pendingImage ? URL.createObjectURL(pendingImage) : null),
+    [pendingImage]
+  );
+  useEffect(() => {
+    return () => {
+      if (pendingUrl) URL.revokeObjectURL(pendingUrl);
+    };
+  }, [pendingUrl]);
   const [recording, setRecording] = useState(false);
   const [recSecs, setRecSecs] = useState(0);
   const [templateOpen, setTemplateOpen] = useState(false);
@@ -158,7 +170,7 @@ export function Composer({ conversationId }: { conversationId: string }) {
 
   const fmtSecs = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
-  const uploadFile = async (file: File) => {
+  const uploadFile = async (file: File, caption?: string) => {
     const isImg = file.type.startsWith("image/");
     const isVideo = file.type.startsWith("video/");
     const name = file.name.toLowerCase();
@@ -196,6 +208,7 @@ export function Composer({ conversationId }: { conversationId: string }) {
           // "file" no CRM = "document" na Cloud API (com o nome do arquivo).
           kind: kind === "file" ? "document" : kind,
           filename: kind === "file" ? file.name : undefined,
+          caption: caption?.trim() || undefined,
         });
         if (!wa.ok) {
           toast.error(
@@ -301,6 +314,15 @@ export function Composer({ conversationId }: { conversationId: string }) {
   };
 
   const send = async (scheduledFor?: string) => {
+    // Imagem colada aguardando: o Enviar manda a imagem (texto = legenda).
+    if (pendingImage && !internal && !scheduledFor) {
+      const file = pendingImage;
+      const caption = body;
+      setPendingImage(null);
+      setBody("");
+      await uploadFile(file, caption);
+      return;
+    }
     if (conversation?.channel === "whatsapp" && !conversation?.channelId && !internal && !scheduledFor) {
       toast.error("Cadastre um canal de WhatsApp em Canais de atendimento para enviar.");
       return;
@@ -466,6 +488,30 @@ export function Composer({ conversationId }: { conversationId: string }) {
           </button>
         </div>
       )}
+      {pendingImage && pendingUrl && (
+        <div className="mb-2 flex items-start gap-3 rounded-lg border border-indigo-200 bg-indigo-50/60 p-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={pendingUrl}
+            alt="Prévia"
+            className="max-h-28 max-w-[160px] rounded-md border object-contain"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold text-slate-700">Imagem colada</p>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              Adicione uma legenda no campo abaixo (opcional) e clique em{" "}
+              <strong>Enviar</strong>.
+            </p>
+          </div>
+          <button
+            onClick={() => setPendingImage(null)}
+            title="Descartar imagem"
+            className="flex size-6 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-200 hover:text-slate-600"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      )}
       <Textarea
         value={body}
         disabled={blocked}
@@ -489,7 +535,8 @@ export function Composer({ conversationId }: { conversationId: string }) {
           e.preventDefault();
           const ext = (imgItem.type.split("/")[1] || "png").replace("jpeg", "jpg");
           const file = new File([blob], `print.${ext}`, { type: imgItem.type });
-          void uploadFile(file);
+          // Não envia direto: mostra a prévia e espera o Enviar.
+          setPendingImage(file);
         }}
         placeholder={
           blocked
