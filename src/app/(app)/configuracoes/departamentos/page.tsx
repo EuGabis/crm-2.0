@@ -616,6 +616,7 @@ function DepartmentDialog({
   const [permissions, setPermissions] = useState<ModulePermissions>({});
   const [channelIds, setChannelIds] = useState<string[]>([]);
   const [leadPool, setLeadPool] = useState<string[]>([]);
+  const [colaborativo, setColaborativo] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Membros deste departamento — só eles entram no rodízio.
@@ -634,6 +635,7 @@ function DepartmentDialog({
     );
     setChannelIds(department?.channelIds ?? []);
     setLeadPool(department?.leadPool ?? []);
+    setColaborativo(department?.colaborativo ?? false);
   }, [department, open]);
 
   const toggleChannel = (id: string) =>
@@ -661,8 +663,16 @@ function DepartmentDialog({
           permissions,
           channelIds,
           leadPool,
+          colaborativo,
         })
-      : await departmentActions.create({ name, description, permissions, channelIds, leadPool });
+      : await departmentActions.create({
+          name,
+          description,
+          permissions,
+          channelIds,
+          leadPool,
+          colaborativo,
+        });
     setSaving(false);
     if (!res.ok) {
       toast.error(res.error ?? "Não foi possível salvar");
@@ -703,6 +713,24 @@ function DepartmentDialog({
             isAllowed={(k) => permissions[k] === true}
             onToggle={(k, allowed) => setPermissions((p) => ({ ...p, [k]: allowed }))}
           />
+
+          {/* Setor colaborativo (migração 0080) */}
+          <Label className="flex cursor-pointer items-start gap-2.5 rounded-lg border p-3">
+            <Checkbox
+              checked={colaborativo}
+              onCheckedChange={(v) => setColaborativo(v === true)}
+              className="mt-0.5"
+            />
+            <span className="space-y-0.5">
+              <span className="block text-xs font-semibold text-slate-800">Setor colaborativo</span>
+              <span className="block text-[11px] font-normal leading-relaxed text-slate-500">
+                Os membros deste setor veem TODAS as conversas do departamento no
+                relatório <span className="font-medium">Conversas do setor</span> e podem
+                assumir a conversa de outro atendente. A caixa de Conversas continua
+                privada (cada um só vê as suas).
+              </span>
+            </span>
+          </Label>
 
           {/* Segmentação por número (migração 0034) */}
           <div>

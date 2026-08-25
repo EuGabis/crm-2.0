@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/button";
 import { formatBRL } from "@/lib/data/repos/opportunities";
 import { usePipelineDb } from "@/lib/data/repos/db/pipeline";
 import { useMyMembership } from "@/lib/data/repos/db/team";
+import { useIsSupervisor } from "@/lib/data/repos/db/sector";
+import { SectorReport } from "@/components/relatorios/sector-report";
 
 const EXAMPLES = [
   "Qual o tempo médio de resposta de cada atendente?",
@@ -276,6 +278,7 @@ function AtribuicaoReport() {
 const TODAS_AS_ABAS = [
   "Análise IA",
   "Atendimento",
+  "Conversas do setor",
   "Agentes",
   "Atribuição",
   "Google Ads",
@@ -302,15 +305,22 @@ function RelatoriosPageInner() {
   // Só abas com dados REAIS. Análise IA e Agentes são de gestão (admin).
   // Atendimento fica com TODO MUNDO que enxerga Relatórios: quem chega aqui já
   // passou pela permissão do módulo, e a rota confere de novo no servidor.
+  const isSupervisor = useIsSupervisor();
   const tabs = isAdmin
     ? [
         { label: "Análise IA" },
         { label: "Atendimento" },
+        { label: "Conversas do setor" },
         { label: "Agentes" },
         { label: "Atribuição" },
         { label: "Google Ads" },
       ]
-    : [{ label: "Atendimento" }, { label: "Atribuição" }, { label: "Google Ads" }];
+    : [
+        { label: "Atendimento" },
+        ...(isSupervisor ? [{ label: "Conversas do setor" }] : []),
+        { label: "Atribuição" },
+        { label: "Google Ads" },
+      ];
   const [tab, setTab] = useState(() => {
     if (urlTab && TODAS_AS_ABAS.includes(urlTab)) return urlTab;
     return isAdmin ? "Análise IA" : "Atendimento";
@@ -323,6 +333,7 @@ function RelatoriosPageInner() {
       <div className="p-6">
         {activeTab === "Análise IA" && isAdmin && <AnaliseIA />}
         {activeTab === "Atendimento" && <ServiceSlaReport />}
+        {activeTab === "Conversas do setor" && isSupervisor && <SectorReport />}
         {activeTab === "Agentes" && isAdmin && <AgentesReport />}
         {activeTab === "Atribuição" && <AtribuicaoReport />}
         {activeTab === "Google Ads" && <GoogleAdsReport />}

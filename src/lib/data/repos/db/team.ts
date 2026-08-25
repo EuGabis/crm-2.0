@@ -30,6 +30,9 @@ export interface Department {
   channelIds: string[];
   /** Atendentes (user_ids) no rodízio de distribuição de leads. Vazio = todos do depto. */
   leadPool: string[];
+  /** Setor colaborativo (0080): membros veem TODAS as conversas do setor no
+   * relatório e podem assumir a de outro atendente. */
+  colaborativo: boolean;
   createdAt: string;
 }
 
@@ -96,6 +99,7 @@ const mapDepartment = (r: any, channelIds: string[] = []): Department => ({
   permissions: r.permissions ?? {},
   channelIds,
   leadPool: r.lead_pool ?? [],
+  colaborativo: r.colaborativo ?? false,
   createdAt: r.created_at,
 });
 
@@ -285,6 +289,7 @@ export const departmentActions = {
     permissions: ModulePermissions;
     channelIds?: string[];
     leadPool?: string[];
+    colaborativo?: boolean;
   }): Promise<{ ok: boolean; error?: string }> {
     const loc = locationId();
     if (!loc) return { ok: false, error: "Empresa não encontrada" };
@@ -298,6 +303,7 @@ export const departmentActions = {
         description: input.description.trim(),
         permissions: input.permissions,
         lead_pool: input.leadPool ?? [],
+        colaborativo: input.colaborativo ?? false,
         created_by: auth.user?.id ?? null,
       })
       .select()
@@ -330,6 +336,7 @@ export const departmentActions = {
       permissions?: ModulePermissions;
       channelIds?: string[];
       leadPool?: string[];
+      colaborativo?: boolean;
     }
   ): Promise<{ ok: boolean; error?: string }> {
     const loc = locationId();
@@ -339,6 +346,7 @@ export const departmentActions = {
     if (patch.description !== undefined) row.description = patch.description.trim();
     if (patch.permissions !== undefined) row.permissions = patch.permissions;
     if (patch.leadPool !== undefined) row.lead_pool = patch.leadPool;
+    if (patch.colaborativo !== undefined) row.colaborativo = patch.colaborativo;
     const supabase = createClient();
     const { data, error } = await supabase
       .from("departments")
