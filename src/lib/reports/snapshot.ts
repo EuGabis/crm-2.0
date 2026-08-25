@@ -82,23 +82,63 @@ export async function buildReportSnapshot(
   const nowIso = new Date().toISOString();
   const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
 
-  const [membersRes, convRes, msgRes, oppRes, pipeRes, stageRes, locRes, apptRes, taskRes] =
-    await Promise.all([
-      supabase.from("location_members").select("user_id, role, department_id").eq("location_id", locationId),
-      supabase.from("conversations").select("id, assigned_to, closed_by, channel_id, closed_at, awaiting_distribution, bot_paused").eq("location_id", locationId),
-      supabase.from("messages").select("conversation_id, direction, type, internal, template_name, created_by, automated, created_at").eq("location_id", locationId).gte("created_at", since).order("created_at"),
-      supabase.from("opportunities").select("owner_id, status, value, stage_id, pipeline_id").eq("location_id", locationId),
-      supabase.from("pipelines").select("id, name").eq("location_id", locationId),
-      supabase.from("stages").select("id, name, pipeline_id"),
-      supabase.from("locations").select("name").eq("id", locationId).maybeSingle(),
-      supabase.from("appointments").select("starts_at").eq("location_id", locationId),
-      supabase.from("tasks").select("status, due_at").eq("location_id", locationId),
-    ]);
+  // PostgREST devolve no máx. 1000 linhas por requisição. Sem paginar, o snapshot
+  // pegava só as 1000 mensagens MAIS ANTIGAS dos 30 dias — as de hoje ficavam de
+  // fora e a IA respondia "0 hoje" pra todo mundo. Paginamos as tabelas grandes.
+  const fetchAll = async (
+    build: (from: number, to: number) => any,
+    maxPages = 60
+  ): Promise<any[]> => {
+    const PAGE = 1000;
+    const all: any[] = [];
+    for (let p = 0; p < maxPages; p++) {
+      const from = p * PAGE;
+      const { data, error } = await build(from, from + PAGE - 1);
+      if (error || !data?.length) break;
+      all.push(...data);
+      if (data.length < PAGE) break;
+    }
+    return all;
+  };
+
+  const [membersRes, pipeRes, stageRes, locRes, apptRes, taskRes] = await Promise.all([
+    supabase.from("location_members").select("user_id, role, department_id").eq("location_id", locationId),
+    supabase.from("pipelines").select("id, name").eq("location_id", locationId),
+    supabase.from("stages").select("id, name, pipeline_id"),
+    supabase.from("locations").select("name").eq("id", locationId).maybeSingle(),
+    supabase.from("appointments").select("starts_at").eq("location_id", locationId),
+    supabase.from("tasks").select("status, due_at").eq("location_id", locationId),
+  ]);
+  const [conversations, messages, opportunities] = await Promise.all([
+    fetchAll((from, to) =>
+      supabase
+        .from("conversations")
+        .select("id, assigned_to, closed_by, channel_id, closed_at, awaiting_distribution, bot_paused")
+        .eq("location_id", locationId)
+        .range(from, to)
+    ),
+    // DESC (mais recentes primeiro) para, se houver volume acima do teto, garantir
+    // que HOJE e os dias recentes entrem. Revertido abaixo para ordem cronológica
+    // (o cálculo de resposta depende da ordem por conversa).
+    fetchAll((from, to) =>
+      supabase
+        .from("messages")
+        .select("conversation_id, direction, type, internal, template_name, created_by, automated, created_at")
+        .eq("location_id", locationId)
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .range(from, to)
+    ).then((rows) => rows.reverse()),
+    fetchAll((from, to) =>
+      supabase
+        .from("opportunities")
+        .select("owner_id, status, value, stage_id, pipeline_id")
+        .eq("location_id", locationId)
+        .range(from, to)
+    ),
+  ]);
 
   const members = membersRes.data ?? [];
-  const conversations = convRes.data ?? [];
-  const messages = msgRes.data ?? [];
-  const opportunities = oppRes.data ?? [];
   const pipelines = pipeRes.data ?? [];
   const stages = stageRes.data ?? [];
   const appointments = apptRes.data ?? [];
