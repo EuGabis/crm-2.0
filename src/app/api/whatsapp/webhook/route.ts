@@ -209,6 +209,15 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
   // agente do zero (nova sessão), sem precisar apagar a conversa.
   const wasClosed = !!(conv && (conv.closed_at || conv.archived_at));
   if (!conv) {
+    // Contato já tem dono? A conversa nova vai DIRETO pra ele (é o lead dele) e o
+    // bot NÃO roda — não faz sentido triar/redistribuir um contato conhecido.
+    // Só entra na fila/bot quando o contato ainda não pertence a ninguém.
+    const { data: ct } = await db
+      .from("contacts")
+      .select("owner_id")
+      .eq("id", contact.id)
+      .maybeSingle();
+    const ownerId: string | null = ct?.owner_id ?? null;
     const { data: created, error: convErr } = await db
       .from("conversations")
       .insert({
@@ -219,6 +228,7 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
         unread_count: 1,
         last_message_at: nowIso,
         last_message_preview: body,
+        ...(ownerId ? { assigned_to: ownerId, bot_paused: true } : {}),
       })
       .select("id")
       .single();
