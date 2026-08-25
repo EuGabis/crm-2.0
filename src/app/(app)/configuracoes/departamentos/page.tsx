@@ -618,6 +618,7 @@ function DepartmentDialog({
   const [leadPool, setLeadPool] = useState<string[]>([]);
   const [colaborativo, setColaborativo] = useState(false);
   const [usaRodizio, setUsaRodizio] = useState(true);
+  const [rodizioOffline, setRodizioOffline] = useState(false);
   const [logoutInatividade, setLogoutInatividade] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -639,6 +640,7 @@ function DepartmentDialog({
     setLeadPool(department?.leadPool ?? []);
     setColaborativo(department?.colaborativo ?? false);
     setUsaRodizio(department?.usaRodizio ?? true);
+    setRodizioOffline(department?.rodizioOffline ?? false);
     setLogoutInatividade(department?.logoutInatividade ?? true);
   }, [department, open]);
 
@@ -669,6 +671,7 @@ function DepartmentDialog({
           leadPool,
           colaborativo,
           usaRodizio,
+          rodizioOffline,
           logoutInatividade,
         })
       : await departmentActions.create({
@@ -679,6 +682,7 @@ function DepartmentDialog({
           leadPool,
           colaborativo,
           usaRodizio,
+          rodizioOffline,
           logoutInatividade,
         });
     setSaving(false);
@@ -823,6 +827,26 @@ function DepartmentDialog({
               </span>
             </span>
           </Label>
+
+          {usaRodizio && (
+            <Label className="ml-4 flex cursor-pointer items-start gap-2.5 rounded-lg border border-dashed p-3">
+              <Checkbox
+                checked={rodizioOffline}
+                onCheckedChange={(v) => setRodizioOffline(v === true)}
+                className="mt-0.5"
+              />
+              <span className="space-y-0.5">
+                <span className="block text-xs font-semibold text-slate-800">
+                  Distribuir mesmo para quem está offline
+                </span>
+                <span className="block text-[11px] font-normal leading-relaxed text-slate-500">
+                  Ligado: o lead entra no rodízio de <strong>todos</strong> do pool,
+                  esteja online ou não (ex.: Secretaria). Desligado: prioriza quem
+                  está online e só usa os offline se ninguém estiver online.
+                </span>
+              </span>
+            </Label>
+          )}
 
           {/* Distribuição de leads por rodízio (migração 0057) */}
           <div className={usaRodizio ? "" : "pointer-events-none opacity-50"}>

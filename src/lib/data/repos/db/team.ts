@@ -35,6 +35,8 @@ export interface Department {
   colaborativo: boolean;
   /** Distribui leads por rodízio? (0081) Desligado = leads ficam na fila do setor. */
   usaRodizio: boolean;
+  /** Distribui mesmo para quem está offline? (0083) */
+  rodizioOffline: boolean;
   /** Aplica o logout automático por inatividade (10 min) aos membros? (0081) */
   logoutInatividade: boolean;
   createdAt: string;
@@ -105,6 +107,7 @@ const mapDepartment = (r: any, channelIds: string[] = []): Department => ({
   leadPool: r.lead_pool ?? [],
   colaborativo: r.colaborativo ?? false,
   usaRodizio: r.usa_rodizio ?? true,
+  rodizioOffline: r.rodizio_offline ?? false,
   logoutInatividade: r.logout_inatividade ?? true,
   createdAt: r.created_at,
 });
@@ -297,6 +300,7 @@ export const departmentActions = {
     leadPool?: string[];
     colaborativo?: boolean;
     usaRodizio?: boolean;
+    rodizioOffline?: boolean;
     logoutInatividade?: boolean;
   }): Promise<{ ok: boolean; error?: string }> {
     const loc = locationId();
@@ -313,6 +317,7 @@ export const departmentActions = {
         lead_pool: input.leadPool ?? [],
         colaborativo: input.colaborativo ?? false,
         usa_rodizio: input.usaRodizio ?? true,
+        rodizio_offline: input.rodizioOffline ?? false,
         logout_inatividade: input.logoutInatividade ?? true,
         created_by: auth.user?.id ?? null,
       })
@@ -348,6 +353,7 @@ export const departmentActions = {
       leadPool?: string[];
       colaborativo?: boolean;
       usaRodizio?: boolean;
+      rodizioOffline?: boolean;
       logoutInatividade?: boolean;
     }
   ): Promise<{ ok: boolean; error?: string }> {
@@ -360,6 +366,7 @@ export const departmentActions = {
     if (patch.leadPool !== undefined) row.lead_pool = patch.leadPool;
     if (patch.colaborativo !== undefined) row.colaborativo = patch.colaborativo;
     if (patch.usaRodizio !== undefined) row.usa_rodizio = patch.usaRodizio;
+    if (patch.rodizioOffline !== undefined) row.rodizio_offline = patch.rodizioOffline;
     if (patch.logoutInatividade !== undefined) row.logout_inatividade = patch.logoutInatividade;
     const supabase = createClient();
     const { data, error } = await supabase

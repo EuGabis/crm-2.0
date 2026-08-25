@@ -169,9 +169,18 @@ export async function distributeOne(
   const { pool, cursor } = await departmentPool(db, args.locationId, args.deptId);
   if (!pool.length) return null; // sem pool/departamento → segura (aguardando)
   const online = await onlineOrdered(db, args.locationId, pool);
-  const offline = online.length === 0;
-  const list = offline ? pool : online; // todos off → todos entram no rodízio
+  // Departamento pode distribuir mesmo pra offline (0083): usa o pool inteiro
+  // independente da presença. Senão, o padrão: online primeiro, offline só se
+  // todos estiverem offline.
+  const { data: dep } = await db
+    .from("departments")
+    .select("rodizio_offline")
+    .eq("id", args.deptId)
+    .maybeSingle();
+  const alwaysAll = dep?.rodizio_offline === true;
+  const list = alwaysAll || online.length === 0 ? pool : online;
   const user = list[cursor % list.length];
+  const offline = !online.includes(user); // marca "offline" se o escolhido não está online
   await db.from("departments").update({ rr_cursor: cursor + 1 }).eq("id", args.deptId);
   await assignLeadTo(
     db,
@@ -201,12 +210,20 @@ export async function distributeDepartment(
   if (!convs.length) return 0;
   const { pool, cursor } = await departmentPool(db, locationId, deptId);
   const online = await onlineOrdered(db, locationId, pool);
-  if (!online.length) return 0;
+  // Departamento que distribui mesmo offline (0083) usa o pool inteiro; senão,
+  // só os online (e não distribui nada se ninguém online).
+  const { data: dep } = await db
+    .from("departments")
+    .select("rodizio_offline")
+    .eq("id", deptId)
+    .maybeSingle();
+  const list = dep?.rodizio_offline === true ? pool : online;
+  if (!list.length) return 0;
 
   const take = Math.min(convs.length, Math.max(1, Math.ceil(convs.length * fraction)));
   for (let i = 0; i < take; i++) {
     const conv = convs[i];
-    const user = online[(cursor + i) % online.length];
+    const user = list[(cursor + i) % list.length];
     await assignLeadTo(
       db,
       {
@@ -216,6 +233,7 @@ export async function distributeDepartment(
         pipelineName: "Controle de Leads",
       },
       user,
+      !online.includes(user),
     );
   }
   await db.from("departments").update({ rr_cursor: cursor + take }).eq("id", deptId);
