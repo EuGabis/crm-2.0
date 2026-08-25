@@ -56,7 +56,7 @@ const useFilesStore = create<FilesState>((setState, get) => ({
   load: async () => {
     if (get().loaded || get().loading) return;
     setState({ loading: true });
-    await useDbStore.getState().load();
+    await useDbStore.getState().ensureSession();
     const locationId = useDbStore.getState().locationId;
     if (!locationId) {
       setState({ loading: false, loaded: true });

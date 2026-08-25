@@ -3,7 +3,6 @@
 import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { useApptStore } from "@/lib/data/repos/db/appointments";
-import { useDbStore } from "@/lib/data/repos/db/contacts";
 import { useModuleStore } from "@/lib/data/repos/db/contacts-module";
 import { usePipelineDbStore } from "@/lib/data/repos/db/pipeline";
 
@@ -33,7 +32,9 @@ const ROUTE_RELOADS: { prefix: string; reload: () => Promise<void> }[] = [
   // Leads e painel leem o mesmo funil.
   { prefix: "/leads", reload: () => usePipelineDbStore.getState().reload() },
   { prefix: "/dashboard", reload: () => usePipelineDbStore.getState().reload() },
-  { prefix: "/contatos", reload: () => useDbStore.getState().reload() },
+  // /contatos NÃO relê a lista de contatos: a tela pagina no servidor e relê a
+  // própria página. Revalidar aqui voltaria a baixar os 41 mil a cada entrada
+  // na rota — exatamente o que a tela deixou de fazer.
   { prefix: "/contatos", reload: () => useModuleStore.getState().reload() },
   { prefix: "/calendarios", reload: () => useApptStore.getState().reload() },
 ];

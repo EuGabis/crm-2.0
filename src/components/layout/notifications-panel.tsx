@@ -248,7 +248,7 @@ export function NotificationsPanel() {
   const canPayments = isAdmin || (!!me && can("pagamentos"));
 
   const refresh = useCallback(async () => {
-    await useDbStore.getState().load();
+    await useDbStore.getState().ensureSession();
     const loc = useDbStore.getState().locationId;
     const me = useDbStore.getState().userId;
     if (!loc) return;

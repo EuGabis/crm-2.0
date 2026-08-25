@@ -34,7 +34,7 @@ export const useCountdownStore = create<CountdownState>((set, get) => ({
   load: async () => {
     if (get().loaded || get().loading) return;
     set({ loading: true });
-    await useDbStore.getState().load();
+    await useDbStore.getState().ensureSession();
     const supabase = createClient();
     const { data } = await supabase
       .from("countdowns")

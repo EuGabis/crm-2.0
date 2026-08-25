@@ -183,7 +183,7 @@ export function useLeadPaymentProfile(contact: Contact | null | undefined, enabl
     setLoading(true);
     setError(null);
     (async () => {
-      await useDbStore.getState().load();
+      await useDbStore.getState().ensureSession();
       const loc = useDbStore.getState().locationId;
       if (!loc) {
         if (active) {

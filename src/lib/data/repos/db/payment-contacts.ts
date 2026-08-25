@@ -70,7 +70,7 @@ export function usePaymentContactsSummary(): GuruContactsSummary | null {
   useEffect(() => {
     let active = true;
     (async () => {
-      await useDbStore.getState().load();
+      await useDbStore.getState().ensureSession();
       const loc = useDbStore.getState().locationId;
       if (!loc) {
         if (active) setSummary({ contacts: 0, revenue: 0, withSubs: 0 });
@@ -135,7 +135,7 @@ export function usePaymentContactsPage(
     let active = true;
     setLoading(true);
     (async () => {
-      await useDbStore.getState().load();
+      await useDbStore.getState().ensureSession();
       const loc = useDbStore.getState().locationId;
       if (!loc) {
         if (active) {

@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { contactName } from "@/lib/data/repos/contacts";
+import { createClient } from "@/lib/supabase/client";
 import { dbContactActions, useDbStore } from "@/lib/data/repos/db/contacts";
 import { logBulk } from "@/lib/data/repos/db/contacts-module";
 import type { Contact } from "@/lib/data/types";
@@ -227,15 +228,50 @@ function parseCsv(text: string, known: Set<string>): ParseResult {
 
 const nf = new Intl.NumberFormat("pt-BR");
 
+/**
+ * Quais dessas chaves já existem no CRM.
+ *
+ * ⚠️ Isto era um `Set` montado a partir do array de contatos do store. A tela de
+ * Contatos deixou de carregar os 41 mil (ela pagina no servidor), então esse
+ * array vive vazio e a checagem sumiria EM SILÊNCIO — reimportar o mesmo
+ * arquivo duplicaria o histórico inteiro. Agora quem responde é o banco
+ * (`existing_contact_keys`), com as mesmas chaves: documento, telefone
+ * normalizado e e-mail.
+ */
+async function fetchExistingKeys(rows: ParsedRow[]): Promise<Set<string>> {
+  const locationId = useDbStore.getState().locationId;
+  const out = new Set<string>();
+  if (!locationId || rows.length === 0) return out;
+  const supabase = createClient();
+  // Lotes de 5000 linhas: o corpo da chamada leva as chaves do arquivo inteiro,
+  // e 41 mil de uma vez é um payload grande demais para uma requisição só.
+  const CHUNK = 5000;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const slice = rows.slice(i, i + CHUNK);
+    const { data, error } = await supabase.rpc("existing_contact_keys", {
+      p_location: locationId,
+      p_docs: slice.map((r) => r.doc ?? "").filter(Boolean),
+      p_phones: slice.map((r) => r.phone).filter(Boolean),
+      p_emails: slice.map((r) => r.email).filter(Boolean),
+    });
+    // Falha aqui NÃO pode travar a importação: sem a resposta, o arquivo entra
+    // inteiro (o dedupe interno do próprio arquivo continua valendo).
+    if (error) return out;
+    for (const row of (data ?? []) as { chave: string }[]) out.add(row.chave);
+  }
+  return out;
+}
+
 export function ImportDialog({
   open,
   onOpenChange,
+  onImported,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
+  onImported?: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const contacts = useDbStore((s) => s.contacts);
   const [result, setResult] = useState<ParseResult | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
@@ -252,13 +288,12 @@ export function ImportDialog({
     setParsing(true);
     try {
       const text = await file.text();
-      // Os contatos JÁ carregados servem de filtro: reimportar o mesmo arquivo
-      // não duplica o histórico.
-      const known = new Set<string>();
-      for (const c of contacts) {
-        identityKeys({ doc: c.doc, phone: c.phone, email: c.email }).forEach((k) => known.add(k));
-      }
-      const parsed = parseCsv(text, known);
+      // Duas passadas: a primeira só para saber QUAIS chaves o arquivo traz, a
+      // segunda já sabendo quais delas o CRM tem. Uma passada só exigiria mandar
+      // o arquivo inteiro para o banco antes de saber se vale a pena.
+      const primeira = parseCsv(text, new Set());
+      const known = await fetchExistingKeys(primeira.rows);
+      const parsed = known.size > 0 ? parseCsv(text, known) : primeira;
       if (parsed.rows.length === 0) {
         toast.error(
           parsed.headers.length > 0
@@ -297,6 +332,7 @@ export function ImportDialog({
       toast.success(`${nf.format(r.inserted)} contato(s) importado(s)`);
     }
     reset();
+    onImported?.();
     onOpenChange(false);
   };
 

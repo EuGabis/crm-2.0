@@ -60,7 +60,7 @@ export const useCampaignStore = create<CampaignState>((set, get) => ({
   load: async () => {
     if (get().loaded || get().loading) return;
     set({ loading: true });
-    await useDbStore.getState().load();
+    await useDbStore.getState().ensureSession();
     const supabase = createClient();
     const { data } = await supabase
       .from("email_campaigns")

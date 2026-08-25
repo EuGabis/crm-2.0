@@ -129,7 +129,7 @@ export const useTeamStore = create<TeamState>((set, get) => ({
   load: async (force = false) => {
     if ((get().loaded && !force) || get().loading) return;
     set({ loading: true });
-    await useDbStore.getState().load();
+    await useDbStore.getState().ensureSession();
     const locationId = useDbStore.getState().locationId;
     if (!locationId) {
       set({ loading: false, loaded: true });

@@ -103,7 +103,7 @@ export const useModuleStore = create<ModuleState>((set, get) => ({
   load: async () => {
     if (get().loaded || get().loading) return;
     set({ loading: true });
-    await useDbStore.getState().load();
+    await useDbStore.getState().ensureSession();
     const supabase = createClient();
     const [lists, tasks, fields, logs] = await Promise.all([
       supabase.from("smart_lists").select("*").order("created_at"),

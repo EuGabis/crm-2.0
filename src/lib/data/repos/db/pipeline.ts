@@ -92,7 +92,7 @@ export const usePipelineDbStore = create<PipelineDbState>((set, get) => ({
   load: async () => {
     if (get().loaded || get().loading) return;
     set({ loading: true });
-    await useDbStore.getState().load();
+    await useDbStore.getState().ensureSession();
     const data = await fetchPipelineState();
     set(data ? { ...data, loaded: true, loading: false } : { loading: false });
   },
@@ -104,7 +104,7 @@ export const usePipelineDbStore = create<PipelineDbState>((set, get) => ({
    * o bot criou depois do primeiro carregamento aparecia só com F5.
    */
   reload: async () => {
-    await useDbStore.getState().load();
+    await useDbStore.getState().ensureSession();
     const data = await fetchPipelineState();
     // Falha de rede não pode esvaziar o funil que já está na tela.
     if (data) set(data);
