@@ -8,6 +8,7 @@ import {
   RevenueByMonthWidget,
   SubscriptionsWidget,
 } from "./payment-widgets";
+import { ServiceSlaWidget } from "./service-widgets";
 import { widgetMeta, type WidgetConfig, type WidgetKey } from "./widget-catalog";
 import { cn } from "@/lib/utils";
 
@@ -48,6 +49,7 @@ export function DashboardWidget({
     "pagamentos-vendas": <RecentSalesWidget />,
     "pagamentos-receita": <RevenueByMonthWidget />,
     "pagamentos-assinaturas": <SubscriptionsWidget />,
+    "atendimento-sla": <ServiceSlaWidget />,
   };
 
   return <div className={cn(SPAN_CLASS[meta.span])}>{content[config.key]}</div>;

@@ -17,7 +17,8 @@ export type WidgetKey =
   | "google-analytics"
   | "pagamentos-vendas"
   | "pagamentos-assinaturas"
-  | "pagamentos-receita";
+  | "pagamentos-receita"
+  | "atendimento-sla";
 
 export interface WidgetMeta {
   key: WidgetKey;
@@ -98,6 +99,14 @@ export const WIDGETS: WidgetMeta[] = [
     description: "Receita aprovada dos últimos meses.",
     span: 2,
     requires: "pagamentos",
+  },
+  {
+    key: "atendimento-sla",
+    title: "Atendimento (SLA)",
+    description:
+      "Cumprimento da meta de primeira resposta, resposta típica e quem está esperando.",
+    span: 2,
+    requires: "relatorios",
   },
   {
     key: "pagamentos-assinaturas",

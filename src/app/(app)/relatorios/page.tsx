@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { SubNav } from "@/components/layout/subnav";
@@ -271,9 +272,36 @@ function AtribuicaoReport() {
   );
 }
 
+/** Abas válidas para o `?tab=` da URL. */
+const TODAS_AS_ABAS = [
+  "Análise IA",
+  "Atendimento",
+  "Agentes",
+  "Atribuição",
+  "Google Ads",
+];
+
+/**
+ * `useSearchParams` obriga um limite de Suspense — sem ele o build falha ao
+ * pré-renderizar /relatorios (mesmo padrão de /leads e /pagamentos).
+ */
 export default function RelatoriosPage() {
+  return (
+    <Suspense fallback={null}>
+      <RelatoriosPageInner />
+    </Suspense>
+  );
+}
+
+function RelatoriosPageInner() {
   const { isAdmin } = useMyMembership();
+  // ?tab=Atendimento vem do widget do painel. A aba só é aceita se existir de
+  // verdade — URL torta não pode deixar a página em branco.
+  const searchParams = useSearchParams();
+  const urlTab = searchParams.get("tab");
   // Só abas com dados REAIS. Análise IA e Agentes são de gestão (admin).
+  // Atendimento fica com TODO MUNDO que enxerga Relatórios: quem chega aqui já
+  // passou pela permissão do módulo, e a rota confere de novo no servidor.
   const tabs = isAdmin
     ? [
         { label: "Análise IA" },
@@ -282,8 +310,11 @@ export default function RelatoriosPage() {
         { label: "Atribuição" },
         { label: "Google Ads" },
       ]
-    : [{ label: "Atribuição" }, { label: "Google Ads" }];
-  const [tab, setTab] = useState(isAdmin ? "Análise IA" : "Atribuição");
+    : [{ label: "Atendimento" }, { label: "Atribuição" }, { label: "Google Ads" }];
+  const [tab, setTab] = useState(() => {
+    if (urlTab && TODAS_AS_ABAS.includes(urlTab)) return urlTab;
+    return isAdmin ? "Análise IA" : "Atendimento";
+  });
   const activeTab = tabs.some((t) => t.label === tab) ? tab : tabs[0].label;
 
   return (
@@ -291,7 +322,7 @@ export default function RelatoriosPage() {
       <SubNav tabs={tabs} active={activeTab} onChange={setTab} />
       <div className="p-6">
         {activeTab === "Análise IA" && isAdmin && <AnaliseIA />}
-        {activeTab === "Atendimento" && isAdmin && <ServiceSlaReport />}
+        {activeTab === "Atendimento" && <ServiceSlaReport />}
         {activeTab === "Agentes" && isAdmin && <AgentesReport />}
         {activeTab === "Atribuição" && <AtribuicaoReport />}
         {activeTab === "Google Ads" && <GoogleAdsReport />}
