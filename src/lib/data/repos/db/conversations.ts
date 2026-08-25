@@ -835,21 +835,14 @@ export const conversationActions = {
   async logEvent(conversationId: string, body: string): Promise<void> {
     const location = loc();
     if (!location) return;
-    const s = useConvStore.getState();
-    const conv = s.conversations.find((c) => c.id === conversationId);
     const supabase = createClient();
-    const { data } = await supabase
-      .from("messages")
-      .insert({
-        location_id: location,
-        conversation_id: conversationId,
-        direction: "out",
-        type: "event",
-        channel: conv?.channel ?? "whatsapp",
-        body,
-      })
-      .select()
-      .single();
+    // Via função SECURITY DEFINER (0084): depois de transferir para OUTRO, o
+    // insert direto em messages é barrado pela RLS (a conversa deixou de ser
+    // minha). A função grava por fora da RLS, validando só a empresa.
+    const { data } = await supabase.rpc("log_conversation_event", {
+      conv_id: conversationId,
+      p_body: body,
+    });
     // Inserção otimista; o Realtime (INSERT em messages) deduplica pelo id.
     if (data) {
       const s2 = useConvStore.getState();
