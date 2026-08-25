@@ -289,12 +289,17 @@ export function ImportDialog({
   const [parsing, setParsing] = useState(false);
   // Opcional: transforma os importados numa lista inteligente (via tag = nome).
   const [listName, setListName] = useState("");
+  // Linhas COMPLETAS do arquivo (sem tirar os que já existem). Ao montar uma
+  // lista, precisamos enviar também os já existentes — o servidor não os duplica,
+  // mas MARCA a tag neles (senão quem já estava no CRM ficaria fora da lista).
+  const [fullRows, setFullRows] = useState<ParsedRow[]>([]);
 
   const reset = () => {
     setResult(null);
     setFileName(null);
     setDone(0);
     setListName("");
+    setFullRows([]);
   };
 
   const onFile = async (file: File) => {
@@ -307,7 +312,9 @@ export function ImportDialog({
       const primeira = parseCsv(text, new Set());
       const known = await fetchExistingKeys(primeira.rows);
       const parsed = known.size > 0 ? parseCsv(text, known) : primeira;
-      if (parsed.rows.length === 0) {
+      // Guarda o arquivo INTEIRO (com os já existentes) para o caso de montar lista.
+      setFullRows(primeira.rows);
+      if (parsed.rows.length === 0 && primeira.rows.length === 0) {
         toast.error(
           parsed.headers.length > 0
             ? `Nenhuma coluna reconhecida. O arquivo tem: ${parsed.headers.slice(0, 8).join(", ")}. Renomeie o cabeçalho para nome, sobrenome, email, telefone, documento, empresa ou tags.`
@@ -329,29 +336,33 @@ export function ImportDialog({
     // minúsculas, como o parser já grava tags) e cria a lista casando essa tag.
     const listTrim = listName.trim();
     const tag = listTrim.toLowerCase();
+    // Com lista: envia o arquivo INTEIRO (o servidor não duplica os já existentes,
+    // mas marca a tag neles). Sem lista: só os novos (pré-filtrados).
+    const base = listTrim ? fullRows : result.rows;
     const rows = tag
-      ? result.rows.map((r) =>
-          r.tags.includes(tag) ? r : { ...r, tags: [...r.tags, tag] }
-        )
-      : result.rows;
+      ? base.map((r) => (r.tags.includes(tag) ? r : { ...r, tags: [...r.tags, tag] }))
+      : base;
     setImporting(true);
     setDone(0);
     const r = await dbContactActions.bulkInsert(rows, (d) => setDone(d));
     setImporting(false);
 
-    if (r.inserted > 0) {
+    const merged = r.merged ?? 0;
+    const processed = r.inserted + merged;
+    if (processed > 0) {
       await logBulk(
         `Importação CSV — ${fileName ?? "arquivo"}${listTrim ? ` (lista: ${listTrim})` : ""}`,
-        r.inserted
+        processed
       );
     }
-    // Nada inserido: só é erro se NÃO foi porque todos já existiam.
-    if (r.inserted === 0) {
+    // Nada inserido NEM marcado: só é erro se não foi porque todos já estavam ok.
+    if (processed === 0) {
       if (r.skipped > 0 && !r.error) {
         toast.info(
-          `Nada novo: os ${nf.format(r.skipped)} contato(s) já existiam no CRM (nenhum duplicado criado).`
+          `Nada a fazer: os ${nf.format(r.skipped)} contato(s) já existiam${listTrim ? " e já estavam na lista" : ""} (nenhum duplicado criado).`
         );
         reset();
+        onImported?.();
         onOpenChange(false);
         return;
       }
@@ -367,17 +378,20 @@ export function ImportDialog({
         const ok = await smartListActions.add(listTrim, [
           { field: "Tag", operator: "é", value: tag },
         ]);
-        if (!ok) toast.warning(`Contatos importados, mas não criei a lista "${listTrim}"`);
+        if (!ok) toast.warning(`Feito, mas não criei a lista "${listTrim}"`);
       }
     }
+    const partes: string[] = [];
+    if (r.inserted) partes.push(`${nf.format(r.inserted)} novo(s)`);
+    if (merged) partes.push(`${nf.format(merged)} já existente(s) marcado(s)`);
+    const resumo = partes.join(" + ") || `${nf.format(processed)} contato(s)`;
+    const naLista = listTrim ? ` na lista "${listTrim}"` : "";
     if (r.failed > 0) {
       toast.warning(
-        `${nf.format(r.inserted)} contato(s) importado(s)${listTrim ? ` na lista "${listTrim}"` : ""}; ${nf.format(r.failed)} ficaram de fora${r.error ? ` (${r.error})` : ""}`
+        `${resumo}${naLista}; ${nf.format(r.failed)} ficaram de fora${r.error ? ` (${r.error})` : ""}`
       );
     } else {
-      toast.success(
-        `${nf.format(r.inserted)} contato(s) importado(s)${listTrim ? ` na lista "${listTrim}"` : ""}`
-      );
+      toast.success(`${resumo}${naLista}`);
     }
     reset();
     onImported?.();
@@ -385,7 +399,12 @@ export function ImportDialog({
   };
 
   const total = result?.rows.length ?? 0;
-  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  const listMode = listName.trim().length > 0;
+  // Em modo lista enviamos o arquivo inteiro (marca a tag nos já existentes);
+  // fora dele, só os novos pré-filtrados.
+  const sendCount = listMode ? fullRows.length : total;
+  const canImport = sendCount > 0;
+  const pct = sendCount > 0 ? Math.min(100, Math.round((done / sendCount) * 100)) : 0;
 
   return (
     <Dialog
@@ -445,17 +464,40 @@ export function ImportDialog({
           <div className="space-y-3 rounded-lg border bg-slate-50 p-4 text-sm">
             <p className="font-semibold text-slate-800">{fileName}</p>
             <p className="text-xs text-slate-600">
-              <span className="font-semibold text-slate-900">{nf.format(total)}</span> contato(s)
-              prontos de {nf.format(result.total)} linha(s). Exemplo:{" "}
-              <span className="font-medium text-slate-700">
-                {result.rows[0].firstName} {result.rows[0].lastName} ·{" "}
-                {result.rows[0].email || result.rows[0].phone || "—"}
-              </span>
+              {listMode ? (
+                <>
+                  <span className="font-semibold text-slate-900">{nf.format(fullRows.length)}</span>{" "}
+                  contato(s) do arquivo entram na lista{" "}
+                  <span className="font-medium text-indigo-600">{listName.trim()}</span> — os que já
+                  existem recebem a etiqueta (sem duplicar).
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold text-slate-900">{nf.format(total)}</span> contato(s)
+                  novos de {nf.format(result.total)} linha(s).
+                </>
+              )}
+              {(result.rows[0] ?? fullRows[0]) && (
+                <>
+                  {" "}
+                  Exemplo:{" "}
+                  <span className="font-medium text-slate-700">
+                    {(result.rows[0] ?? fullRows[0]).firstName}{" "}
+                    {(result.rows[0] ?? fullRows[0]).lastName} ·{" "}
+                    {(result.rows[0] ?? fullRows[0]).email ||
+                      (result.rows[0] ?? fullRows[0]).phone ||
+                      "—"}
+                  </span>
+                </>
+              )}
             </p>
             {(result.existing > 0 || result.duplicates > 0 || result.ignored > 0) && (
               <ul className="space-y-0.5 text-[11px] text-slate-500">
                 {result.existing > 0 && (
-                  <li>{nf.format(result.existing)} já existem no CRM (ignorados)</li>
+                  <li>
+                    {nf.format(result.existing)} já existem no CRM
+                    {listMode ? " (recebem a etiqueta)" : " (ignorados)"}
+                  </li>
                 )}
                 {result.duplicates > 0 && (
                   <li>{nf.format(result.duplicates)} repetidos no próprio arquivo</li>
@@ -474,11 +516,11 @@ export function ImportDialog({
                   />
                 </div>
                 <p className="text-[11px] text-slate-500">
-                  {nf.format(done)} de {nf.format(total)} — não feche esta janela.
+                  {nf.format(done)} de {nf.format(sendCount)} — não feche esta janela.
                 </p>
               </div>
             )}
-            {!importing && total > 5000 && (
+            {!importing && sendCount > 5000 && (
               <p className="text-[11px] text-amber-700">
                 Arquivo grande: a importação vai em lotes e pode levar alguns minutos.
                 Deixe a aba aberta.
@@ -490,8 +532,12 @@ export function ImportDialog({
           <Button variant="ghost" disabled={importing} onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
-          <Button disabled={total === 0 || importing} onClick={run}>
-            {importing ? `Importando ${pct}%` : `Importar ${total ? nf.format(total) : ""}`.trim()}
+          <Button disabled={!canImport || importing} onClick={run}>
+            {importing
+              ? `Importando ${pct}%`
+              : listMode
+                ? `Importar ${nf.format(sendCount)} para a lista`
+                : `Importar ${sendCount ? nf.format(sendCount) : ""}`.trim()}
           </Button>
         </DialogFooter>
       </DialogContent>

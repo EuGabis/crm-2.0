@@ -70,6 +70,7 @@ export async function POST(request: Request) {
   let inserted = 0;
   let failed = 0;
   let skipped = 0;
+  let merged = 0;
   let firstError: string | null = null;
 
   // Insere um lote; se falhar, reparte ao meio até isolar a(s) linha(s) ruim(ns).
@@ -124,18 +125,37 @@ export async function POST(request: Request) {
     const existEmails = new Set<string>((ex?.emails ?? []) as string[]);
     const existDocs = new Set<string>((ex?.docs ?? []) as string[]);
 
-    const fresh = chunk.filter((r) => {
+    const isExisting = (r: (typeof chunk)[number]) => {
       const pk = phoneKey(r.phone);
       const em = (r.email ?? "").trim().toLowerCase();
       const dk = (r.doc ?? "").replace(/\D/g, "");
-      if (pk && existPhones.has(pk)) return false;
-      if (em.includes("@") && existEmails.has(em)) return false;
-      if (dk.length >= 11 && existDocs.has(dk)) return false;
-      return true;
-    });
-    skipped += chunk.length - fresh.length;
+      return (
+        (pk !== "" && existPhones.has(pk)) ||
+        (em.includes("@") && existEmails.has(em)) ||
+        (dk.length >= 11 && existDocs.has(dk))
+      );
+    };
+    const fresh = chunk.filter((r) => !isExisting(r));
+    const existing = chunk.filter(isExisting);
+    skipped += existing.length;
     if (fresh.length) await push(fresh);
+
+    // Marca a(s) tag(s) da importação nos que já existem — para "importar como
+    // lista" incluir também quem já estava no CRM, sem criar duplicado.
+    const tags = Array.from(new Set(existing.flatMap((r) => r.tags ?? []))).filter(Boolean);
+    if (existing.length && tags.length) {
+      const { data: n, error: mErr } = await supabase.rpc("add_tags_to_existing", {
+        p_phones: existing.map((r) => r.phone).filter(Boolean),
+        p_emails: existing.map((r) => r.email).filter(Boolean),
+        p_docs: existing.map((r) => r.doc ?? "").filter(Boolean),
+        p_tags: tags,
+      });
+      // Se a função não existir (migração 0079), não quebra a importação — só não
+      // marca a tag nos existentes; o firstError registra para o aviso.
+      if (mErr) firstError ??= mErr.message;
+      else if (typeof n === "number") merged += n;
+    }
   }
 
-  return Response.json({ inserted, failed, skipped, error: firstError });
+  return Response.json({ inserted, failed, skipped, merged, error: firstError });
 }
