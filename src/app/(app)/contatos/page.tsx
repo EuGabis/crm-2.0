@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Download, Filter, Plus, Upload } from "lucide-react";
@@ -18,13 +19,12 @@ import {
   FieldsTab,
   SmartListsTab,
   TasksTab,
-  matchesConditions,
 } from "@/components/contacts/module-tabs";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { contactName } from "@/lib/data/repos/contacts";
-import { useDbContacts } from "@/lib/data/repos/db/contacts";
+import { fetchAllMatching, useContactsSearch } from "@/lib/data/repos/db/contacts-search";
 import type { Contact } from "@/lib/data/types";
 
 const TABS = [
@@ -43,23 +43,54 @@ function avatarColor(id: string) {
   return colors[id.split("").reduce((s, ch) => s + ch.charCodeAt(0), 0) % colors.length];
 }
 
+const PAGE_SIZE = 12;
+
 export default function ContatosPage() {
   const router = useRouter();
-  const { contacts, loading } = useDbContacts();
   const [tab, setTab] = useState("Contatos");
   const [filterOpen, setFilterOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [conditions, setConditions] = useState<FilterCondition[]>([]);
+  const [exporting, setExporting] = useState(false);
 
-  const filtered = useMemo(
-    () => contacts.filter((c) => matchesConditions(c, conditions)),
-    [contacts, conditions]
-  );
+  // Busca, ordenação e página vivem AQUI (e não dentro da tabela) porque agora
+  // são os parâmetros de uma consulta ao banco, não estado de desenho.
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
+  const [page, setPage] = useState(0);
+
+  const { rows, total, loading, error, refresh } = useContactsSearch({
+    query,
+    conditions,
+    sort,
+    page,
+    pageSize: PAGE_SIZE,
+  });
+
+  // Trocar o filtro reinicia a paginação: a página 7 do filtro antigo não tem
+  // relação nenhuma com o novo, e cair numa página vazia parece "sem resultado".
+  const applyConditions = (conds: FilterCondition[]) => {
+    setConditions(conds);
+    setPage(0);
+  };
 
   const applySmartList = (conds: FilterCondition[]) => {
-    setConditions(conds);
+    applyConditions(conds);
     setTab("Contatos");
+  };
+
+  const exportar = async () => {
+    setExporting(true);
+    const t = toast.loading("Preparando a exportação...");
+    // Exporta o FILTRO INTEIRO, não a página na tela — mas buscando do servidor,
+    // que é o único lugar onde os 41 mil existem.
+    const all = await fetchAllMatching({ query, conditions, sort }, (done, tot) =>
+      toast.loading(`Preparando a exportação... ${done.toLocaleString("pt-BR")} de ${tot.toLocaleString("pt-BR")}`, { id: t })
+    );
+    toast.dismiss(t);
+    setExporting(false);
+    exportContactsCsv(all);
   };
 
   const columns: Column<Contact>[] = [
@@ -137,11 +168,13 @@ export default function ContatosPage() {
               <div className="flex items-center gap-3">
                 <h1 className="text-lg font-bold text-slate-900">Contatos</h1>
                 <Badge variant="secondary">
-                  {loading ? "Carregando..." : `${filtered.length} contatos`}
+                  {loading && rows.length === 0
+                    ? "Carregando..."
+                    : `${total.toLocaleString("pt-BR")} contatos`}
                 </Badge>
                 {conditions.length > 0 && (
                   <button
-                    onClick={() => setConditions([])}
+                    onClick={() => applyConditions([])}
                     className="text-xs text-indigo-600 hover:underline"
                   >
                     Limpar {conditions.length} filtro(s)
@@ -161,7 +194,8 @@ export default function ContatosPage() {
                   variant="outline"
                   size="sm"
                   className="h-8 gap-1.5 text-xs"
-                  onClick={() => exportContactsCsv(filtered)}
+                  disabled={exporting || total === 0}
+                  onClick={() => void exportar()}
                 >
                   <Download className="size-3.5" /> Exportar
                 </Button>
@@ -178,29 +212,52 @@ export default function ContatosPage() {
                 </Button>
               </div>
             </div>
+            {error && (
+              <p className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                {error}
+              </p>
+            )}
             <DataTable
-              data={filtered}
+              data={rows}
               columns={columns}
               selectable
-              searchPlaceholder="Pesquisar contatos"
-              searchFn={(c, q) =>
-                `${contactName(c)} ${c.email} ${c.phone} ${c.company ?? ""} ${c.tags.join(" ")}`
-                  .toLowerCase()
-                  .includes(q)
-              }
-              bulkBar={(ids, clear) => <BulkActions ids={ids} clear={clear} />}
-              pageSize={12}
+              searchPlaceholder="Pesquisar por nome, e-mail, telefone ou empresa"
+              bulkBar={(ids, clear) => (
+                <BulkActions
+                  ids={ids}
+                  clear={() => {
+                    clear();
+                    // A ação em massa mexeu no banco; a página na tela veio de
+                    // uma consulta e não se corrige sozinha.
+                    refresh();
+                  }}
+                />
+              )}
+              pageSize={PAGE_SIZE}
               onRowClick={(c) => router.push(`/contatos/${c.id}`)}
+              server={{
+                total,
+                page,
+                onPageChange: setPage,
+                query,
+                onQueryChange: (q) => {
+                  setQuery(q);
+                  setPage(0);
+                },
+                sort,
+                onSortChange: setSort,
+                loading,
+              }}
             />
           </>
         ) : tab === "Listas inteligentes" ? (
-          <SmartListsTab contacts={contacts} onApply={applySmartList} />
+          <SmartListsTab onApply={applySmartList} />
         ) : tab === "Ações em massa" ? (
           <BulkLogTab />
         ) : tab === "Tarefas" ? (
-          <TasksTab contacts={contacts} />
+          <TasksTab />
         ) : tab === "Empresas" ? (
-          <CompaniesTab contacts={contacts} />
+          <CompaniesTab />
         ) : (
           <FieldsTab />
         )}
@@ -209,10 +266,10 @@ export default function ContatosPage() {
         open={filterOpen}
         onOpenChange={setFilterOpen}
         fields={FILTER_FIELDS}
-        onApply={setConditions}
+        onApply={applyConditions}
       />
-      <ContactFormDialog open={formOpen} onOpenChange={setFormOpen} />
-      <ImportDialog open={importOpen} onOpenChange={setImportOpen} />
+      <ContactFormDialog open={formOpen} onOpenChange={setFormOpen} onCreated={refresh} />
+      <ImportDialog open={importOpen} onOpenChange={setImportOpen} onImported={refresh} />
     </div>
   );
 }

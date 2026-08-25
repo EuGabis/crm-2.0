@@ -88,7 +88,7 @@ export const useWfStore = create<WfState>((set, get) => ({
   load: async () => {
     if (get().loaded || get().loading) return;
     set({ loading: true });
-    await useDbStore.getState().load();
+    await useDbStore.getState().ensureSession();
     const supabase = createClient();
     const { data } = await supabase.from("workflows").select("*").order("created_at", { ascending: false });
     set({ loaded: true, loading: false, workflows: (data ?? []).map(mapWorkflow) });

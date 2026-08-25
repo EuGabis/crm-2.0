@@ -30,7 +30,7 @@ export function useBotFlow(key: string) {
     let active = true;
     setReady(false);
     void (async () => {
-      await useDbStore.getState().load();
+      await useDbStore.getState().ensureSession();
       const loc = useDbStore.getState().locationId;
       const fallback = DEFAULTS[key] ?? null;
       if (!loc) {
@@ -139,7 +139,7 @@ export function useBotFlowsList() {
 
   const reload = useCallback(async () => {
     setLoading(true);
-    await useDbStore.getState().load();
+    await useDbStore.getState().ensureSession();
     const loc = useDbStore.getState().locationId;
     const list: BotSummary[] = [];
     if (loc) {

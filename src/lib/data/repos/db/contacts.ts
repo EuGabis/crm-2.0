@@ -72,6 +72,9 @@ function mapContact(row: any): Contact {
   };
 }
 
+/** Compartilhada por todas as chamadas simultâneas de `ensureSession`. */
+let sessionPromise: Promise<void> | null = null;
+
 interface DbState {
   loaded: boolean;
   loading: boolean;
@@ -81,6 +84,12 @@ interface DbState {
   contacts: Contact[];
   team: User[];
   load: () => Promise<void>;
+  /** Só a sessão (empresa + usuário), sem baixar a lista de contatos. */
+  ensureSession: () => Promise<void>;
+  sessionLoading: boolean;
+  /** Só a equipe (perfis + papéis), sem baixar a lista de contatos. */
+  loadTeam: () => Promise<void>;
+  teamLoaded: boolean;
   reload: () => Promise<void>;
   setContacts: (fn: (prev: Contact[]) => Contact[]) => void;
 }
@@ -93,6 +102,78 @@ export const useDbStore = create<DbState>((set, get) => ({
   userId: null,
   contacts: [],
   team: [],
+
+  sessionLoading: false,
+
+  /**
+   * Resolve `locationId`/`userId` e MAIS NADA.
+   *
+   * Quem só precisa saber "de que empresa eu sou" — a busca paginada da tela de
+   * Contatos, por exemplo — chamava `load()` e, de brinde, baixava os 41 mil
+   * contatos que a tela justamente deixou de usar. Duas consultas leves aqui
+   * contra ~42 requisições e ~20 MB lá.
+   *
+   * Não mexe em `loaded`: quem precisar da lista inteira ainda vai chamar
+   * `load()` e ela será buscada normalmente.
+   */
+  ensureSession: async () => {
+    if (get().locationId) return;
+    // ⚠️ A espera é a MESMA promessa para todo mundo, e não um `if (loading)
+    // return`. Com o guard booleano, a segunda chamada concorrente voltava NA
+    // HORA, o chamador lia `locationId` ainda nulo e cacheava uma lista vazia
+    // como carregada — o bug que a aba Canais do WhatsApp já teve (está no
+    // AGENTS.md). Aqui todos aguardam a mesma ida ao servidor.
+    if (!sessionPromise) {
+      set({ sessionLoading: true });
+      sessionPromise = (async () => {
+        const supabase = createClient();
+        const [{ data: auth }, { data: memberships }] = await Promise.all([
+          supabase.auth.getUser(),
+          supabase.from("location_members").select("location_id, user_id"),
+        ]);
+        const me = auth?.user?.id;
+        const membership = memberships?.find((m) => m.user_id === me) ?? memberships?.[0];
+        set({
+          sessionLoading: false,
+          locationId: membership?.location_id ?? null,
+          userId: me ?? null,
+        });
+        // Sem empresa resolvida (sessão hidratando, rede), a próxima chamada
+        // tenta de novo em vez de ficar presa a uma resposta vazia.
+        if (!membership) sessionPromise = null;
+      })();
+    }
+    await sessionPromise;
+  },
+
+  teamLoaded: false,
+
+  /**
+   * A equipe são algumas dezenas de perfis; os contatos são 41 mil. Quem só
+   * quer escrever o nome do responsável de uma tarefa chamava `load()` e
+   * baixava os dois — este é o caminho barato.
+   */
+  loadTeam: async () => {
+    if (get().teamLoaded) return;
+    await get().ensureSession();
+    const supabase = createClient();
+    const [{ data: memberships }, { data: profiles }] = await Promise.all([
+      supabase.from("location_members").select("user_id, role"),
+      supabase.from("profiles").select("*"),
+    ]);
+    if (!profiles) return; // falha de rede não cacheia equipe vazia
+    const roleByUser = new Map(memberships?.map((m: any) => [m.user_id, m.role]) ?? []);
+    set({
+      teamLoaded: true,
+      team: profiles.map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        email: p.email,
+        role: (roleByUser.get(p.id) ?? "user") as User["role"],
+        color: p.color,
+      })),
+    });
+  },
 
   load: async () => {
     if (get().loaded || get().loading) return;
@@ -140,6 +221,7 @@ export const useDbStore = create<DbState>((set, get) => ({
     set({
       loaded: true,
       loading: false,
+      teamLoaded: true,
       locationId: membership.location_id,
       userId: auth.user?.id ?? null,
       contacts: (contacts ?? []).map(mapContact),
@@ -153,8 +235,11 @@ export const useDbStore = create<DbState>((set, get) => ({
    * aparecia depois de um F5.
    */
   reload: async () => {
-    const { locationId } = get();
-    if (!locationId) return;
+    const { locationId, loaded } = get();
+    // Nunca carregou = não há lista na tela para revalidar. Sem isto, uma rota
+    // que só resolveu a sessão (`ensureSession`) baixaria a empresa inteira
+    // aqui, de surpresa.
+    if (!locationId || !loaded) return;
     const supabase = createClient();
     const [{ data: contacts, error }, { data: memberships }, { data: profiles }] =
       await Promise.all([
@@ -215,10 +300,11 @@ export function useDbContact(id: string | null) {
 }
 
 export function useDbTeam() {
-  const { team, load } = useDbStore();
+  const team = useDbStore((s) => s.team);
+  const loadTeam = useDbStore((s) => s.loadTeam);
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadTeam();
+  }, [loadTeam]);
   return team;
 }
 

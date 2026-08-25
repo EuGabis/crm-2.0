@@ -1,13 +1,19 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Check, ListChecks, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable, type Column } from "@/components/shared/data-table";
 import { EmptyState } from "@/components/shared/empty-state";
+import { ContactPicker } from "@/components/contacts/contact-picker";
 import type { FilterCondition } from "@/components/shared/filter-drawer";
+import {
+  countMatching,
+  useContactCompanies,
+  useContactsByIds,
+} from "@/lib/data/repos/db/contacts-search";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -71,10 +77,8 @@ const LIST_OPS: FilterCondition["operator"][] = ["é", "não é", "contém"];
 /* ============ Listas inteligentes ============ */
 
 export function SmartListsTab({
-  contacts,
   onApply,
 }: {
-  contacts: Contact[];
   onApply: (conditions: FilterCondition[]) => void;
 }) {
   const confirm = useConfirm();
@@ -86,13 +90,23 @@ export function SmartListsTab({
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const counts = useMemo(
-    () =>
-      new Map(
-        smartLists.map((l) => [l.id, contacts.filter((c) => matchesConditions(c, l.conditions)).length])
-      ),
-    [smartLists, contacts]
-  );
+  // Cada lista é uma contagem no banco. Antes era `contacts.filter(...)` sobre o
+  // array inteiro — que só existia porque a tela carregava os 41 mil contatos.
+  // Uma consulta por lista (são poucas) troca isso por ~30 ms cada.
+  const [counts, setCounts] = useState<Map<string, number>>(new Map());
+  const listsKey = smartLists.map((l) => `${l.id}:${JSON.stringify(l.conditions)}`).join("|");
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const entries: [string, number][] = [];
+      for (const l of smartLists) entries.push([l.id, await countMatching(l.conditions)]);
+      if (alive) setCounts(new Map(entries));
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listsKey]);
 
   const create = async () => {
     if (!name.trim() || !value.trim()) {
@@ -319,10 +333,12 @@ export function BulkLogTab() {
 
 /* ============ Tarefas (reais) ============ */
 
-export function TasksTab({ contacts }: { contacts: Contact[] }) {
+export function TasksTab() {
   const confirm = useConfirm();
   const { tasks, loaded } = useContactsModule();
   const team = useDbTeam();
+  // Só os contatos que as tarefas citam — não os 41 mil.
+  const contactsById = useContactsByIds(tasks.map((t) => t.contactId));
   const [dialogOpen, setDialogOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [contactId, setContactId] = useState<string>("");
@@ -385,7 +401,7 @@ export function TasksTab({ contacts }: { contacts: Contact[] }) {
       key: "contato",
       header: "Contato vinculado",
       render: (t) => {
-        const c = contacts.find((x) => x.id === t.contactId);
+        const c = t.contactId ? contactsById.get(t.contactId) : null;
         return <span className="text-slate-600">{c ? contactName(c) : "—"}</span>;
       },
     },
@@ -472,22 +488,11 @@ export function TasksTab({ contacts }: { contacts: Contact[] }) {
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Contato (opcional)</Label>
-              <Select value={contactId} onValueChange={(v) => setContactId(v ?? "")}>
-                <SelectTrigger className="h-8 w-full text-xs">
-                  <SelectValue>
-                    {contactId
-                      ? contactName(contacts.find((c) => c.id === contactId)!)
-                      : "Sem contato vinculado"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {contacts.slice(0, 50).map((c) => (
-                    <SelectItem key={c.id} value={c.id} className="text-xs">
-                      {contactName(c)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <ContactPicker
+                value={contactId}
+                onChange={setContactId}
+                placeholder="Sem contato vinculado"
+              />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
@@ -543,23 +548,23 @@ interface CompanyRow {
   lastAdded: string;
 }
 
-export function CompaniesTab({ contacts }: { contacts: Contact[] }) {
-  const rows = useMemo<CompanyRow[]>(() => {
-    const byCompany = new Map<string, { count: number; lastAdded: string }>();
-    contacts.forEach((c) => {
-      if (!c.company) return;
-      const cur = byCompany.get(c.company);
-      if (!cur) {
-        byCompany.set(c.company, { count: 1, lastAdded: c.createdAt });
-      } else {
-        cur.count += 1;
-        if (c.createdAt > cur.lastAdded) cur.lastAdded = c.createdAt;
-      }
-    });
-    return [...byCompany.entries()]
-      .sort((a, b) => b[1].count - a[1].count)
-      .map(([name, v], i) => ({ id: `emp-${i}`, name, ...v }));
-  }, [contacts]);
+/**
+ * A aba derivava as empresas percorrendo o array inteiro de contatos. Com os 41
+ * mil importados isso obrigava a carregar tudo para mostrar 5 linhas — agora é
+ * um `group by` no banco (`contact_companies`).
+ */
+export function CompaniesTab() {
+  const { companies, loading } = useContactCompanies();
+  const rows = useMemo<CompanyRow[]>(
+    () =>
+      companies.map((c, i) => ({
+        id: `emp-${i}`,
+        name: c.company,
+        count: c.contatos,
+        lastAdded: c.ultimoContato ?? new Date().toISOString(),
+      })),
+    [companies]
+  );
 
   const columns: Column<CompanyRow>[] = [
     {
@@ -602,7 +607,7 @@ export function CompaniesTab({ contacts }: { contacts: Contact[] }) {
       {rows.length === 0 ? (
         <EmptyState
           icon={ListChecks}
-          title="Nenhuma empresa ainda"
+          title={loading ? "Carregando empresas..." : "Nenhuma empresa ainda"}
           description='As empresas aparecem automaticamente a partir do campo "Empresa" dos seus contatos.'
         />
       ) : (

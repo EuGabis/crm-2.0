@@ -41,7 +41,7 @@ export const useApptStore = create<ApptState>((set, get) => ({
   load: async () => {
     if (get().loaded || get().loading) return;
     set({ loading: true });
-    await useDbStore.getState().load();
+    await useDbStore.getState().ensureSession();
     const supabase = createClient();
     const { data } = await supabase.from("appointments").select("*").order("starts_at");
     set({ loaded: true, loading: false, appointments: (data ?? []).map(mapAppointment) });

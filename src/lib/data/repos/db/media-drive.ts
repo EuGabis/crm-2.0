@@ -43,7 +43,7 @@ export function useDriveItems() {
   const locationId = useDbStore((s) => s.locationId);
 
   const load = useCallback(async () => {
-    await useDbStore.getState().load();
+    await useDbStore.getState().ensureSession();
     const loc = useDbStore.getState().locationId;
     if (!loc) return;
     const supabase = createClient();

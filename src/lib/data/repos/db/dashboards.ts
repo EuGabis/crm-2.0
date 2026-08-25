@@ -66,7 +66,7 @@ const useStore = create<State>((setState, get) => ({
   load: async (force = false) => {
     if ((get().loaded && !force) || get().loading) return;
     setState({ loading: true });
-    await useDbStore.getState().load();
+    await useDbStore.getState().ensureSession();
     const locationId = useDbStore.getState().locationId;
     if (!locationId) {
       // Não marca `loaded`: cachear vazio antes da empresa chegar prenderia o

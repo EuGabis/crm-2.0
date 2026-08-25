@@ -19,9 +19,15 @@ import { useContactsModule } from "@/lib/data/repos/db/contacts-module";
 export function ContactFormDialog({
   open,
   onOpenChange,
+  onCreated,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
+  /**
+   * A lista da tela de Contatos vem de uma consulta paginada ao banco, não do
+   * store — ela não fica sabendo do contato novo sozinha.
+   */
+  onCreated?: () => void;
 }) {
   const { fields } = useContactsModule();
   const [form, setForm] = useState({
@@ -85,6 +91,7 @@ export function ContactFormDialog({
       tags: "",
     });
     setCustom({});
+    onCreated?.();
     onOpenChange(false);
   };
 

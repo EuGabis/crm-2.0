@@ -132,7 +132,7 @@ export const useConvStore = create<ConvState>((set, get) => ({
   load: async () => {
     if (get().loaded || get().loading) return;
     set({ loading: true });
-    await useDbStore.getState().load();
+    await useDbStore.getState().ensureSession();
     const supabase = createClient();
     // Antes buscávamos TODAS as mensagens da empresa aqui — crescia sem teto e
     // travava a caixa inteira até a consulta gigante voltar (a conversa clicada

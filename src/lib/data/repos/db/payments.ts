@@ -156,7 +156,7 @@ export const usePaymentsStore = create<PaymentsState>((set, get) => ({
   load: async () => {
     if (get().loaded || get().loading) return;
     set({ loading: true });
-    await useDbStore.getState().load();
+    await useDbStore.getState().ensureSession();
     const locationId = useDbStore.getState().locationId;
     if (!locationId) {
       set({ loading: false, loaded: true });
@@ -307,7 +307,7 @@ export function usePaymentEventsPage(
     let active = true;
     setLoading(true);
     (async () => {
-      await useDbStore.getState().load();
+      await useDbStore.getState().ensureSession();
       const loc = useDbStore.getState().locationId;
       if (!loc) {
         if (active) {
@@ -380,7 +380,7 @@ export function usePaymentEventsForContact(email: string | null, name: string | 
     let active = true;
     setLoading(true);
     (async () => {
-      await useDbStore.getState().load();
+      await useDbStore.getState().ensureSession();
       const loc = useDbStore.getState().locationId;
       if (!loc) {
         if (active) {
@@ -435,7 +435,7 @@ export function usePaymentEventsForProduct(
     let active = true;
     setLoading(true);
     (async () => {
-      await useDbStore.getState().load();
+      await useDbStore.getState().ensureSession();
       const loc = useDbStore.getState().locationId;
       if (!loc) {
         if (active) {
@@ -490,7 +490,7 @@ export function useProductSalesSummary(productName: string | null) {
     }
     let active = true;
     (async () => {
-      await useDbStore.getState().load();
+      await useDbStore.getState().ensureSession();
       const loc = useDbStore.getState().locationId;
       if (!loc) {
         if (active) setSummary(null);
@@ -558,7 +558,7 @@ export function usePaymentSubscriptionsForContact(email: string | null, name: st
     let active = true;
     setLoading(true);
     (async () => {
-      await useDbStore.getState().load();
+      await useDbStore.getState().ensureSession();
       const loc = useDbStore.getState().locationId;
       if (!loc) {
         if (active) {
@@ -614,7 +614,7 @@ export function usePaymentSalesReport() {
   useEffect(() => {
     let active = true;
     (async () => {
-      await useDbStore.getState().load();
+      await useDbStore.getState().ensureSession();
       const loc = useDbStore.getState().locationId;
       if (!loc) {
         if (active) {

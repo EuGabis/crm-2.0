@@ -725,7 +725,8 @@ Cloud API → celular.
   0053 = conversa visível/atribuída, 0054 = bot conversacional,
   0055 = editor do bot (`bot_flows`) — as três do outro Claude,
   0056 = view `payment_new_sales` (o que conta como VENDA NOVA);
-  **próxima migração livre: 0057**.
+  **próxima migração livre: 0079** (0077 = responder mensagem, 0078 = busca de
+  contatos no servidor).
 - Env (privadas, nunca `NEXT_PUBLIC_`): `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`,
   `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_GRAPH_VERSION` (default `v21.0`).
 - **Mídia real (imagem/áudio/vídeo)** — helpers em `src/lib/whatsapp/client.ts`
@@ -897,6 +898,76 @@ com spec própria.
 - Botão **Testar seu bot** usa `POST /api/ai/chat` (monta o system prompt do agente + histórico de conversa → OpenAI; grava `ai_logs` feature "agent-test").
 - Ainda MOCK nessa aba: KPIs, aba Logs (histórico de testes), IA de voz, Base de Conhecimento, execução das ações do agente na conversa, e auto-responder em conversas reais de clientes (depende da Meta/WhatsApp estar conectado — fase seguinte).
 - Sem env nova; reusa `OPENAI_API_KEY` da fundação.
+
+## Contatos: a lista sai do store e vira consulta (41 mil linhas)
+
+A importação do CRM antigo levou a empresa de 365 para **41.532 contatos** e a
+tela de Contatos passou a demorar dezenas de segundos. A causa não era a tabela:
+era a tela ler `useDbContacts()` — o array INTEIRO — para desenhar 12 linhas.
+Carregar tudo é ~42 requisições (o PostgREST corta em 1000, regra nº 7) e ~20 MB.
+
+Migração **0078**: `public.search_contacts(...)` faz busca, filtro, ordenação,
+paginação e **contagem** no Postgres; `public.contact_companies(...)` agrega a
+aba Empresas; `public.existing_contact_keys(...)` responde o dedupe da
+importação. Medido como `authenticated`: busca por nome 22–81 ms, página sem
+busca 205 ms, empresa alheia devolve vazio.
+
+- **`security definer` com a checagem de empresa na PRIMEIRA LINHA** — padrão da
+  0049. Sob RLS, um `where` que chama função não-leakproof (`lower`) não pode
+  ser avaliado antes das políticas, sai de baixo do índice funcional e vira Seq
+  Scan. ⚠️ Ao mexer na função, mantenha o guard no topo: sem ele, `security
+  definer` significa "qualquer autenticado lê o contato de qualquer empresa".
+- ⚠️ **O guard fica FORA da consulta.** Escrito como CTE no `from`, ele virava um
+  join opaco e o planner desistia do índice de trigramas: 153 ms com a CTE
+  contra 81 ms com `if ... then return; end if;` antes do `return query`.
+- O índice é **GIN de trigramas** (`pg_trgm`, que NÃO estava instalado — e no
+  Supabase mora no schema `extensions`, senão o `create index` falha com
+  "operator class gin_trgm_ops does not exist"). ⚠️ A expressão indexada tem que
+  ser IDÊNTICA à do `where`, senão o índice é ignorado e ninguém avisa.
+- `tags` ficou **fora da busca livre**: `array_to_string` não é immutable e não
+  entra em índice. Tag continua nos filtros avançados e nas listas inteligentes.
+- Os filtros avançados são avaliados com `jsonb_array_elements`, **não com SQL
+  montado em texto** — valor digitado pelo usuário não vira SQL. A semântica é a
+  do antigo `matchesConditions`: "é" e "contém" são os dois SUBSTRING, "não é" é
+  a negação. Mudar isso mudaria o resultado das listas já salvas.
+- `count(*) over ()` conta o filtro inteiro (a janela roda antes do `limit`) —
+  é o selo "41.532 contatos", que não pode virar "12". É também o que faz a
+  página sem busca custar 205 ms: sem filtro, contar é varrer tudo.
+
+**No app** (`db/contacts-search.ts`): `useContactsSearch` (uma página, com
+debounce de 300 ms só no que é DIGITADO — clique em página/ordem não espera),
+`fetchAllMatching` (exportação, em páginas de 1000), `countMatching` (selo das
+listas), `useContactCompanies`, `useContactsByIds` (resolve nome por id, em
+lotes de 200). O `DataTable` ganhou a prop opcional **`server`**: com ela, `data`
+já é a página pronta e a tabela só desenha — sem ela, nada muda para Leads,
+Automações e Conversas.
+
+⚠️ **Duas armadilhas que a mudança abriu, e como foram fechadas:**
+1. **`load()` baixava os 41 mil só para descobrir a empresa.** Vinte e quatro
+   repos faziam `await useDbStore.getState().load()` e usavam apenas
+   `locationId`. Agora existe **`ensureSession()`** (duas consultas leves) e
+   **`loadTeam()`** (a equipe são dezenas de perfis; `useDbTeam` arrastava os 41
+   mil junto). `load()` continua para quem realmente usa a lista.
+   `ensureSession` compartilha **a mesma promessa** entre chamadas simultâneas —
+   com um `if (loading) return`, a segunda voltava na hora, o chamador lia
+   `locationId` nulo e cacheava lista vazia como carregada (o bug da aba Canais).
+2. **O dedupe da importação era um `Set` do array do store.** Com a tela sem
+   carregar a lista, o array vive vazio e a checagem sumiria EM SILÊNCIO —
+   reimportar o mesmo arquivo duplicaria o histórico inteiro. Agora quem
+   responde é `existing_contact_keys` (documento, telefone normalizado, e-mail),
+   em lotes de 5000 linhas do arquivo.
+
+Também: `/contatos` **saiu do `RouteRevalidator`** (revalidar ali voltaria a
+baixar os 41 mil a cada entrada na rota) e `reload()` agora não faz nada se
+`loaded` for false. Criar contato e ação em massa chamam `refresh()` da página —
+a lista veio de uma consulta e não se corrige sozinha.
+
+**Ainda leem o array inteiro** (decisão do Gabriel de manter o escopo na tela de
+Contatos): Conversas (`conversation-list`, `views-rail`, `conversations-report`),
+Calendários, `reminders`, o drilldown do painel, o composer de campanha e o
+diálogo de oportunidade. Nessas telas `useDbContacts()` segue baixando tudo — o
+caminho é `useContactsByIds` (nome por id) e `ContactPicker` (busca no servidor,
+`components/contacts/contact-picker.tsx`), que já existem.
 
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 

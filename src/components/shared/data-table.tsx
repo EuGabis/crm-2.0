@@ -23,6 +23,29 @@ export interface Column<T> {
   render: (row: T) => ReactNode;
 }
 
+/**
+ * Busca, ordenação e paginação NO SERVIDOR.
+ *
+ * A tabela nasceu resolvendo tudo em memória, o que é certo para as dezenas de
+ * linhas das outras telas. Com os 41 mil contatos importados do CRM antigo isso
+ * deixou de funcionar: filtrar e ordenar exige ter TUDO carregado, e carregar
+ * tudo era ~42 requisições e ~20 MB para desenhar 12 linhas.
+ *
+ * Quando `server` é passado, `data` já é A PÁGINA pronta e a tabela só desenha —
+ * quem filtra, ordena e conta é o banco. Sem `server` nada muda, que é o que
+ * mantém Leads, Automações e Conversas funcionando como antes.
+ */
+export interface ServerTable {
+  total: number;
+  page: number;
+  onPageChange: (page: number) => void;
+  query: string;
+  onQueryChange: (query: string) => void;
+  sort: { key: string; dir: "asc" | "desc" } | null;
+  onSortChange: (sort: { key: string; dir: "asc" | "desc" } | null) => void;
+  loading?: boolean;
+}
+
 export function DataTable<T extends { id: string }>({
   data,
   columns,
@@ -32,6 +55,7 @@ export function DataTable<T extends { id: string }>({
   bulkBar,
   pageSize = 10,
   onRowClick,
+  server,
 }: {
   data: T[];
   columns: Column<T>[];
@@ -41,13 +65,27 @@ export function DataTable<T extends { id: string }>({
   bulkBar?: (ids: string[], clear: () => void) => ReactNode;
   pageSize?: number;
   onRowClick?: (row: T) => void;
+  server?: ServerTable;
 }) {
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
-  const [page, setPage] = useState(0);
+  const [localQuery, setLocalQuery] = useState("");
+  const [localSort, setLocalSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
+  const [localPage, setLocalPage] = useState(0);
   const [selected, setSelected] = useState<string[]>([]);
 
+  const query = server ? server.query : localQuery;
+  const sort = server ? server.sort : localSort;
+  const page = server ? server.page : localPage;
+  const setQuery = server ? server.onQueryChange : setLocalQuery;
+  const setPage = (fn: number | ((p: number) => number)) => {
+    const next = typeof fn === "function" ? fn(page) : fn;
+    (server ? server.onPageChange : setLocalPage)(next);
+  };
+
   const filtered = useMemo(() => {
+    // No modo servidor `data` JÁ é a página filtrada e ordenada — refiltrar aqui
+    // esconderia linhas que o banco escolheu de propósito (a busca do servidor
+    // olha campos que a `searchFn` local não conhece).
+    if (server) return data;
     let rows = data;
     if (query && searchFn) rows = rows.filter((r) => searchFn(r, query.toLowerCase()));
     if (sort) {
@@ -65,18 +103,25 @@ export function DataTable<T extends { id: string }>({
       }
     }
     return rows;
-  }, [data, query, searchFn, sort, columns]);
+  }, [data, query, searchFn, sort, columns, server]);
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const total = server ? server.total : filtered.length;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(page, pageCount - 1);
-  const pageRows = filtered.slice(safePage * pageSize, (safePage + 1) * pageSize);
+  const pageRows = server ? filtered : filtered.slice(safePage * pageSize, (safePage + 1) * pageSize);
   const pageIds = pageRows.map((r) => r.id);
   const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.includes(id));
 
-  const toggleSort = (key: string) =>
-    setSort((s) =>
-      s?.key === key ? (s.dir === "asc" ? { key, dir: "desc" } : null) : { key, dir: "asc" }
-    );
+  const toggleSort = (key: string) => {
+    const next: { key: string; dir: "asc" | "desc" } | null =
+      sort?.key === key ? (sort.dir === "asc" ? { key, dir: "desc" } : null) : { key, dir: "asc" };
+    if (server) {
+      server.onSortChange(next);
+      // Trocar a ordem com a página 4 aberta mostraria o 4º pedaço de uma lista
+      // que acabou de mudar de ordem — volta para o começo.
+      server.onPageChange(0);
+    } else setLocalSort(next);
+  };
 
   const clear = () => setSelected([]);
 
@@ -87,7 +132,7 @@ export function DataTable<T extends { id: string }>({
           {bulkBar(selected, clear)}
         </div>
       ) : (
-        searchFn && (
+        (searchFn || server) && (
           <div className="flex items-center gap-2 border-b px-4 py-2.5">
             <Search className="size-4 text-slate-400" />
             <Input
@@ -174,7 +219,7 @@ export function DataTable<T extends { id: string }>({
                 colSpan={columns.length + (selectable ? 1 : 0)}
                 className="py-10 text-center text-sm text-slate-500"
               >
-                Nenhum registro encontrado
+                {server?.loading ? "Carregando..." : "Nenhum registro encontrado"}
               </TableCell>
             </TableRow>
           )}
@@ -182,7 +227,9 @@ export function DataTable<T extends { id: string }>({
       </Table>
       <div className="flex items-center justify-between border-t px-4 py-2 text-xs text-slate-500">
         <span>
-          {filtered.length} registro{filtered.length === 1 ? "" : "s"}
+          {server?.loading
+            ? "Carregando..."
+            : `${total.toLocaleString("pt-BR")} registro${total === 1 ? "" : "s"}`}
         </span>
         <div className="flex items-center gap-2">
           <Button

@@ -54,7 +54,7 @@ export function useContactActivityCounts(contactId: string | null | undefined) {
   useEffect(() => {
     let active = true;
     (async () => {
-      await useDbStore.getState().load();
+      await useDbStore.getState().ensureSession();
       if (!contactId) {
         if (active) setCounts({ notes: 0, files: 0 });
         return;
@@ -104,7 +104,7 @@ export function useContactFiles(contactId: string | null | undefined, enabled = 
     // setState no corpo sincrono dispara renderizacao em cascata (regra
     // react-hooks/set-state-in-effect). Depois do primeiro await, o resto roda
     // em continuacao de promise e a regra fica satisfeita.
-    await useDbStore.getState().load();
+    await useDbStore.getState().ensureSession();
     if (!contactId) {
       setFiles([]);
       return;

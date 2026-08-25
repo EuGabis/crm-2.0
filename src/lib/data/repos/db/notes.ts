@@ -37,7 +37,7 @@ export function useContactNotes(contactId: string | null | undefined, enabled = 
     // setState no corpo sincrono dispara renderizacao em cascata (regra
     // react-hooks/set-state-in-effect). Depois do primeiro await, o resto roda
     // em continuacao de promise e a regra fica satisfeita.
-    await useDbStore.getState().load();
+    await useDbStore.getState().ensureSession();
     if (!contactId) {
       setNotes([]);
       return;
