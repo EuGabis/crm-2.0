@@ -176,6 +176,11 @@ export function Composer({ conversationId }: { conversationId: string }) {
   const fmtSecs = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
   const uploadFile = async (file: File, caption?: string) => {
+    // Conversa finalizada/arquivada: mídia também não sai (clipe e colar).
+    if (conversation?.closedAt || conversation?.archivedAt) {
+      toast.error("Reabra a conversa (ou envie um template) para enviar mídia.");
+      return;
+    }
     const isImg = file.type.startsWith("image/");
     const isVideo = file.type.startsWith("video/");
     const name = file.name.toLowerCase();
