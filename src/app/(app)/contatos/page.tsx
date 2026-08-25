@@ -251,7 +251,7 @@ export default function ContatosPage() {
             />
           </>
         ) : tab === "Listas inteligentes" ? (
-          <SmartListsTab onApply={applySmartList} />
+          <SmartListsTab onApply={applySmartList} onImport={() => setImportOpen(true)} />
         ) : tab === "Ações em massa" ? (
           <BulkLogTab />
         ) : tab === "Tarefas" ? (

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Check, ListChecks, Plus, Trash2 } from "lucide-react";
+import { Check, ListChecks, Plus, Trash2, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable, type Column } from "@/components/shared/data-table";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -78,8 +78,11 @@ const LIST_OPS: FilterCondition["operator"][] = ["é", "não é", "contém"];
 
 export function SmartListsTab({
   onApply,
+  onImport,
 }: {
   onApply: (conditions: FilterCondition[]) => void;
+  /** Abre o diálogo de importação (importar contatos como uma lista). */
+  onImport?: () => void;
 }) {
   const confirm = useConfirm();
   const { smartLists, loaded } = useContactsModule();
@@ -133,9 +136,21 @@ export function SmartListsTab({
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-lg font-bold text-slate-900">Listas inteligentes</h1>
-        <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setDialogOpen(true)}>
-          <Plus className="size-3.5" /> Nova lista
-        </Button>
+        <div className="flex items-center gap-2">
+          {onImport && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1.5 text-xs"
+              onClick={onImport}
+            >
+              <UploadCloud className="size-3.5" /> Importar lista
+            </Button>
+          )}
+          <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setDialogOpen(true)}>
+            <Plus className="size-3.5" /> Nova lista
+          </Button>
+        </div>
       </div>
       {loaded && smartLists.length === 0 ? (
         <EmptyState

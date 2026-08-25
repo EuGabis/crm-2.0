@@ -14,7 +14,9 @@ import {
 import { contactName } from "@/lib/data/repos/contacts";
 import { createClient } from "@/lib/supabase/client";
 import { dbContactActions, useDbStore } from "@/lib/data/repos/db/contacts";
-import { logBulk } from "@/lib/data/repos/db/contacts-module";
+import { logBulk, smartListActions, useModuleStore } from "@/lib/data/repos/db/contacts-module";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import type { Contact } from "@/lib/data/types";
 
 interface ParsedRow {
@@ -142,18 +144,26 @@ function parseCsv(text: string, known: Set<string>): ParseResult {
 
   const header = table[0].map(deaccent);
   const idx = (...names: string[]) => header.findIndex((h) => names.includes(h));
+  // Todas as colunas que casam (não só a 1ª) — usado para telefone, que em
+  // alguns exports vem espalhado em `phone` (vazio) + `mobile`/`whatsapp` (cheio).
+  const allIdx = (...names: string[]) =>
+    header.map((h, i) => (names.includes(h) ? i : -1)).filter((i) => i >= 0);
 
   const iFull = idx("nome completo", "nome_completo", "full name", "fullname", "contato", "cliente");
   const iFirst = idx("nome", "primeiro nome", "first_name", "firstname", "first name", "name");
   const iLast = idx("sobrenome", "ultimo nome", "last_name", "lastname", "last name", "apelido");
   const iEmail = idx("email", "e-mail", "e mail", "mail", "email principal");
-  const iPhone = idx("telefone", "phone", "celular", "whatsapp", "fone", "telefone principal", "mobile");
+  // Telefone pode estar em várias colunas; pega o 1º valor NÃO-VAZIO por linha.
+  const iPhones = allIdx(
+    "telefone", "phone", "celular", "whatsapp", "fone", "telefone principal",
+    "mobile", "telefone celular", "telefone_celular"
+  );
   const iDoc = idx("documento", "cpf", "cnpj", "cpf/cnpj", "cpf_cnpj", "doc");
-  const iCompany = idx("empresa", "company", "nome comercial", "organizacao", "organization");
+  const iCompany = idx("empresa", "company", "companies", "nome comercial", "organizacao", "organization");
   const iTags = idx("tags", "etiquetas", "marcadores", "tag");
 
   // Sem NENHUMA coluna de identificação não há contato para criar.
-  if (iFull === -1 && iFirst === -1 && iEmail === -1 && iPhone === -1) {
+  if (iFull === -1 && iFirst === -1 && iEmail === -1 && iPhones.length === 0) {
     return { ...empty, headers: table[0] };
   }
 
@@ -179,7 +189,7 @@ function parseCsv(text: string, known: Set<string>): ParseResult {
     }
 
     const email = get(iEmail);
-    const phone = get(iPhone);
+    const phone = iPhones.map((i) => (cols[i] ?? "").trim()).find((v) => v) ?? "";
     const doc = get(iDoc);
 
     // Nome vazio mas com e-mail/telefone é contato de verdade (a coluna `first_name`
@@ -277,11 +287,14 @@ export function ImportDialog({
   const [importing, setImporting] = useState(false);
   const [done, setDone] = useState(0);
   const [parsing, setParsing] = useState(false);
+  // Opcional: transforma os importados numa lista inteligente (via tag = nome).
+  const [listName, setListName] = useState("");
 
   const reset = () => {
     setResult(null);
     setFileName(null);
     setDone(0);
+    setListName("");
   };
 
   const onFile = async (file: File) => {
@@ -312,24 +325,50 @@ export function ImportDialog({
 
   const run = async () => {
     if (!result) return;
+    // Lista inteligente: marca todo importado com a tag (= nome da lista, em
+    // minúsculas, como o parser já grava tags) e cria a lista casando essa tag.
+    const listTrim = listName.trim();
+    const tag = listTrim.toLowerCase();
+    const rows = tag
+      ? result.rows.map((r) =>
+          r.tags.includes(tag) ? r : { ...r, tags: [...r.tags, tag] }
+        )
+      : result.rows;
     setImporting(true);
     setDone(0);
-    const r = await dbContactActions.bulkInsert(result.rows, (d) => setDone(d));
+    const r = await dbContactActions.bulkInsert(rows, (d) => setDone(d));
     setImporting(false);
 
     if (r.inserted > 0) {
-      await logBulk(`Importação CSV — ${fileName ?? "arquivo"}`, r.inserted);
+      await logBulk(
+        `Importação CSV — ${fileName ?? "arquivo"}${listTrim ? ` (lista: ${listTrim})` : ""}`,
+        r.inserted
+      );
     }
     if (r.inserted === 0) {
       toast.error(`A importação falhou${r.error ? `: ${r.error}` : ""}`);
       return;
     }
+    // Cria a lista inteligente (se ainda não houver uma com esse nome).
+    if (listTrim) {
+      const exists = useModuleStore
+        .getState()
+        .smartLists.some((l) => l.name.trim().toLowerCase() === tag);
+      if (!exists) {
+        const ok = await smartListActions.add(listTrim, [
+          { field: "Tag", operator: "é", value: tag },
+        ]);
+        if (!ok) toast.warning(`Contatos importados, mas não criei a lista "${listTrim}"`);
+      }
+    }
     if (r.failed > 0) {
       toast.warning(
-        `${nf.format(r.inserted)} contato(s) importado(s); ${nf.format(r.failed)} ficaram de fora${r.error ? ` (${r.error})` : ""}`
+        `${nf.format(r.inserted)} contato(s) importado(s)${listTrim ? ` na lista "${listTrim}"` : ""}; ${nf.format(r.failed)} ficaram de fora${r.error ? ` (${r.error})` : ""}`
       );
     } else {
-      toast.success(`${nf.format(r.inserted)} contato(s) importado(s)`);
+      toast.success(
+        `${nf.format(r.inserted)} contato(s) importado(s)${listTrim ? ` na lista "${listTrim}"` : ""}`
+      );
     }
     reset();
     onImported?.();
@@ -364,6 +403,20 @@ export function ImportDialog({
             if (f) void onFile(f);
           }}
         />
+        <div className="space-y-1">
+          <Label className="text-xs">Transformar em lista inteligente (opcional)</Label>
+          <Input
+            value={listName}
+            onChange={(e) => setListName(e.target.value)}
+            placeholder="Ex.: Formulário MMA"
+            disabled={importing}
+            className="h-8 text-xs"
+          />
+          <p className="text-[11px] text-slate-400">
+            Se preencher, os contatos importados recebem essa etiqueta e viram uma
+            lista inteligente com esse nome — sempre em sincronia.
+          </p>
+        </div>
         {!result ? (
           <button
             disabled={parsing}
