@@ -176,6 +176,9 @@ export async function POST(request: Request) {
       closed_by: null,
       archived_at: null,
       archived_by: null,
+      // Enviar TEMPLATE (única forma de falar com a conversa finalizada) reabre E
+      // atribui a quem enviou — o atendente assume o retorno do cliente.
+      ...(template ? { assigned_to: user.id } : {}),
     })
     .eq("id", conversationId);
 

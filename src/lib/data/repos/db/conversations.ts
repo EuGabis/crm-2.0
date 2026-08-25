@@ -860,7 +860,13 @@ export const conversationActions = {
     const supabase = createClient();
     const { data: auth } = await supabase.auth.getUser();
     const patch = done
-      ? { closed_at: new Date().toISOString(), closed_by: auth.user?.id ?? null }
+      ? {
+          closed_at: new Date().toISOString(),
+          closed_by: auth.user?.id ?? null,
+          // Finalizou = atendimento encerrado: solta o responsável (volta pra fila
+          // sem dono). Se o cliente voltar, é redistribuído/reassumido.
+          assigned_to: null,
+        }
       : { closed_at: null, closed_by: null };
     const { data, error } = await supabase
       .from("conversations")

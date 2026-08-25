@@ -167,6 +167,11 @@ export function Composer({ conversationId }: { conversationId: string }) {
     isWhatsapp && (!lastInboundAt || now - new Date(lastInboundAt).getTime() > WINDOW_MS);
   // Nota interna não sai do CRM: continua livre com a janela fechada.
   const blocked = windowClosed && !internal;
+  // Conversa finalizada/arquivada: não dá pra mandar mensagem (o cliente precisa
+  // reabrir, ou manda-se um template — que reabre e atribui a quem enviou).
+  // Nota interna continua liberada (não sai do CRM).
+  const isClosed = !!conversation?.closedAt || !!conversation?.archivedAt;
+  const blockedClosed = isClosed && !internal;
 
   const fmtSecs = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
@@ -314,6 +319,11 @@ export function Composer({ conversationId }: { conversationId: string }) {
   };
 
   const send = async (scheduledFor?: string) => {
+    // Conversa finalizada/arquivada: não envia mensagem (só nota interna ou template).
+    if (blockedClosed) {
+      toast.error("Reabra a conversa (ou envie um template) para responder.");
+      return;
+    }
     // Imagem colada aguardando: o Enviar manda a imagem (texto = legenda).
     if (pendingImage && !internal && !scheduledFor) {
       const file = pendingImage;
@@ -432,7 +442,54 @@ export function Composer({ conversationId }: { conversationId: string }) {
           />
         )}
       </div>
-      {blocked && (
+      {blockedClosed && (
+        <div className="mb-2 rounded-lg border border-slate-300 bg-slate-100 p-3">
+          <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+            <Lock className="size-3.5" />{" "}
+            {conversation?.archivedAt ? "Conversa arquivada" : "Conversa finalizada"}
+          </p>
+          <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+            Não dá para responder com a conversa{" "}
+            {conversation?.archivedAt ? "arquivada" : "finalizada"}.{" "}
+            <strong>Reabra</strong> para retomar o atendimento, ou envie um{" "}
+            <strong>template</strong> — que reabre a conversa e a atribui a você.
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1.5 text-xs"
+              onClick={async () => {
+                const ok = conversation?.archivedAt
+                  ? await conversationActions.archive(conversationId, false)
+                  : await conversationActions.close(conversationId, false);
+                ok
+                  ? toast.success("Conversa reaberta")
+                  : toast.error("Não foi possível reabrir");
+              }}
+            >
+              <Lock className="size-3.5" /> Reabrir
+            </Button>
+            <Button
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              onClick={() => {
+                setTemplateForced(true);
+                setTemplateOpen(true);
+              }}
+            >
+              <LayoutTemplate className="size-3.5" /> Enviar template
+            </Button>
+            <button
+              onClick={() => setInternal(true)}
+              className="text-[11px] font-semibold text-slate-500 hover:underline"
+            >
+              Escrever comentário interno
+            </button>
+          </div>
+        </div>
+      )}
+      {blocked && !isClosed && (
         <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
           <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-900">
             <Lock className="size-3.5" /> Janela de 24h fechada
@@ -514,7 +571,7 @@ export function Composer({ conversationId }: { conversationId: string }) {
       )}
       <Textarea
         value={body}
-        disabled={blocked}
+        disabled={blocked || blockedClosed}
         onChange={(e) => setBody(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) {
@@ -525,8 +582,8 @@ export function Composer({ conversationId }: { conversationId: string }) {
         onPaste={(e) => {
           // Colar um print (Ctrl+V) manda como imagem no WhatsApp. Só intercepta
           // se o clipboard tiver imagem e não estiver em nota interna; texto cola
-          // normal. Envio de mídia não vale para nota interna.
-          if (internal) return;
+          // normal. Envio de mídia não vale para nota interna nem conversa fechada.
+          if (internal || blockedClosed) return;
           const items = Array.from(e.clipboardData?.items ?? []);
           const imgItem = items.find((it) => it.type.startsWith("image/"));
           if (!imgItem) return;
@@ -539,11 +596,13 @@ export function Composer({ conversationId }: { conversationId: string }) {
           setPendingImage(file);
         }}
         placeholder={
-          blocked
-            ? "Fora da janela de 24h — envie um template para retomar"
-            : internal
-              ? "Escreva uma nota interna (o lead não vê)"
-              : `Digite uma mensagem (${channelLabel(channel)})`
+          blockedClosed
+            ? "Conversa finalizada — reabra para responder"
+            : blocked
+              ? "Fora da janela de 24h — envie um template para retomar"
+              : internal
+                ? "Escreva uma nota interna (o lead não vê)"
+                : `Digite uma mensagem (${channelLabel(channel)})`
         }
         className="min-h-16 resize-none text-sm disabled:cursor-not-allowed disabled:bg-slate-50"
       />
@@ -567,7 +626,7 @@ export function Composer({ conversationId }: { conversationId: string }) {
           </div>
         </div>
       )}
-      {!recording && !blocked && (
+      {!recording && !blocked && !blockedClosed && (
       <div className="mt-2 flex items-center justify-between">
         <div className="flex items-center gap-0.5">
           {/* Emoji */}
@@ -760,7 +819,7 @@ export function Composer({ conversationId }: { conversationId: string }) {
           size="sm"
           className="h-8 gap-1.5 text-xs"
           onClick={() => send()}
-          disabled={sending || uploading}
+          disabled={sending || uploading || blockedClosed}
         >
           <Send className="size-3.5" /> {sending ? "Enviando..." : "Enviar"}
         </Button>
