@@ -33,6 +33,10 @@ export interface Department {
   /** Setor colaborativo (0080): membros veem TODAS as conversas do setor no
    * relatório e podem assumir a de outro atendente. */
   colaborativo: boolean;
+  /** Distribui leads por rodízio? (0081) Desligado = leads ficam na fila do setor. */
+  usaRodizio: boolean;
+  /** Aplica o logout automático por inatividade (10 min) aos membros? (0081) */
+  logoutInatividade: boolean;
   createdAt: string;
 }
 
@@ -100,6 +104,8 @@ const mapDepartment = (r: any, channelIds: string[] = []): Department => ({
   channelIds,
   leadPool: r.lead_pool ?? [],
   colaborativo: r.colaborativo ?? false,
+  usaRodizio: r.usa_rodizio ?? true,
+  logoutInatividade: r.logout_inatividade ?? true,
   createdAt: r.created_at,
 });
 
@@ -290,6 +296,8 @@ export const departmentActions = {
     channelIds?: string[];
     leadPool?: string[];
     colaborativo?: boolean;
+    usaRodizio?: boolean;
+    logoutInatividade?: boolean;
   }): Promise<{ ok: boolean; error?: string }> {
     const loc = locationId();
     if (!loc) return { ok: false, error: "Empresa não encontrada" };
@@ -304,6 +312,8 @@ export const departmentActions = {
         permissions: input.permissions,
         lead_pool: input.leadPool ?? [],
         colaborativo: input.colaborativo ?? false,
+        usa_rodizio: input.usaRodizio ?? true,
+        logout_inatividade: input.logoutInatividade ?? true,
         created_by: auth.user?.id ?? null,
       })
       .select()
@@ -337,6 +347,8 @@ export const departmentActions = {
       channelIds?: string[];
       leadPool?: string[];
       colaborativo?: boolean;
+      usaRodizio?: boolean;
+      logoutInatividade?: boolean;
     }
   ): Promise<{ ok: boolean; error?: string }> {
     const loc = locationId();
@@ -347,6 +359,8 @@ export const departmentActions = {
     if (patch.permissions !== undefined) row.permissions = patch.permissions;
     if (patch.leadPool !== undefined) row.lead_pool = patch.leadPool;
     if (patch.colaborativo !== undefined) row.colaborativo = patch.colaborativo;
+    if (patch.usaRodizio !== undefined) row.usa_rodizio = patch.usaRodizio;
+    if (patch.logoutInatividade !== undefined) row.logout_inatividade = patch.logoutInatividade;
     const supabase = createClient();
     const { data, error } = await supabase
       .from("departments")

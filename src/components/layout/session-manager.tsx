@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useMyMembership } from "@/lib/data/repos/db/team";
+import { useMyDepartment } from "@/lib/data/repos/db/sector";
 import { hasBrowserSession, clearBrowserSession } from "@/lib/auth/session-marker";
 
 const PRESENCE_MS = 5 * 60 * 1000; // online (distribuição) = ativo nos últimos 5 min
@@ -22,6 +23,9 @@ const ACTIVITY = ["mousemove", "mousedown", "keydown", "scroll", "touchstart", "
  */
 export function SessionManager() {
   const { me } = useMyMembership();
+  // O logout por inatividade agora é POR DEPARTAMENTO (0081): só arma se o setor
+  // do usuário tiver a regra ligada. Sem departamento carregado → padrão (ligado).
+  const { logoutInatividade } = useMyDepartment();
   const lastActivity = useRef(Date.now());
   const done = useRef(false);
   const [warnSeconds, setWarnSeconds] = useState<number | null>(null);
@@ -78,6 +82,7 @@ export function SessionManager() {
   // Parte 1 — inatividade (só papel "user"): avisa 1 min antes e desloga em 10 min.
   useEffect(() => {
     if (me?.role !== "user") return; // admin / desconhecido → não arma o timer
+    if (!logoutInatividade) return; // departamento sem a regra de logout → não arma
     lastActivity.current = Date.now(); // zera o relógio quando o timer realmente arma
     const bump = () => {
       lastActivity.current = Date.now();
@@ -99,7 +104,7 @@ export function SessionManager() {
       window.clearInterval(interval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me?.role]);
+  }, [me?.role, logoutInatividade]);
 
   if (warnSeconds === null) return null;
   return (

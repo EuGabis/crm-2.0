@@ -71,22 +71,53 @@ export const sectorActions = {
   },
 };
 
-/** O usuário pode usar o relatório do setor? admin OU membro de setor colaborativo. */
-export function useIsSupervisor(): boolean {
-  const { me, isAdmin } = useMyMembership();
-  const [colab, setColab] = useState(false);
+export interface MyDepartmentFlags {
+  loaded: boolean;
+  colaborativo: boolean;
+  /** Distribui leads por rodízio (0081). */
+  usaRodizio: boolean;
+  /** Aplica o logout automático por inatividade de 10 min (0081). */
+  logoutInatividade: boolean;
+}
+
+/**
+ * Flags do departamento do usuário atual. Departamentos são legíveis por qualquer
+ * membro (RLS da 0033), então funciona para não-admins. Sem departamento → padrões.
+ */
+export function useMyDepartment(): MyDepartmentFlags {
+  const { me } = useMyMembership();
+  const [flags, setFlags] = useState<MyDepartmentFlags>({
+    loaded: false,
+    colaborativo: false,
+    usaRodizio: true,
+    logoutInatividade: true,
+  });
   useEffect(() => {
     if (!me?.departmentId) {
-      setColab(false);
+      setFlags({ loaded: true, colaborativo: false, usaRodizio: true, logoutInatividade: true });
       return;
     }
     const supabase = createClient();
     void supabase
       .from("departments")
-      .select("colaborativo")
+      .select("colaborativo, usa_rodizio, logout_inatividade")
       .eq("id", me.departmentId)
       .maybeSingle()
-      .then(({ data }) => setColab(!!data?.colaborativo));
+      .then(({ data }) =>
+        setFlags({
+          loaded: true,
+          colaborativo: !!data?.colaborativo,
+          usaRodizio: data?.usa_rodizio ?? true,
+          logoutInatividade: data?.logout_inatividade ?? true,
+        })
+      );
   }, [me?.departmentId]);
-  return isAdmin || colab;
+  return flags;
+}
+
+/** O usuário pode usar o relatório do setor? admin OU membro de setor colaborativo. */
+export function useIsSupervisor(): boolean {
+  const { isAdmin } = useMyMembership();
+  const { colaborativo } = useMyDepartment();
+  return isAdmin || colaborativo;
 }

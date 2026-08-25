@@ -617,6 +617,8 @@ function DepartmentDialog({
   const [channelIds, setChannelIds] = useState<string[]>([]);
   const [leadPool, setLeadPool] = useState<string[]>([]);
   const [colaborativo, setColaborativo] = useState(false);
+  const [usaRodizio, setUsaRodizio] = useState(true);
+  const [logoutInatividade, setLogoutInatividade] = useState(true);
   const [saving, setSaving] = useState(false);
 
   // Membros deste departamento — só eles entram no rodízio.
@@ -636,6 +638,8 @@ function DepartmentDialog({
     setChannelIds(department?.channelIds ?? []);
     setLeadPool(department?.leadPool ?? []);
     setColaborativo(department?.colaborativo ?? false);
+    setUsaRodizio(department?.usaRodizio ?? true);
+    setLogoutInatividade(department?.logoutInatividade ?? true);
   }, [department, open]);
 
   const toggleChannel = (id: string) =>
@@ -664,6 +668,8 @@ function DepartmentDialog({
           channelIds,
           leadPool,
           colaborativo,
+          usaRodizio,
+          logoutInatividade,
         })
       : await departmentActions.create({
           name,
@@ -672,6 +678,8 @@ function DepartmentDialog({
           channelIds,
           leadPool,
           colaborativo,
+          usaRodizio,
+          logoutInatividade,
         });
     setSaving(false);
     if (!res.ok) {
@@ -732,6 +740,25 @@ function DepartmentDialog({
             </span>
           </Label>
 
+          {/* Logout por inatividade — por departamento (migração 0081) */}
+          <Label className="flex cursor-pointer items-start gap-2.5 rounded-lg border p-3">
+            <Checkbox
+              checked={logoutInatividade}
+              onCheckedChange={(v) => setLogoutInatividade(v === true)}
+              className="mt-0.5"
+            />
+            <span className="space-y-0.5">
+              <span className="block text-xs font-semibold text-slate-800">
+                Sair automático por inatividade (10 min)
+              </span>
+              <span className="block text-[11px] font-normal leading-relaxed text-slate-500">
+                Os usuários deste setor são desconectados após 10 minutos sem
+                atividade (avisa 1 min antes). Desligue para setores que não devem
+                cair sozinhos. Não afeta administradores.
+              </span>
+            </span>
+          </Label>
+
           {/* Segmentação por número (migração 0034) */}
           <div>
             <div className="mb-2 flex items-center justify-between">
@@ -778,8 +805,27 @@ function DepartmentDialog({
             </p>
           </div>
 
+          {/* Liga/desliga o rodízio por departamento (migração 0081) */}
+          <Label className="flex cursor-pointer items-start gap-2.5 rounded-lg border p-3">
+            <Checkbox
+              checked={usaRodizio}
+              onCheckedChange={(v) => setUsaRodizio(v === true)}
+              className="mt-0.5"
+            />
+            <span className="space-y-0.5">
+              <span className="block text-xs font-semibold text-slate-800">
+                Distribuir leads por rodízio
+              </span>
+              <span className="block text-[11px] font-normal leading-relaxed text-slate-500">
+                Ligado: o bot distribui o lead entre os atendentes online abaixo.
+                Desligado: <strong>respeita o bot</strong> — o lead fica na fila do
+                setor (ninguém é escolhido automaticamente) e alguém assume.
+              </span>
+            </span>
+          </Label>
+
           {/* Distribuição de leads por rodízio (migração 0057) */}
-          <div>
+          <div className={usaRodizio ? "" : "pointer-events-none opacity-50"}>
             <Label className="text-xs font-semibold">Distribuição de leads (rodízio)</Label>
             {!department ? (
               <p className="mt-1 rounded-lg border border-dashed p-3 text-[11px] text-slate-400">

@@ -421,6 +421,17 @@ async function syncCard(
 async function distributeLead(ctx: Ctx, node: { pipeline?: string }) {
   const deptId = await channelDepartmentId(ctx.db, ctx.channel.id);
   if (deptId) {
+    // Rodízio é POR DEPARTAMENTO (0081): se o setor não usa rodízio, o lead não é
+    // distribuído automaticamente — fica na fila do setor para alguém assumir.
+    const { data: dep } = await ctx.db
+      .from("departments")
+      .select("usa_rodizio")
+      .eq("id", deptId)
+      .maybeSingle();
+    if (dep && dep.usa_rodizio === false) {
+      await botLogEvent(ctx, "Setor sem rodízio — lead disponível na fila do setor");
+      return;
+    }
     const user = await distributeOne(ctx.db, {
       locationId: ctx.channel.location_id,
       deptId,
