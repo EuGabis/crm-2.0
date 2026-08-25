@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { create } from "zustand";
 import { createClient } from "@/lib/supabase/client";
 import { useDbStore } from "./contacts";
+import { canAccess } from "@/lib/auth/module-access";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -59,23 +60,12 @@ export interface Invitation {
 }
 
 /**
- * Acesso efetivo a um módulo. A ordem é a decidida com o Gabriel:
- * admin vê tudo → exceção individual → departamento → libera (legado).
+ * Acesso efetivo a um módulo (admin → exceção individual → departamento →
+ * libera). Mora em `lib/auth/module-access.ts` porque as rotas de API também
+ * precisam dela e não podem importar deste arquivo, que é `"use client"`.
+ * Reexportado aqui para não mudar quem já importava daqui.
  */
-export function canAccess(
-  moduleKey: string,
-  member: Pick<TeamMember, "role" | "permissions" | "departmentId"> | null,
-  departments: Department[]
-): boolean {
-  if (!member) return true;
-  if (member.role === "admin") return true;
-  const own = member.permissions?.[moduleKey];
-  if (typeof own === "boolean") return own;
-  const dep = departments.find((d) => d.id === member.departmentId);
-  const fromDep = dep?.permissions?.[moduleKey];
-  if (typeof fromDep === "boolean") return fromDep;
-  return true;
-}
+export { canAccess };
 
 /** Mapa de acesso efetivo de um membro, módulo a módulo. */
 export function effectivePermissions(

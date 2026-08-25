@@ -1032,6 +1032,58 @@ Conversa sem responsável aparece agrupada como "Sem responsável" (188 de 245, 
 A tela usa as classes claras de sempre (`bg-white`, `text-slate-900`) e o dark
 mode vem dos overrides de `globals.css` — não espalhe `dark:` aqui.
 
+### Gráficos clicáveis, filtros e o widget do painel
+
+**A agregação saiu da rota e foi para o navegador** (`lib/reports/sla.ts`). A
+rota devolve UMA LINHA POR CONVERSA (245 em 30 dias, ~40 KB) e quem soma é o
+client, dentro de `useMemo`. Motivo: com os gráficos clicáveis, recontar no
+servidor a cada clique tiraria a resposta imediata do filtro. O dia em que
+245 virar 20 mil é o dia de voltar a agregar no servidor.
+
+Ganho de projeto: o recorte que o clique cria e o do painel de filtros passam
+pelo MESMO caminho (`aplicarFiltros`) — não existe "filtro que o gráfico entende
+e a tabela não". `faixaDe()` é a mesma função que desenha a barra e que filtra.
+
+- **Tudo alterna**: clicar no que já está ativo remove o recorte. Clicáveis: os
+  4 KPIs, as barras da distribuição, os dias da linha, as linhas de responsável
+  e as de canal. Chips no topo mostram o recorte e removem item a item.
+- ⚠️ **O clique da linha vem do GRÁFICO (`activeLabel`), não do ponto**: acertar
+  um `dot` de 4 px com o mouse é difícil, e a área do dia já identifica qual foi.
+- ⚠️ **Faixa fora do recorte fica com `opacity 0.3`, não desaparece** — ver o
+  tamanho relativo dela é metade da informação.
+- Os seletores listam o PERÍODO, não o recorte: encolhendo junto com o filtro,
+  trocar de responsável exigiria limpar o filtro antes.
+- O eixo do gráfico é o do período (`dias_do_periodo` vem da rota): filtrando por
+  um responsável, os dias em que ele não atendeu aparecem como zero em vez de
+  encurtar a linha e mudar a escala.
+- Recorte vazio mostra um aviso com "limpar filtros" — quatro zeros e dois
+  gráficos vazios sem explicação parecem defeito.
+- Trocar de período limpa o recorte, e isso é feito **no clique, não num efeito**
+  sobre `dias`: o efeito rodaria também na primeira montagem.
+- ⚠️ `const linhas = useMemo(() => dados?.linhas ?? [], [dados])` — com o
+  literal `?? []` direto, o array nasce novo a cada render e invalida todos os
+  `useMemo` abaixo.
+
+**Widget no painel** (`dashboard/service-widgets.tsx`, chave `atendimento-sla`,
+span 2): quatro números de 7 dias + faixa âmbar quando há alguém esperando +
+link para a análise completa. Enxuto de propósito — gráficos clicáveis, filtros e
+a fila num card de meia linha viram um amontoado ilegível (mesmo raciocínio do
+"Resumo pagamentos" na barra das Conversas). `/relatorios` passou a aceitar
+**`?tab=<aba>`** (com o limite de `Suspense` que o `useSearchParams` exige) para
+o link cair na aba certa.
+
+⚠️ **A rota deixou de ser admin-only e passou a valer a permissão do módulo
+`relatorios`** (`requires: "relatorios"` no catálogo do widget) — pedido do
+Gabriel de que a análise apareça para quem tem acesso liberado. A aba Atendimento
+também aparece para não-admin. **A checagem que vale é a do SERVIDOR**: como
+`sla_conversations` é `security definer`, esconder o widget na tela não seria
+proteção. Para isso, `canAccess` saiu de `db/team.ts` (que é `"use client"` e não
+pode ser importado numa rota) para **`lib/auth/module-access.ts`**; `team.ts`
+reexporta de lá, então a ordem de resolução do acesso continua existindo em UM
+lugar. O widget trata 403 devolvendo `null` — se o acesso mudou depois de o
+painel ter sido salvo com ele, a resposta certa é desaparecer, não um cartão de
+erro no painel de quem não pode ver mesmo.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
