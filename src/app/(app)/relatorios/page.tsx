@@ -5,6 +5,7 @@ import { Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { SubNav } from "@/components/layout/subnav";
 import { GoogleAdsReport } from "@/components/reports/google-ads-report";
+import { ServiceSlaReport } from "@/components/reports/service-sla-report";
 import { Button } from "@/components/ui/button";
 import { formatBRL } from "@/lib/data/repos/opportunities";
 import { usePipelineDb } from "@/lib/data/repos/db/pipeline";
@@ -274,7 +275,13 @@ export default function RelatoriosPage() {
   const { isAdmin } = useMyMembership();
   // Só abas com dados REAIS. Análise IA e Agentes são de gestão (admin).
   const tabs = isAdmin
-    ? [{ label: "Análise IA" }, { label: "Agentes" }, { label: "Atribuição" }, { label: "Google Ads" }]
+    ? [
+        { label: "Análise IA" },
+        { label: "Atendimento" },
+        { label: "Agentes" },
+        { label: "Atribuição" },
+        { label: "Google Ads" },
+      ]
     : [{ label: "Atribuição" }, { label: "Google Ads" }];
   const [tab, setTab] = useState(isAdmin ? "Análise IA" : "Atribuição");
   const activeTab = tabs.some((t) => t.label === tab) ? tab : tabs[0].label;
@@ -284,6 +291,7 @@ export default function RelatoriosPage() {
       <SubNav tabs={tabs} active={activeTab} onChange={setTab} />
       <div className="p-6">
         {activeTab === "Análise IA" && isAdmin && <AnaliseIA />}
+        {activeTab === "Atendimento" && isAdmin && <ServiceSlaReport />}
         {activeTab === "Agentes" && isAdmin && <AgentesReport />}
         {activeTab === "Atribuição" && <AtribuicaoReport />}
         {activeTab === "Google Ads" && <GoogleAdsReport />}
