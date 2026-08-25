@@ -345,7 +345,16 @@ export function ImportDialog({
         r.inserted
       );
     }
+    // Nada inserido: só é erro se NÃO foi porque todos já existiam.
     if (r.inserted === 0) {
+      if (r.skipped > 0 && !r.error) {
+        toast.info(
+          `Nada novo: os ${nf.format(r.skipped)} contato(s) já existiam no CRM (nenhum duplicado criado).`
+        );
+        reset();
+        onOpenChange(false);
+        return;
+      }
       toast.error(`A importação falhou${r.error ? `: ${r.error}` : ""}`);
       return;
     }

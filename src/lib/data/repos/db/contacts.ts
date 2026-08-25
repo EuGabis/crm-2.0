@@ -482,10 +482,10 @@ export const dbContactActions = {
       tags: string[];
     }[],
     onProgress?: (done: number, total: number) => void
-  ): Promise<{ inserted: number; failed: number; error: string | null }> {
+  ): Promise<{ inserted: number; failed: number; skipped: number; error: string | null }> {
     const { locationId } = useDbStore.getState();
-    if (!locationId) return { inserted: 0, failed: rows.length, error: "Empresa não carregada — recarregue a página" };
-    if (rows.length === 0) return { inserted: 0, failed: 0, error: "Nada para importar" };
+    if (!locationId) return { inserted: 0, failed: rows.length, skipped: 0, error: "Empresa não carregada — recarregue a página" };
+    if (rows.length === 0) return { inserted: 0, failed: 0, skipped: 0, error: "Nada para importar" };
 
     // Os inserts acontecem no SERVIDOR (/api/contacts/import): o cliente só envia
     // os dados em poucos blocos curtos. Assim a aba não trava nem é suspensa no
@@ -493,6 +493,7 @@ export const dbContactActions = {
     const CHUNK = 5000;
     let inserted = 0;
     let failed = 0;
+    let skipped = 0;
     let firstError: string | null = null;
 
     for (let i = 0; i < rows.length; i += CHUNK) {
@@ -510,18 +511,19 @@ export const dbContactActions = {
         } else {
           inserted += json.inserted ?? 0;
           failed += json.failed ?? 0;
+          skipped += json.skipped ?? 0;
           firstError ??= json.error ?? null;
         }
       } catch (e) {
         failed += chunk.length;
         firstError ??= e instanceof Error ? e.message : "Falha de conexão";
       }
-      onProgress?.(inserted + failed, rows.length);
+      onProgress?.(inserted + failed + skipped, rows.length);
     }
 
     // Relê a lista (não prepend): 50 mil linhas no store por `setContacts` travava a aba.
     await useDbStore.getState().reload();
 
-    return { inserted, failed, error: firstError };
+    return { inserted, failed, skipped, error: firstError };
   },
 };

@@ -16,6 +16,17 @@ interface RawRow {
 }
 
 /**
+ * Mesma chave canônica de `private.phone_key` (0047): só dígitos, sem o 55,
+ * DDD + últimos 8 (une "com" e "sem" o 9º dígito). Replicada aqui para comparar
+ * com as chaves que a função `existing_contact_keys` devolve.
+ */
+function phoneKey(raw?: string): string {
+  const digits = (raw ?? "").replace(/\D/g, "");
+  const n = digits.length >= 12 && digits.startsWith("55") ? digits.slice(2) : digits;
+  return n.length < 10 ? n : n.slice(0, 2) + n.slice(-8);
+}
+
+/**
  * Importação em massa de contatos — feita no SERVIDOR. O cliente envia os dados
  * em blocos (poucas requisições curtas), e AQUI os inserts são feitos em lotes;
  * assim a aba do navegador não trava nem é suspensa no meio de 50 mil inserts
@@ -58,6 +69,7 @@ export async function POST(request: Request) {
 
   let inserted = 0;
   let failed = 0;
+  let skipped = 0;
   let firstError: string | null = null;
 
   // Insere um lote; se falhar, reparte ao meio até isolar a(s) linha(s) ruim(ns).
@@ -83,8 +95,47 @@ export async function POST(request: Request) {
 
   const CHUNK = 1000;
   for (let i = 0; i < payload.length; i += CHUNK) {
-    await push(payload.slice(i, i + CHUNK));
+    const chunk = payload.slice(i, i + CHUNK);
+
+    // Deduplicação NO SERVIDOR (migração 0078): pergunta quais chaves já existem
+    // na empresa e pula essas linhas. Sem isso, reimportar duplicava contatos.
+    const { data: ex, error: exErr } = await supabase.rpc("existing_contact_keys", {
+      p_phones: chunk.map((r) => r.phone).filter(Boolean),
+      p_emails: chunk.map((r) => r.email).filter(Boolean),
+      p_docs: chunk.map((r) => r.doc ?? "").filter(Boolean),
+    });
+    if (exErr) {
+      // A função não existe (migração 0078 não aplicada) ou falhou. Aborta em vez
+      // de inserir SEM deduplicar — duplicar de novo é pior do que parar.
+      return Response.json(
+        {
+          inserted,
+          failed,
+          skipped,
+          error:
+            "Deduplicação indisponível (aplique a migração 0078 no Supabase). " +
+            `Detalhe: ${exErr.message}`,
+        },
+        { status: 503 },
+      );
+    }
+
+    const existPhones = new Set<string>((ex?.phones ?? []) as string[]);
+    const existEmails = new Set<string>((ex?.emails ?? []) as string[]);
+    const existDocs = new Set<string>((ex?.docs ?? []) as string[]);
+
+    const fresh = chunk.filter((r) => {
+      const pk = phoneKey(r.phone);
+      const em = (r.email ?? "").trim().toLowerCase();
+      const dk = (r.doc ?? "").replace(/\D/g, "");
+      if (pk && existPhones.has(pk)) return false;
+      if (em.includes("@") && existEmails.has(em)) return false;
+      if (dk.length >= 11 && existDocs.has(dk)) return false;
+      return true;
+    });
+    skipped += chunk.length - fresh.length;
+    if (fresh.length) await push(fresh);
   }
 
-  return Response.json({ inserted, failed, error: firstError });
+  return Response.json({ inserted, failed, skipped, error: firstError });
 }
