@@ -6,7 +6,7 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { ArrowRight } from "lucide-react";
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { WidgetCard } from "./widget-card";
+import { shortBRL, WidgetCard } from "./widget-card";
 import { TOOLTIP_STYLE } from "./opportunity-widgets";
 import { useDashboardRange } from "./date-range";
 import { formatBRL } from "@/lib/data/repos/opportunities";
@@ -175,7 +175,10 @@ export function RevenueByMonthWidget() {
         <ResponsiveContainer width="100%" height={170}>
           <BarChart data={data} margin={{ left: 4, right: 8 }}>
             <XAxis dataKey="month" fontSize={10} />
-            <YAxis fontSize={10} tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}K`} />
+            {/* `shortBRL` e não dividir por mil: com receita abaixo de R$ 1.000
+                o eixo virava "R$0K" em TODOS os traços — o mesmo defeito que o
+                widget de Valor de Oportunidade já teve. */}
+            <YAxis fontSize={10} tickFormatter={shortBRL} />
             <Tooltip
               contentStyle={TOOLTIP_STYLE}
               formatter={(v) => [formatBRL(Number(v)), "Receita aprovada"]}

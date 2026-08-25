@@ -1149,6 +1149,42 @@ No Postgres 15+ a view roda com os privilégios de quem a criou, a menos que
   (Authentication → Policies), não código — **passo manual do Gabriel**, se
   quiser ligar a checagem contra o HaveIBeenPwned.
 
+### Os fiapos de gráfico dos KPIs (interativos desde 2026-08-25)
+
+Os quatro sparklines da faixa não respondiam a nada: passar o mouse não mostrava
+valor nenhum e não havia como saber que período um ponto representava.
+
+- **A leitura aparece NO LUGAR do hint**, não num balão flutuante. O card tem
+  `overflow-hidden` (a faixa de cor no topo depende disso para arredondar nas
+  pontas) e um tooltip do Recharts sairia **cortado pela borda**. Sob o mouse, a
+  linha "204 ainda em aberto" vira "29 de ago · 3 novas · 12 até aqui".
+- ⚠️ **O `<Tooltip content={() => null} />` não é resto de código.** É ele que
+  faz o Recharts calcular o `activeTooltipIndex` (lido no `onMouseMove`) e
+  desenhar o `activeDot`. Sem o Tooltip montado, não há índice ativo e nada
+  acontece.
+- ⚠️ **A linha é ACUMULADA**, então o tooltip mostra os dois números: o que
+  entrou na fatia (`inc`) e o acumulado (`v`). Só com o acumulado, o número do
+  ponto contradiz a intuição de "quantas nesse dia".
+- **As fatias eram 12 fixas** — num mês, 2,5 dias cada, impossível de rotular.
+  Agora a fatia é o DIA enquanto o período couber em 31 leituras, e só além disso
+  agrupa (o rótulo então vira "1 a 3 de set"). Foi essa mudança que tornou o
+  tooltip escrevível.
+- **O card virou botão**: clicar abre o mesmo `DrilldownDialog` dos outros
+  widgets. Com o mouse sobre um ponto, abre só aquele intervalo; fora dele, o
+  período inteiro.
+
+⚠️ **`DrilldownDialog` usava `useDbContacts()`** e fica montado no painel mesmo
+fechado — abrir o Dashboard baixava os 41 mil contatos para escrever o nome de
+dez linhas *caso* alguém clicasse num gráfico. Passou a usar
+`useContactsByIds` (só os contatos das oportunidades em tela).
+
+Dois defeitos do mesmo tipo, corrigidos junto: a rosca de **Distribuição de
+fases** tinha `<Tooltip />` sem `formatter` e mostrava `value: 12` (nome de
+coluna do banco na tela), e o eixo de **Receita por mês** dividia por mil com
+`toFixed(0)` — com receita abaixo de R$ 1.000 escrevia "R$0K" em todos os
+traços, o mesmo defeito que Valor de Oportunidade já tinha tido. Agora usa
+`shortBRL`.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
