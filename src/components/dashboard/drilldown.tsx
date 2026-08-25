@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { contactName } from "@/lib/data/repos/contacts";
-import { useDbContacts } from "@/lib/data/repos/db/contacts";
+import { useContactsByIds } from "@/lib/data/repos/db/contacts-search";
 import { useDbPipelines } from "@/lib/data/repos/db/pipeline";
 import { formatBRL } from "@/lib/data/repos/opportunities";
 import type { Opportunity } from "@/lib/data/types";
@@ -56,7 +56,12 @@ export function DrilldownDialog({
   state: DrilldownState | null;
   onClose: () => void;
 }) {
-  const { contacts } = useDbContacts();
+  // ⚠️ Era `useDbContacts()`, que baixa a lista INTEIRA — e como este diálogo
+  // fica montado no painel mesmo fechado, abrir o Dashboard puxava os 41 mil
+  // contatos só para escrever o nome de dez linhas quando alguém clicasse num
+  // gráfico. Aqui só os contatos das oportunidades em tela são buscados.
+  const ops = state?.ops ?? [];
+  const contactsById = useContactsByIds(ops.map((o) => o.contactId));
   const pipelines = useDbPipelines();
 
   const stageName = useMemo(() => {
@@ -65,7 +70,6 @@ export function DrilldownDialog({
     return map;
   }, [pipelines]);
 
-  const ops = state?.ops ?? [];
   const total = ops.reduce((s, o) => s + o.value, 0);
 
   return (
@@ -111,7 +115,7 @@ export function DrilldownDialog({
               </thead>
               <tbody>
                 {ops.map((o) => {
-                  const contact = contacts.find((c) => c.id === o.contactId);
+                  const contact = o.contactId ? contactsById.get(o.contactId) : null;
                   return (
                     <tr key={o.id} className="border-b last:border-0">
                       <td className="py-2 pr-2 font-medium text-slate-800">{o.name}</td>

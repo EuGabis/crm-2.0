@@ -169,7 +169,16 @@ export function StageDistribution(props: WidgetPipelineProps = {}) {
                   <Cell key={d.name} fill={d.color} />
                 ))}
               </Pie>
-              <Tooltip contentStyle={TOOLTIP_STYLE} />
+              {/* Sem `formatter` o balão saía como "value: 12" — nome de coluna
+                  do banco na cara do usuário. Mesmo tratamento da rosca de
+                  status, que já tinha sido corrigida por isso. */}
+              <Tooltip
+                contentStyle={TOOLTIP_STYLE}
+                formatter={(v, name) => [
+                  `${v} oportunidade${Number(v) === 1 ? "" : "s"}`,
+                  name,
+                ]}
+              />
             </PieChart>
           </ResponsiveContainer>
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
