@@ -1241,6 +1241,23 @@ fone, no ritmo de quem falou. Transcrito, ele entra na **busca global do inbox**
 - **A prévia da conversa passa a mostrar a transcrição** quando o áudio é a
   última mensagem (`🎤 <texto>`). ⚠️ Só se NENHUMA mensagem mais nova chegou nesse
   meio tempo — senão a lista mentiria sobre qual foi a última mensagem.
+- ⚠️ **O balão pede a transcrição ao ver um áudio `pendente`**, sem esperar o
+  tick: o tick roda a cada minuto e existe para o histórico; quem está com a
+  conversa aberta não deveria esperar um minuto pelo áudio que acabou de chegar.
+  Os pedidos saem **em série e com teto de 12 por carregamento de página** —
+  uma conversa cheia de áudio antigo dispararia uma requisição por balão, todas
+  ao mesmo tempo; o que passar do teto fica para a fila.
+- ⚠️ **`useState(message.transcription)` NÃO funciona aqui** e foi o motivo de a
+  transcrição só aparecer depois de recarregar a página. O `useState` usa o
+  argumento apenas na primeira montagem, então quando o texto chegava pelo
+  Realtime (o inbox já assina UPDATE de `messages`, e a tabela é `replica
+  identity full`) o componente seguia exibindo o valor congelado. Hoje o valor
+  do BANCO tem prioridade e o estado local é só ponte para a resposta do clique.
+- ⚠️ **O corte da fila é por TEMPO** (20 s), não só por quantidade. Lote fixo
+  obriga a escolher entre esvaziar devagar (5 por rodada = mais de meia hora nas
+  170 gravações do histórico) e arriscar o timeout da rota — que abortaria o
+  tique INTEIRO, junto com as automações e as mensagens agendadas, que moram no
+  mesmo lugar.
 - Rota `POST /api/messages/transcribe` para transcrever na hora (o áudio que
   acabou de chegar, ou o que falhou). **A sessão AUTORIZA e a service role
   EXECUTA** (padrão do `resolveGuruUserToken`): o `select` passa pela RLS, então
@@ -1253,12 +1270,11 @@ fone, no ritmo de quem falou. Transcrito, ele entra na **busca global do inbox**
 justamente o que ninguém vai voltar para ouvir. A 5 por minuto, a fila leva ~40
 min para esvaziar depois do deploy.
 
-**Passo a conferir (Gabriel):** `OPENAI_API_KEY` precisa estar na Vercel. A lista
-de envs registrada neste arquivo não a inclui (o AI Studio pode estar usando uma
-adicionada sem atualizar o doc). Sem ela, a transcrição grava `falhou` com
-"OPENAI_API_KEY ausente" — dá para ver o motivo em
-`select transcription_status, transcription_error, count(*) from messages where
-type='audio' group by 1,2;`.
+**Confirmado em produção** (2026-08-25): `OPENAI_API_KEY` ESTÁ na Vercel — 35
+áudios transcritos e nenhuma falha na primeira leva. A qualidade do `whisper-1`
+com `language=pt` é boa até em nome próprio e jargão do negócio ("mecânico de
+aeronaves", "o instrutor, o Júnior"). Para acompanhar:
+`select transcription_status, count(*) from messages where type='audio' group by 1;`
 
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
