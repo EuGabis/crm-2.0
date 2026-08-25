@@ -725,8 +725,9 @@ Cloud API → celular.
   0053 = conversa visível/atribuída, 0054 = bot conversacional,
   0055 = editor do bot (`bot_flows`) — as três do outro Claude,
   0056 = view `payment_new_sales` (o que conta como VENDA NOVA);
-  **próxima migração livre: 0081** (0077 = responder mensagem, 0078 = busca de
-  contatos no servidor, 0079 = SLA de atendimento, 0080 = avisos de segurança).
+  **próxima migração livre: 0086** (0078 = busca de contatos no servidor,
+  0079 = SLA de atendimento, 0080 = avisos de segurança, 0085 = transcrição de
+  áudio; as 0080–0084 do outro Claude são de setor/rodízio).
 - Env (privadas, nunca `NEXT_PUBLIC_`): `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`,
   `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_GRAPH_VERSION` (default `v21.0`).
 - **Mídia real (imagem/áudio/vídeo)** — helpers em `src/lib/whatsapp/client.ts`
@@ -1194,6 +1195,70 @@ coluna do banco na tela), e o eixo de **Receita por mês** dividia por mil com
 `toFixed(0)` — com receita abaixo de R$ 1.000 escrevia "R$0K" em todos os
 traços, o mesmo defeito que Valor de Oportunidade já tinha tido. Agora usa
 `shortBRL`.
+
+## Conversas: horário na lista e transcrição dos áudios (migração 0085)
+
+**Horário da última mensagem na lista** (`conversation-list.tsx`, sem migração):
+antes era preciso ABRIR a conversa para saber se a última mensagem foi de agora
+ou do mês passado. A escala é a do WhatsApp e é proposital: hoje mostra a HORA
+(o que importa é "há quanto tempo"), ontem e a semana mostram o DIA (a hora
+exata já não muda a decisão), e o resto mostra a data — com o ano quando é de
+outro ano, senão "12/03" enganaria. O horário foi para a linha do NOME e o
+contador de não lidas desceu para a linha da prévia: juntos no mesmo canto, o
+nome do contato truncava cedo.
+
+**Transcrição dos áudios.** Áudio no atendimento obriga a parar e ouvir, com
+fone, no ritmo de quem falou. Transcrito, ele entra na **busca global do inbox**
+(que já procura no corpo das mensagens) e é lido de relance.
+
+- Colunas `messages.transcription`, `transcription_status`
+  (`pendente|ok|falhou|ignorado`) e `transcription_error`.
+- ⚠️ **Quem enfileira é um TRIGGER**, não um `default` nem quem insere: áudio
+  entra por quatro caminhos (webhook do WhatsApp, `sendMedia` do composer, painel
+  Arquivos, disparo de mídia) e o quinto que alguém criar amanhã esqueceria de
+  marcar.
+- ⚠️ **Quem transcreve é o TICK QUE JÁ EXISTE** (`/api/automations/tick`), como
+  as mensagens agendadas da 0028 — segundo cron significaria segundo segredo,
+  segunda migração de agendamento e mais um passo manual em produção. Lote de 5
+  por rodada, **mais novos primeiro**: a conversa de agora é a que alguém está
+  lendo; o histórico pode esperar as próximas rodadas.
+- **O que decidiu transcrever TUDO automaticamente foi a medida do volume:** 30
+  dias deste banco = 63 áudios recebidos (~13 min) e 137 enviados (~62 min). A
+  ~US$ 0,006/min dá menos de US$ 0,50/mês. Com volume alto, valeria exigir o
+  clique.
+- ⚠️ **O modelo default é `whisper-1`, não o mais novo.** `gpt-4o-mini-transcribe`
+  custa ~metade, mas um nome de modelo que a conta não tem faz TODA transcrição
+  falhar; na diferença real deste volume a economia é de centavos. Trocar é só
+  `OPENAI_TRANSCRIBE_MODEL` na Vercel, sem mexer no código.
+- ⚠️ **O nome do arquivo importa** no `FormData`: a API decide o formato pela
+  EXTENSÃO, e o WhatsApp manda ogg/opus. Sem extensão, ela recusa o arquivo. E
+  `language=pt` fica fixo — em áudio curto e com ruído a detecção automática às
+  vezes escolhe espanhol.
+- **`ignorado` não é `falhou`**, e a diferença é o que evita laço infinito:
+  áudio sem arquivo (o composer grava a mensagem otimista e o upload pode falhar
+  depois), acima de 25 MB (teto da API) ou sem fala reconhecida saem da fila em
+  vez de serem retentados a cada minuto para sempre.
+- **A prévia da conversa passa a mostrar a transcrição** quando o áudio é a
+  última mensagem (`🎤 <texto>`). ⚠️ Só se NENHUMA mensagem mais nova chegou nesse
+  meio tempo — senão a lista mentiria sobre qual foi a última mensagem.
+- Rota `POST /api/messages/transcribe` para transcrever na hora (o áudio que
+  acabou de chegar, ou o que falhou). **A sessão AUTORIZA e a service role
+  EXECUTA** (padrão do `resolveGuruUserToken`): o `select` passa pela RLS, então
+  quem não vê a conversa recebe 404 e não gasta uma chamada; a escrita precisa da
+  service role porque UPDATE em `messages` é admin-only (0040). Já transcrito
+  devolve o cache em vez de pagar de novo.
+- Env nova: `OPENAI_TRANSCRIBE_MODEL` (opcional). Reusa `OPENAI_API_KEY`.
+
+⚠️ **A migração marcou os ~200 áudios existentes como `pendente`** — o histórico é
+justamente o que ninguém vai voltar para ouvir. A 5 por minuto, a fila leva ~40
+min para esvaziar depois do deploy.
+
+**Passo a conferir (Gabriel):** `OPENAI_API_KEY` precisa estar na Vercel. A lista
+de envs registrada neste arquivo não a inclui (o AI Studio pode estar usando uma
+adicionada sem atualizar o doc). Sem ela, a transcrição grava `falhou` com
+"OPENAI_API_KEY ausente" — dá para ver o motivo em
+`select transcription_status, transcription_error, count(*) from messages where
+type='audio' group by 1,2;`.
 
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 

@@ -249,6 +249,98 @@ function AudioPlayer({ url, duration, out }: { url: string | null; duration?: st
 }
 
 /** Conteúdo de mensagens de mídia: imagem, áudio ou arquivo. */
+/**
+ * Transcrição do áudio, embaixo do player.
+ *
+ * A fila do tick transcreve tudo sozinha (migração 0085), então o normal é o
+ * texto já estar aqui quando alguém abre a conversa. O botão cobre os dois casos
+ * em que esperar o próximo minuto incomoda: o áudio que acabou de chegar e o que
+ * falhou.
+ *
+ * Estado local em vez de recarregar a conversa: só este balão muda, e um reload
+ * do thread saltaria o scroll de quem está lendo.
+ */
+function Transcricao({ message, out }: { message: Message; out: boolean }) {
+  const [texto, setTexto] = useState(message.transcription ?? null);
+  const [status, setStatus] = useState(message.transcriptionStatus);
+  const [carregando, setCarregando] = useState(false);
+
+  const pedir = async () => {
+    setCarregando(true);
+    try {
+      const res = await fetch("/api/messages/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId: message.id }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(json?.error ?? "Não foi possível transcrever");
+        setStatus("falhou");
+        return;
+      }
+      if (json.texto) {
+        setTexto(json.texto);
+        setStatus("ok");
+      } else {
+        // "ignorado" com texto vazio = áudio sem fala. Dizer isso é melhor que
+        // deixar o botão ali sugerindo que uma nova tentativa resolveria.
+        setStatus("ignorado");
+        toast.info(json?.erro ?? "Nenhuma fala reconhecida neste áudio");
+      }
+    } catch {
+      toast.error("Falha de conexão");
+      setStatus("falhou");
+    } finally {
+      setCarregando(false);
+    }
+  };
+
+  if (texto) {
+    return (
+      <p
+        className={cn(
+          "border-l-2 pl-2 text-[11px] leading-relaxed",
+          out ? "border-white/30 text-white/80" : "border-slate-300 text-slate-500"
+        )}
+      >
+        {texto}
+      </p>
+    );
+  }
+
+  // Enquanto está na fila, nada de botão: clicar não adiantaria e o texto chega
+  // no próximo tique.
+  if (status === "pendente" || carregando) {
+    return (
+      <p className={cn("text-[10px] italic", out ? "text-white/60" : "text-slate-400")}>
+        transcrevendo o áudio...
+      </p>
+    );
+  }
+
+  if (status === "ignorado") {
+    return (
+      <p className={cn("text-[10px] italic", out ? "text-white/60" : "text-slate-400")}>
+        sem fala reconhecida
+      </p>
+    );
+  }
+
+  return (
+    <button
+      onClick={pedir}
+      className={cn(
+        "flex items-center gap-1 text-[10px] font-medium hover:underline",
+        out ? "text-white/70" : "text-indigo-600"
+      )}
+    >
+      <FileText className="size-3" />
+      {status === "falhou" ? "Tentar transcrever de novo" : "Transcrever áudio"}
+    </button>
+  );
+}
+
 function MediaContent({ message, out }: { message: Message; out: boolean }) {
   const url = useMediaUrl(message.mediaPath);
 
@@ -267,7 +359,12 @@ function MediaContent({ message, out }: { message: Message; out: boolean }) {
   }
 
   if (message.type === "audio") {
-    return <AudioPlayer url={url} duration={message.body || undefined} out={out} />;
+    return (
+      <div className="space-y-1.5">
+        <AudioPlayer url={url} duration={message.body || undefined} out={out} />
+        <Transcricao message={message} out={out} />
+      </div>
+    );
   }
 
   if (message.type === "video") {

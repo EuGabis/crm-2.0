@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { differenceInCalendarDays, format, isToday, isYesterday } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import {
   Archive,
   ArrowUpDown,
@@ -21,6 +23,32 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+/**
+ * Quando foi a última mensagem, do jeito que o WhatsApp escreve.
+ *
+ * Antes não havia nada: era preciso ABRIR a conversa para saber se a última
+ * mensagem foi de agora ou do mês passado. Numa lista ordenada por atividade,
+ * isso deixava a coluna toda igual.
+ *
+ * A escala é proposital: hoje mostra a HORA (o que importa é "há quanto tempo"),
+ * ontem e a semana mostram o DIA (a hora exata já não muda a decisão) e o resto
+ * mostra a data. Escrever "25/08/2026 14:32" em tudo ocuparia o dobro do espaço
+ * dizendo menos.
+ */
+function quando(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  if (isToday(d)) return format(d, "HH:mm");
+  if (isYesterday(d)) return "ontem";
+  // Até 6 dias atrás o dia da semana é mais legível que a data ("sáb" > "23/08").
+  if (differenceInCalendarDays(new Date(), d) < 7) {
+    return format(d, "EEE", { locale: ptBR }).replace(".", "");
+  }
+  // Ano diferente entra na conta: "12/03" de outro ano seria enganoso.
+  if (d.getFullYear() !== new Date().getFullYear()) return format(d, "dd/MM/yy");
+  return format(d, "dd/MM");
+}
+
 import { ChannelIcon } from "@/components/shared/channel-icon";
 import { SlaBadge } from "@/components/shared/sla-badge";
 import { contactName } from "@/lib/data/repos/contacts";
@@ -532,14 +560,27 @@ export function ConversationList({
                   </span>
                   <span className="flex shrink-0 items-center gap-1">
                     <SlaBadge days={conv.slaDays} />
-                    {conv.unreadCount > 0 && (
-                      <span className="rounded-full bg-indigo-500 px-1.5 text-[9px] font-bold text-white">
-                        {conv.unreadCount}
-                      </span>
-                    )}
+                    {/* Horário na primeira linha e contador na segunda — a
+                        divisão do WhatsApp. Com os dois juntos aqui, o nome do
+                        contato perdia espaço e truncava cedo. */}
+                    <span
+                      className={cn(
+                        "shrink-0 text-[10px]",
+                        conv.unreadCount > 0 ? "font-semibold text-indigo-600" : "text-slate-400"
+                      )}
+                    >
+                      {quando(conv.lastMessageAt)}
+                    </span>
                   </span>
                 </div>
-                <p className="truncate text-[11px] text-slate-500">{conv.lastMessagePreview}</p>
+                <div className="flex items-center justify-between gap-1">
+                  <p className="truncate text-[11px] text-slate-500">{conv.lastMessagePreview}</p>
+                  {conv.unreadCount > 0 && (
+                    <span className="shrink-0 rounded-full bg-indigo-500 px-1.5 text-[9px] font-bold text-white">
+                      {conv.unreadCount}
+                    </span>
+                  )}
+                </div>
               </div>
               <span
                 onClick={(e) => {
