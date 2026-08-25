@@ -86,7 +86,7 @@ export async function buildReportSnapshot(
     await Promise.all([
       supabase.from("location_members").select("user_id, role, department_id").eq("location_id", locationId),
       supabase.from("conversations").select("id, assigned_to, channel_id, closed_at, awaiting_distribution, bot_paused").eq("location_id", locationId),
-      supabase.from("messages").select("conversation_id, direction, type, internal, template_name, created_by, created_at").eq("location_id", locationId).gte("created_at", since).order("created_at"),
+      supabase.from("messages").select("conversation_id, direction, type, internal, template_name, created_by, automated, created_at").eq("location_id", locationId).gte("created_at", since).order("created_at"),
       supabase.from("opportunities").select("owner_id, status, value, stage_id, pipeline_id").eq("location_id", locationId),
       supabase.from("pipelines").select("id, name").eq("location_id", locationId),
       supabase.from("stages").select("id, name, pipeline_id"),
@@ -135,39 +135,54 @@ export async function buildReportSnapshot(
   const sentByUser = new Map<string, number>();
   // ator (created_by) -> dia -> { conversas tocadas (set), mensagens, templates }
   const dailyByUser = new Map<string, Map<string, { convs: Set<string>; msgs: number; templates: number }>>();
+  // Tempo de resposta é atribuído ao RESPONSÁVEL da conversa (assigned_to), não a
+  // quem tecnicamente enviou (created_by) — que fica nulo em ~86% das saídas
+  // (bot/auto/legado), deixando quase todo mundo "sem dados". Mede a 1ª resposta
+  // HUMANA (automated=false) após a entrada; resposta do bot não conta nem zera
+  // a espera. Mesma definição da função sla_conversations (migração 0079).
+  const convAssigned = new Map<string, string | null>(
+    conversations.map((c: any) => [c.id, c.assigned_to ?? null])
+  );
   for (const [convId, msgs] of byConv) {
+    const owner = convAssigned.get(convId) ?? null;
     let lastIn: number | null = null;
     for (const m of msgs) {
       if (m.internal || m.type === "event") continue;
       const t = new Date(m.created_at).getTime();
       if (m.direction === "in") {
         lastIn = t;
-      } else if (m.direction === "out") {
-        const actor = (m.created_by as string | null) ?? null;
-        if (actor) {
-          sentByUser.set(actor, (sentByUser.get(actor) ?? 0) + 1);
-          const day = brDay(m.created_at);
-          let dm = dailyByUser.get(actor);
-          if (!dm) {
-            dm = new Map();
-            dailyByUser.set(actor, dm);
-          }
-          let e = dm.get(day);
-          if (!e) {
-            e = { convs: new Set(), msgs: 0, templates: 0 };
-            dm.set(day, e);
-          }
-          e.convs.add(convId);
-          e.msgs += 1;
-          if (m.template_name) e.templates += 1;
-          if (lastIn != null) {
-            const min = (t - lastIn) / 60000;
-            if (min >= 0 && min <= MAX_RESPONSE_MIN) {
-              const cur = respByUser.get(actor) ?? { total: 0, count: 0 };
-              cur.total += min;
-              cur.count += 1;
-              respByUser.set(actor, cur);
-            }
+        continue;
+      }
+      // saída
+      const actor = (m.created_by as string | null) ?? null;
+      const automated = !!m.automated;
+      // Atividade de ENVIO (por quem realmente enviou) — inalterada.
+      if (actor) {
+        sentByUser.set(actor, (sentByUser.get(actor) ?? 0) + 1);
+        const day = brDay(m.created_at);
+        let dm = dailyByUser.get(actor);
+        if (!dm) {
+          dm = new Map();
+          dailyByUser.set(actor, dm);
+        }
+        let e = dm.get(day);
+        if (!e) {
+          e = { convs: new Set(), msgs: 0, templates: 0 };
+          dm.set(day, e);
+        }
+        e.convs.add(convId);
+        e.msgs += 1;
+        if (m.template_name) e.templates += 1;
+      }
+      // Tempo de resposta: só a 1ª resposta HUMANA após a entrada.
+      if (!automated && lastIn != null) {
+        if (owner) {
+          const min = (t - lastIn) / 60000;
+          if (min >= 0 && min <= MAX_RESPONSE_MIN) {
+            const cur = respByUser.get(owner) ?? { total: 0, count: 0 };
+            cur.total += min;
+            cur.count += 1;
+            respByUser.set(owner, cur);
           }
         }
         lastIn = null; // uma resposta por entrada
