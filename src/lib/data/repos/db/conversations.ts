@@ -46,6 +46,7 @@ const mapConversation = (r: any): Conversation => ({
   contactFirstName: r.contact?.first_name ?? undefined,
   contactLastName: r.contact?.last_name ?? undefined,
   contactPhone: r.contact?.phone ?? undefined,
+  contactEmail: r.contact?.email ?? undefined,
 });
 
 const mapMessage = (r: any): Message => ({
@@ -142,7 +143,7 @@ export const useConvStore = create<ConvState>((set, get) => ({
     // lista usa o preview desnormalizado (last_message_preview), sem depender
     // deste array.
     const [convs, msgs, snips, views] = await Promise.all([
-      supabase.from("conversations").select("*, contact:contacts(first_name, last_name, phone)"),
+      supabase.from("conversations").select("*, contact:contacts(first_name, last_name, phone, email)"),
       supabase
         .from("messages")
         .select("*")
@@ -333,7 +334,7 @@ export async function syncInboxDelta(): Promise<number> {
   const touched = [...new Set(fresh.map((m) => m.conversationId))];
   const { data: convs } = await supabase
     .from("conversations")
-    .select("*, contact:contacts(first_name, last_name, phone)")
+    .select("*, contact:contacts(first_name, last_name, phone, email)")
     .in("id", touched);
   if (convs?.length) {
     const byId = new Map(convs.map((c: any) => [c.id, mapConversation(c)]));
@@ -356,7 +357,7 @@ export async function resyncConversations(): Promise<void> {
   const supabase = createClient();
   const { data, error } = await supabase
     .from("conversations")
-    .select("*, contact:contacts(first_name, last_name, phone)");
+    .select("*, contact:contacts(first_name, last_name, phone, email)");
   if (error || !data) return;
   const s = useConvStore.getState();
   const known = new Set(s.conversations.map((c) => c.id));
@@ -979,7 +980,7 @@ export const conversationActions = {
       // Consigo VER essa conversa? (a RLS decide: dono/admin/sees_all).
       const { data: full } = await supabase
         .from("conversations")
-        .select("*, contact:contacts(first_name, last_name, phone)")
+        .select("*, contact:contacts(first_name, last_name, phone, email)")
         .eq("id", existing.conv_id)
         .maybeSingle();
       if (full) return { id: addToStore(full) };

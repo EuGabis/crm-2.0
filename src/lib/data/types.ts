@@ -130,6 +130,7 @@ export interface Conversation {
   contactFirstName?: string;
   contactLastName?: string;
   contactPhone?: string;
+  contactEmail?: string;
 }
 
 /** Abas de filtro da caixa de entrada. */

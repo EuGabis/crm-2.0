@@ -110,14 +110,18 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
   const rows: Row[] = useMemo(
     () =>
       conversations.map((c) => {
+        // O store de contatos é paginado (não tem todos) — então usamos o nome/
+        // telefone/e-mail que a conversa já traz embutido do banco, com o store só
+        // como reforço. Antes caía tudo em "—".
         const contact = contactMap.get(c.contactId);
         const ch = c.channelId ? channelMap.get(c.channelId) : undefined;
+        const embName = `${c.contactFirstName ?? ""} ${c.contactLastName ?? ""}`.trim();
         return {
           id: c.id,
           contactId: c.contactId,
-          nome: contact ? contactName(contact) : "—",
-          numero: contact?.phone ?? "—",
-          email: contact?.email || "—",
+          nome: (contact ? contactName(contact) : embName) || "—",
+          numero: contact?.phone || c.contactPhone || "—",
+          email: contact?.email || c.contactEmail || "—",
           status: statusOf(c),
           canal: channelLabel(c.channel),
           tipo: inboundSet.has(c.id) ? "Receptivo" : "Ativo",
