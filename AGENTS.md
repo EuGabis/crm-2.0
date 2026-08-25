@@ -1159,9 +1159,19 @@ valor nenhum e não havia como saber que período um ponto representava.
   pontas) e um tooltip do Recharts sairia **cortado pela borda**. Sob o mouse, a
   linha "204 ainda em aberto" vira "29 de ago · 3 novas · 12 até aqui".
 - ⚠️ **O `<Tooltip content={() => null} />` não é resto de código.** É ele que
-  faz o Recharts calcular o `activeTooltipIndex` (lido no `onMouseMove`) e
-  desenhar o `activeDot`. Sem o Tooltip montado, não há índice ativo e nada
-  acontece.
+  faz o Recharts desenhar o `activeDot` no ponto sob o cursor. Sem o Tooltip
+  montado, não há ponto marcado.
+- ⚠️ **O índice sob o cursor é medido pela POSIÇÃO DO MOUSE no container**, não
+  lido do estado do Recharts. A primeira versão usava o `onMouseMove` do gráfico
+  e o `activeTooltipIndex` — e **não funcionava**: no Recharts 3 esse campo é
+  `TooltipIndex = string | null`, não `number`, então a checagem `typeof i ===
+  "number"` descartava todo hover EM SILÊNCIO. O sintoma engana: o ponto e a
+  linha do cursor apareciam (isso é interno do Recharts, não depende do
+  handler) e só o texto nunca trocava. Medir no container não depende de detalhe
+  interno de versão.
+  `Math.round(p * (n - 1))` e não `Math.floor`: é o ponto MAIS PRÓXIMO do
+  cursor, o mesmo critério do `activeDot` — com `floor` os dois discordariam nas
+  bordas e o texto falaria de um ponto diferente do marcado.
 - ⚠️ **A linha é ACUMULADA**, então o tooltip mostra os dois números: o que
   entrou na fatia (`inc`) e o acumulado (`v`). Só com o acumulado, o número do
   ponto contradiz a intuição de "quantas nesse dia".
