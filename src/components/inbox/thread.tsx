@@ -250,6 +250,46 @@ function AudioPlayer({ url, duration, out }: { url: string | null; duration?: st
 
 /** Conteúdo de mensagens de mídia: imagem, áudio ou arquivo. */
 /**
+ * Pedidos de transcrição em SÉRIE, com teto por carregamento de página.
+ *
+ * Abrir uma conversa cheia de áudio pendente dispararia uma requisição por
+ * balão, todas de uma vez. Em série o servidor atende uma por vez, e o teto
+ * evita a rajada numa conversa com dezenas de áudios — o que sobrar fica para a
+ * fila do tick, que é justamente o mecanismo para o histórico.
+ */
+let filaTranscricao: Promise<void> = Promise.resolve();
+const jaPedido = new Set<string>();
+let pedidosFeitos = 0;
+const TETO_POR_PAGINA = 12;
+
+function pedirTranscricao(
+  messageId: string,
+  aoTerminar: (r: { texto?: string; status?: string; erro?: string }) => void
+): boolean {
+  if (jaPedido.has(messageId) || pedidosFeitos >= TETO_POR_PAGINA) return false;
+  jaPedido.add(messageId);
+  pedidosFeitos += 1;
+  filaTranscricao = filaTranscricao.then(async () => {
+    try {
+      const res = await fetch("/api/messages/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        aoTerminar({ status: "falhou", erro: json?.error });
+        return;
+      }
+      aoTerminar({ texto: json.texto ?? undefined, status: json.status, erro: json.erro });
+    } catch {
+      aoTerminar({ status: "falhou", erro: "Falha de conexão" });
+    }
+  });
+  return true;
+}
+
+/**
  * Transcrição do áudio, embaixo do player.
  *
  * A fila do tick transcreve tudo sozinha (migração 0085), então o normal é o
@@ -261,39 +301,53 @@ function AudioPlayer({ url, duration, out }: { url: string | null; duration?: st
  * do thread saltaria o scroll de quem está lendo.
  */
 function Transcricao({ message, out }: { message: Message; out: boolean }) {
-  const [texto, setTexto] = useState(message.transcription ?? null);
-  const [status, setStatus] = useState(message.transcriptionStatus);
+  // ⚠️ O valor do BANCO tem prioridade sobre o estado local, e não o contrário.
+  // A primeira versão fazia `useState(message.transcription)`: o `useState` só
+  // usa o argumento na PRIMEIRA montagem, então quando a transcrição chegava
+  // pelo Realtime (o inbox já assina UPDATE de `messages`) o componente
+  // continuava mostrando o valor congelado — era exatamente por isso que só
+  // aparecia depois de recarregar a página. O estado local ficou só como ponte
+  // para a resposta do clique, enquanto o Realtime não chega.
+  const [local, setLocal] = useState<{ texto?: string; status?: string } | null>(null);
   const [carregando, setCarregando] = useState(false);
+
+  const texto = message.transcription ?? local?.texto ?? null;
+  const status = message.transcriptionStatus ?? local?.status;
+
+  const aplicar = (r: { texto?: string; status?: string; erro?: string }) => {
+    setCarregando(false);
+    if (r.texto) {
+      setLocal({ texto: r.texto, status: "ok" });
+      return;
+    }
+    setLocal({ status: r.status ?? "falhou" });
+    if (r.status === "ignorado") {
+      // Áudio sem fala. Dizer isso é melhor que deixar o botão ali sugerindo
+      // que uma nova tentativa resolveria.
+      toast.info(r.erro ?? "Nenhuma fala reconhecida neste áudio");
+    } else if (r.status === "falhou") {
+      toast.error(r.erro ?? "Não foi possível transcrever");
+    }
+  };
+
+  // Áudio que ainda está na fila: pede a transcrição AGORA, sem esperar o tick.
+  // O tick roda a cada minuto e existe para o histórico; quem está com a
+  // conversa aberta não deveria esperar um minuto pelo áudio que acabou de
+  // chegar.
+  useEffect(() => {
+    if (texto || status !== "pendente") return;
+    // Sem `setCarregando` aqui: `pendente` já desenha "transcrevendo o
+    // áudio...", então o estado seria redundante — e `setState` no corpo de um
+    // efeito dispara renderização em cascata (a regra do React reclama disso).
+    pedirTranscricao(message.id, aplicar);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [message.id, status, texto]);
 
   const pedir = async () => {
     setCarregando(true);
-    try {
-      const res = await fetch("/api/messages/transcribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messageId: message.id }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(json?.error ?? "Não foi possível transcrever");
-        setStatus("falhou");
-        return;
-      }
-      if (json.texto) {
-        setTexto(json.texto);
-        setStatus("ok");
-      } else {
-        // "ignorado" com texto vazio = áudio sem fala. Dizer isso é melhor que
-        // deixar o botão ali sugerindo que uma nova tentativa resolveria.
-        setStatus("ignorado");
-        toast.info(json?.erro ?? "Nenhuma fala reconhecida neste áudio");
-      }
-    } catch {
-      toast.error("Falha de conexão");
-      setStatus("falhou");
-    } finally {
-      setCarregando(false);
-    }
+    // Botão manual: sai da mesma fila, para não concorrer com o automático.
+    jaPedido.delete(message.id);
+    if (!pedirTranscricao(message.id, aplicar)) setCarregando(false);
   };
 
   if (texto) {

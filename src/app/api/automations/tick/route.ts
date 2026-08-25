@@ -72,6 +72,6 @@ export async function POST(request: Request) {
     transcricoes:
       transcricoes.status === "fulfilled"
         ? transcricoes.value
-        : { processados: 0, ok: 0, erros: 0, tickError: true },
+        : { processados: 0, ok: 0, erros: 0, restaram: 0, tickError: true },
   });
 }

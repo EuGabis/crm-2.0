@@ -156,6 +156,9 @@ async function atualizarPreview(
     .eq("id", conversationId);
 }
 
+/** Quanto tempo a fila pode ocupar de um tique, em ms. */
+const ORCAMENTO_MS = 20_000;
+
 /**
  * Processa a fila de áudios pendentes.
  *
@@ -163,29 +166,36 @@ async function atualizarPreview(
  * mensagens agendadas — de propósito, para não criar segundo cron, segundo
  * segredo nem passo manual novo em produção.
  *
- * O lote é pequeno porque cada áudio é uma chamada de rede de alguns segundos e
- * o tick roda a cada minuto: melhor esvaziar a fila em várias rodadas do que
- * estourar o tempo da rota e não gravar nada.
+ * ⚠️ O corte é por TEMPO, não só por quantidade. Um lote fixo obriga a escolher
+ * entre esvaziar devagar (um lote de 5 leva mais de meia hora nas 170 gravações
+ * do histórico) e arriscar o timeout da rota, que abortaria o tique inteiro —
+ * inclusive as automações e as mensagens agendadas, que rodam no mesmo lugar.
+ * Com orçamento de tempo, um áudio curto não faz o próximo esperar e um áudio
+ * longo simplesmente encerra a rodada.
  */
 export async function processarFilaDeTranscricao(
-  limite = 5
-): Promise<{ processados: number; ok: number; erros: number }> {
+  limite = 12
+): Promise<{ processados: number; ok: number; erros: number; restaram: number }> {
   const supabase = createAdminClient();
-  const { data: pendentes } = await supabase
+  const inicio = Date.now();
+  const { data: pendentes, count } = await supabase
     .from("messages")
-    .select("id")
+    .select("id", { count: "exact" })
     .eq("transcription_status", "pendente")
     // Mais novos primeiro: a conversa de agora é a que alguém está lendo. O
     // histórico antigo pode esperar as próximas rodadas.
     .order("created_at", { ascending: false })
     .limit(limite);
 
+  let processados = 0;
   let ok = 0;
   let erros = 0;
   for (const m of pendentes ?? []) {
+    if (Date.now() - inicio > ORCAMENTO_MS) break;
     const r = await transcreverMensagem(m.id);
+    processados++;
     if (r.status === "ok") ok++;
     else if (r.status === "falhou") erros++;
   }
-  return { processados: (pendentes ?? []).length, ok, erros };
+  return { processados, ok, erros, restaram: Math.max(0, (count ?? 0) - processados) };
 }
