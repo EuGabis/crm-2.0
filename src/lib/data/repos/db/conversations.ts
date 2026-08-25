@@ -13,6 +13,7 @@ import type {
   Message,
 } from "@/lib/data/types";
 import { useDbStore } from "./contacts";
+import { useTeamStore } from "./team";
 
 export type { ConversationFilter } from "@/lib/data/types";
 
@@ -842,10 +843,28 @@ export const conversationActions = {
     // Via função SECURITY DEFINER (0084): depois de transferir para OUTRO, o
     // insert direto em messages é barrado pela RLS (a conversa deixou de ser
     // minha). A função grava por fora da RLS, validando só a empresa.
-    const { data } = await supabase.rpc("log_conversation_event", {
+    let { data } = await supabase.rpc("log_conversation_event", {
       conv_id: conversationId,
       p_body: body,
     });
+    // Resiliência: se a 0084 ainda não foi aplicada (função inexistente), cai no
+    // insert direto — funciona para dono/admin (não some tudo por falta da função).
+    if (!data) {
+      const conv = useConvStore.getState().conversations.find((c) => c.id === conversationId);
+      const res = await supabase
+        .from("messages")
+        .insert({
+          location_id: location,
+          conversation_id: conversationId,
+          direction: "out",
+          type: "event",
+          channel: conv?.channel ?? "whatsapp",
+          body,
+        })
+        .select()
+        .single();
+      data = res.data ?? null;
+    }
     // Inserção otimista; o Realtime (INSERT em messages) deduplica pelo id.
     if (data) {
       const s2 = useConvStore.getState();
@@ -884,6 +903,14 @@ export const conversationActions = {
         c.id === conversationId ? mapConversation(data) : c
       ),
     });
+    // Log inline (pílula cinza) que fica no histórico mesmo depois de reabrir — o
+    // banner do topo some ao reabrir; o log permanece.
+    const uid = useDbStore.getState().userId;
+    const actor = useTeamStore.getState().members.find((m) => m.userId === uid)?.name ?? "Alguém";
+    void conversationActions.logEvent(
+      conversationId,
+      done ? `Conversa finalizada por ${actor}` : `Conversa reaberta por ${actor}`
+    );
     return true;
   },
 
