@@ -17,8 +17,11 @@ export interface SectorConversation {
   contactFirst: string;
   contactLast: string;
   contactPhone: string;
+  contactEmail: string;
   assignedTo: string | null;
+  channel: string;
   channelId: string | null;
+  inbound: boolean;
   closedAt: string | null;
   archivedAt: string | null;
   lastMessageAt: string | null;
@@ -32,8 +35,11 @@ const mapRow = (r: any): SectorConversation => ({
   contactFirst: r.contact_first ?? "",
   contactLast: r.contact_last ?? "",
   contactPhone: r.contact_phone ?? "",
+  contactEmail: r.contact_email ?? "",
   assignedTo: r.assigned_to ?? null,
+  channel: r.channel ?? "whatsapp",
   channelId: r.channel_id ?? null,
+  inbound: r.inbound ?? false,
   closedAt: r.closed_at ?? null,
   archivedAt: r.archived_at ?? null,
   lastMessageAt: r.last_message_at ?? null,

@@ -4,11 +4,12 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Download, MessageSquare, Send, User } from "lucide-react";
+import { Download, Loader2, MessageSquare, Send, User, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { contactName } from "@/lib/data/repos/contacts";
 import { useDbContacts } from "@/lib/data/repos/db/contacts";
-import { useConversations, useConvStore } from "@/lib/data/repos/db/conversations";
+import { conversationActions, useConversations, useConvStore } from "@/lib/data/repos/db/conversations";
+import { useIsSupervisor, useSectorConversations, sectorActions } from "@/lib/data/repos/db/sector";
 import { useMyMembership, useTeam } from "@/lib/data/repos/db/team";
 import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
 import { channelLabel } from "@/components/shared/channel-icon";
@@ -48,6 +49,20 @@ interface Row {
   atendente: string;
   numeroAssociado: string;
   inicio: string | null;
+  channelId: string | null;
+  assignedToId: string | null;
+}
+
+/** Status a partir de campos soltos (usado na visão de setor, sem o objeto Conversation). */
+function statusFrom(c: {
+  closedAt: string | null;
+  archivedAt: string | null;
+  assignedTo: string | null;
+}): string {
+  if (c.closedAt) return "Finalizada";
+  if (c.archivedAt) return "Arquivada";
+  if (c.assignedTo) return "Aberta";
+  return "Na fila";
 }
 
 const PER_PAGE = 25;
@@ -57,9 +72,32 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
   const { contacts } = useDbContacts();
   const { channels } = useWhatsappChannels();
   const { members } = useTeam();
-  const { isAdmin } = useMyMembership();
+  const { isAdmin, me } = useMyMembership();
   const messages = useConvStore((s) => s.messages);
+  // Supervisor (setor colaborativo/admin) vê TODAS as conversas do setor — vindas
+  // da função sector_conversations, que não passa pela RLS da caixa (privada).
+  const isSupervisor = useIsSupervisor();
+  const { rows: sectorConvs, reload: reloadSector } = useSectorConversations();
   const [distributing, setDistributing] = useState(false);
+  const [assuming, setAssuming] = useState<string | null>(null);
+
+  const assumir = async (row: Row) => {
+    setAssuming(row.id);
+    const ok = await sectorActions.takeOver(row.id);
+    if (ok) {
+      const actor = (me ? memberMap.get(me.userId) : null) ?? "Você";
+      const from = row.assignedToId ? memberMap.get(row.assignedToId) : null;
+      await conversationActions.logEvent(
+        row.id,
+        from ? `${actor} assumiu a conversa de ${from}` : `${actor} assumiu a conversa`
+      );
+      toast.success("Conversa assumida — está na sua caixa de Conversas");
+      await reloadSector();
+    } else {
+      toast.error("Não foi possível assumir esta conversa");
+    }
+    setAssuming(null);
+  };
 
   const awaitingCount = useMemo(
     () => conversations.filter((c) => c.awaitingDistribution).length,
@@ -107,31 +145,54 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
     return s;
   }, [messages]);
 
-  const rows: Row[] = useMemo(
-    () =>
-      conversations.map((c) => {
-        // O store de contatos é paginado (não tem todos) — então usamos o nome/
-        // telefone/e-mail que a conversa já traz embutido do banco, com o store só
-        // como reforço. Antes caía tudo em "—".
-        const contact = contactMap.get(c.contactId);
+  const rows: Row[] = useMemo(() => {
+    // SUPERVISOR: monta a partir das conversas do SETOR (todas, de todos os
+    // atendentes). Caso contrário, das conversas que a RLS deixa ver (as minhas).
+    if (isSupervisor && sectorConvs.length > 0) {
+      return sectorConvs.map((c) => {
         const ch = c.channelId ? channelMap.get(c.channelId) : undefined;
-        const embName = `${c.contactFirstName ?? ""} ${c.contactLastName ?? ""}`.trim();
+        const nome = `${c.contactFirst} ${c.contactLast}`.trim();
         return {
           id: c.id,
-          contactId: c.contactId,
-          nome: (contact ? contactName(contact) : embName) || "—",
-          numero: contact?.phone || c.contactPhone || "—",
-          email: contact?.email || c.contactEmail || "—",
-          status: statusOf(c),
-          canal: channelLabel(c.channel),
-          tipo: inboundSet.has(c.id) ? "Receptivo" : "Ativo",
+          contactId: c.contactId ?? "",
+          nome: nome || c.contactPhone || "—",
+          numero: c.contactPhone || "—",
+          email: c.contactEmail || "—",
+          status: statusFrom(c),
+          canal: channelLabel(c.channel as Conversation["channel"]),
+          tipo: c.inbound ? "Receptivo" : "Ativo",
           atendente: c.assignedTo ? memberMap.get(c.assignedTo) ?? "—" : "NA",
           numeroAssociado: ch ? ch.phoneE164 || ch.name : "—",
           inicio: c.createdAt ?? c.lastMessageAt ?? null,
+          channelId: c.channelId,
+          assignedToId: c.assignedTo,
         };
-      }),
-    [conversations, contactMap, channelMap, memberMap, inboundSet],
-  );
+      });
+    }
+    return conversations.map((c) => {
+      // O store de contatos é paginado (não tem todos) — então usamos o nome/
+      // telefone/e-mail que a conversa já traz embutido do banco, com o store só
+      // como reforço. Antes caía tudo em "—".
+      const contact = contactMap.get(c.contactId);
+      const ch = c.channelId ? channelMap.get(c.channelId) : undefined;
+      const embName = `${c.contactFirstName ?? ""} ${c.contactLastName ?? ""}`.trim();
+      return {
+        id: c.id,
+        contactId: c.contactId,
+        nome: (contact ? contactName(contact) : embName) || "—",
+        numero: contact?.phone || c.contactPhone || "—",
+        email: contact?.email || c.contactEmail || "—",
+        status: statusOf(c),
+        canal: channelLabel(c.channel),
+        tipo: inboundSet.has(c.id) ? "Receptivo" : "Ativo",
+        atendente: c.assignedTo ? memberMap.get(c.assignedTo) ?? "—" : "NA",
+        numeroAssociado: ch ? ch.phoneE164 || ch.name : "—",
+        inicio: c.createdAt ?? c.lastMessageAt ?? null,
+        channelId: c.channelId ?? null,
+        assignedToId: c.assignedTo ?? null,
+      };
+    });
+  }, [isSupervisor, sectorConvs, conversations, contactMap, channelMap, memberMap, inboundSet]);
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -140,14 +201,9 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
     return rows.filter((r) => {
       if (statusF !== "todos" && r.status !== statusF) return false;
       if (canalF !== "todos" && r.canal !== canalF) return false;
-      if (numeroF !== "todos") {
-        const conv = conversations.find((c) => c.id === r.id);
-        if ((conv?.channelId ?? "") !== numeroF) return false;
-      }
+      if (numeroF !== "todos" && (r.channelId ?? "") !== numeroF) return false;
       if (atendenteF !== "todos") {
-        const conv = conversations.find((c) => c.id === r.id);
-        const assigned = conv?.assignedTo ?? null;
-        if (atendenteF === "sem" ? !!assigned : assigned !== atendenteF) return false;
+        if (atendenteF === "sem" ? !!r.assignedToId : r.assignedToId !== atendenteF) return false;
       }
       if (deTs || ateTs) {
         const t = r.inicio ? new Date(r.inicio).getTime() : 0;
@@ -385,6 +441,21 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
                     >
                       <MessageSquare className="size-3.5" />
                     </button>
+                    {isSupervisor && r.assignedToId !== me?.userId && (
+                      <button
+                        type="button"
+                        onClick={() => void assumir(r)}
+                        disabled={assuming === r.id}
+                        title="Assumir esta conversa (vai para a sua caixa)"
+                        className="flex size-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-emerald-600 disabled:opacity-50"
+                      >
+                        {assuming === r.id ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <UserCheck className="size-3.5" />
+                        )}
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
