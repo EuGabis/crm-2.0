@@ -725,8 +725,8 @@ Cloud API → celular.
   0053 = conversa visível/atribuída, 0054 = bot conversacional,
   0055 = editor do bot (`bot_flows`) — as três do outro Claude,
   0056 = view `payment_new_sales` (o que conta como VENDA NOVA);
-  **próxima migração livre: 0079** (0077 = responder mensagem, 0078 = busca de
-  contatos no servidor).
+  **próxima migração livre: 0080** (0077 = responder mensagem, 0078 = busca de
+  contatos no servidor, 0079 = SLA de atendimento).
 - Env (privadas, nunca `NEXT_PUBLIC_`): `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`,
   `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_GRAPH_VERSION` (default `v21.0`).
 - **Mídia real (imagem/áudio/vídeo)** — helpers em `src/lib/whatsapp/client.ts`
@@ -968,6 +968,69 @@ Calendários, `reminders`, o drilldown do painel, o composer de campanha e o
 diálogo de oportunidade. Nessas telas `useDbContacts()` segue baixando tudo — o
 caminho é `useContactsByIds` (nome por id) e `ContactPicker` (busca no servidor,
 `components/contacts/contact-picker.tsx`), que já existem.
+
+## Análise de atendimento (SLA) — Relatórios → Atendimento
+
+Aba nova (`components/reports/service-sla-report.tsx` + rota
+`/api/relatorios/atendimento`), admin-only como as outras de gestão. Mede o
+tempo até a **primeira resposta humana**. Migração **0079**.
+
+**Definições do Gabriel:** expediente **seg–sex, 8h–19h** (America/Sao_Paulo) e
+meta de **15 minutos** úteis.
+
+⚠️ **O "tempo médio de resposta" da aba Agentes era ficção em quatro camadas** —
+tudo medido neste banco, 30 dias. Não repita nenhuma delas em métrica nova:
+
+1. **Descartava tudo acima de 24h** (`MAX_RESPONSE_MIN` em
+   `lib/reports/snapshot.ts`): escondia justamente as piores respostas.
+2. **Média, não mediana.** A média era 675 min (11h) e a mediana, 14 min. A
+   atendente que a tela mostrava com "1h 59min" tem mediana de **1,8 min** e 68%
+   na meta — era a melhor da equipe retratada como a pior.
+3. **Não contava quem nunca foi respondido.** 55 das 245 conversas com mensagem
+   de cliente (23%) não tiveram UMA resposta humana e não entravam em métrica
+   alguma: o pior caso de atendimento era invisível. Por isso as não respondidas
+   entram no DENOMINADOR do cumprimento — medir só entre as respondidas
+   premiaria abandonar a conversa.
+4. **Media tempo corrido.** Com o expediente aplicado, o p90 caiu de **45h para
+   2h33**: dos 25 casos que passavam de 24h, 21 eram de sexta ou sábado
+   respondidos na segunda. Sem congelar o relógio, a tela acusa a equipe de
+   violar SLA por não trabalhar no domingo.
+
+**Peças:**
+- `private.business_minutes(t0, t1)` — minutos dentro do expediente, em horário
+  LOCAL (a janela é 8h–19h no relógio de quem atende). Laço por dia com teto de
+  400 voltas: conversa esquecida há anos não pode virar dez mil iterações dentro
+  de uma consulta de tela. Conferido com 8 casos de borda (vira a noite, sábado
+  → segunda, domingo inteiro = 0, t1 antes de t0 = 0).
+- `public.sla_conversations(location, de, ate, meta)` — uma linha por conversa
+  com espera útil, espera corrida, respondida, dentro da meta, fechada e se **só
+  o bot respondeu**. `security definer` com a checagem de empresa na primeira
+  linha (padrão da 0049 — `business_minutes` não é leakproof). 14–26 ms para
+  qualquer período até 90 dias.
+- A rota agrega KPIs, série diária, faixas de distribuição, por responsável, por
+  canal e a **fila de ação** (quem espera agora primeiro, depois as violações).
+
+⚠️ **A resposta do BOT não conta como atendimento.** O auto-responder responde em
+segundos; contando como primeira resposta, o SLA ficaria perfeito sem ninguém
+ter atendido. As conversas em que só o bot falou aparecem marcadas ("só o bot
+respondeu") — são 8 hoje.
+
+⚠️ **O recorte por pessoa usa `conversations.assigned_to`, NÃO
+`messages.created_by`** — e isso levou à correção da causa raiz: **86% das saídas
+estavam com autor nulo** (906 de 1.416 saídas humanas). O `created_by` vinha de
+`useDbStore.getState().userId`, que só existia depois do `load()` do store — o
+mesmo `load()` que baixava os 41 mil contatos e levava uma dezena de segundos.
+Quem respondia rápido depois de abrir as Conversas gravava a mensagem **sem
+autor, em silêncio**; daí os 8 de 10 atendentes com "sem dados", e daí também a
+nota interna que o próprio autor não conseguia mais excluir (a policy da 0051
+exige `created_by = auth.uid()`). `conversationActions.send`/`sendMedia` agora
+resolvem o autor com `await autor()`, que chama `ensureSession()` se preciso.
+**As mensagens antigas seguem sem autor** — não dá para adivinhar quem enviou.
+Conversa sem responsável aparece agrupada como "Sem responsável" (188 de 245, e
+46 delas nunca respondidas): é informação de gestão, não erro a esconder.
+
+A tela usa as classes claras de sempre (`bg-white`, `text-slate-900`) e o dark
+mode vem dos overrides de `globals.css` — não espalhe `dark:` aqui.
 
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 

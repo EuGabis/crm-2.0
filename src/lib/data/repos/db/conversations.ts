@@ -523,6 +523,26 @@ export function useAutomatedConversationIds() {
 
 const loc = () => useDbStore.getState().locationId;
 
+/**
+ * Quem está enviando — resolvendo a sessão se ela ainda não chegou.
+ *
+ * ⚠️ Isto era `useDbStore.getState().userId` puro, e é a causa de **86% das
+ * mensagens de saída estarem sem `created_by`** (medido: 906 de 1.416 saídas
+ * humanas em 30 dias). O `userId` só existia depois do `load()` do store, que
+ * baixava a lista inteira de contatos — com 41 mil, uma dezena de segundos. Quem
+ * abria as Conversas e respondia rápido gravava a mensagem sem autor, calado.
+ *
+ * Sem autor, a coluna "tempo médio de resposta" da aba Agentes lia "sem dados"
+ * para 8 dos 10 atendentes, e o autor da nota interna não podia mais excluí-la
+ * (a policy da 0051 exige `created_by = auth.uid()`).
+ */
+async function autor(): Promise<string | null> {
+  const atual = useDbStore.getState().userId;
+  if (atual) return atual;
+  await useDbStore.getState().ensureSession();
+  return useDbStore.getState().userId;
+}
+
 export const conversationActions = {
   async send(
     conversationId: string,
@@ -553,7 +573,7 @@ export const conversationActions = {
         // continua funcionando mesmo antes de a migração ser aplicada.
         ...(msg.replyTo ? { reply_to: msg.replyTo } : {}),
         // Autor (0051): é o que permite o próprio excluir a nota que escreveu.
-        created_by: useDbStore.getState().userId,
+        created_by: await autor(),
         ...scheduling,
       })
       .select()
@@ -663,7 +683,7 @@ export const conversationActions = {
         channel,
         body,
         internal,
-        created_by: useDbStore.getState().userId,
+        created_by: await autor(),
         media_path: path,
         media_name: file.name,
         media_mime: file.type || null,
