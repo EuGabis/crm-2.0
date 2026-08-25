@@ -725,8 +725,8 @@ Cloud API → celular.
   0053 = conversa visível/atribuída, 0054 = bot conversacional,
   0055 = editor do bot (`bot_flows`) — as três do outro Claude,
   0056 = view `payment_new_sales` (o que conta como VENDA NOVA);
-  **próxima migração livre: 0080** (0077 = responder mensagem, 0078 = busca de
-  contatos no servidor, 0079 = SLA de atendimento).
+  **próxima migração livre: 0081** (0077 = responder mensagem, 0078 = busca de
+  contatos no servidor, 0079 = SLA de atendimento, 0080 = avisos de segurança).
 - Env (privadas, nunca `NEXT_PUBLIC_`): `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`,
   `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_GRAPH_VERSION` (default `v21.0`).
 - **Mídia real (imagem/áudio/vídeo)** — helpers em `src/lib/whatsapp/client.ts`
@@ -1083,6 +1083,71 @@ reexporta de lá, então a ordem de resolução do acesso continua existindo em 
 lugar. O widget trata 403 devolvendo `null` — se o acesso mudou depois de o
 painel ter sido salvo com ele, a resposta certa é desaparecer, não um cartão de
 erro no painel de quem não pode ver mesmo.
+
+## Avisos do linter de segurança do Supabase (migração 0080)
+
+O painel apontava dois **"Security Definer View" como CRITICAL**. Rodando a
+lista completa (`get_advisors`), o achado mais grave era outro.
+
+⚠️ **Seis funções `security definer` eram chamáveis SEM LOGIN** — a causa é o
+padrão do Postgres: `create function` já concede EXECUTE a **PUBLIC**, e elas
+não tinham o `revoke`. Conferido como `anon` ANTES de mexer:
+`public.contact_conversation('<uuid de contato>', 'whatsapp')` devolvia o id da
+conversa e o atendente atribuído, de qualquer empresa, para quem não estava
+autenticado. As seis: `contact_conversation`, `claim_conversation`,
+`transfer_conversation`, `touch_presence`, `publish_campaign`,
+`add_campaign_recipients`. Depois da 0080, `anon` recebe
+`42501 permission denied for function`.
+
+⚠️ **Ao criar função em `public`, faça SEMPRE o par**
+`revoke execute ... from public, anon` + `grant execute ... to authenticated`.
+É o que as funções das 0047/0048/0078/0079 já fazem — e é por isso que elas nunca
+apareceram nessa lista. Só o `grant to authenticated` não basta: ele não tira o
+EXECUTE que o PUBLIC ganhou de graça.
+
+**`contact_conversation` ganhou checagem de empresa.** Ela nasceu sem checagem
+nenhuma, e ignorar a RLS é o propósito dela (o botão "Abrir conversa" do card
+precisa achar a conversa mesmo sendo de outro atendente). Mas "de outro
+atendente" e "de outra empresa" são coisas diferentes: sem o filtro, um membro da
+empresa A resolvia conversa de contato da empresa B. O guard preserva a intenção
+e fecha o vazamento.
+
+### As duas views — e por que a receita do linter NÃO servia para as duas
+
+No Postgres 15+ a view roda com os privilégios de quem a criou, a menos que
+`security_invoker` esteja ligado. É disso que o linter reclama.
+
+- `media_integration_status` (0045): **`security_invoker = true`** e pronto. Não
+  tem um consumidor no app desde que o Canva saiu (2026-08-17) e o Drive passou
+  ao Picker. O objeto fica no banco, como a 0045 decidiu.
+- ⚠️ `payment_integration_status` (0036): ligar o invoker aqui **REINTRODUZ um
+  bug que este projeto já teve DUAS VEZES**. `payment_credentials` é admin-only
+  desde a 0008, e a view existe exatamente para o usuário comum ver o ESTADO da
+  integração sem alcançar o token; com invoker, a policy admin-only volta a valer
+  e todo não-admin vê "Guru não conectada" numa empresa conectada.
+  **`grant` por coluna também não resolve**: admin e usuário comum são o MESMO
+  role (`authenticated`), e quem os separa é a RLS, que é por linha, não por
+  coluna.
+  A saída foi a view virar uma **casca com invoker ligado sobre a função definer
+  `payment_integration_status_rows()`**, que faz a checagem de empresa
+  explicitamente. O linter fica satisfeito, `db/payments.ts` continua com
+  `.from("payment_integration_status")` (nenhuma mudança no app) e a proteção do
+  token deixa de depender da lista de colunas da view. Conferido como usuário
+  comum: vê 1 linha de estado, vê 0 linhas de `payment_credentials`.
+
+### O que sobrou na lista, de propósito
+
+- **`rls_enabled_no_policy` em `private.app_settings` / `automation_config` /
+  `marketing_config`** (INFO): é o desenho. O schema `private` não é exposto na
+  API e RLS ligada sem policy nenhuma significa "ninguém acessa pela API" — que é
+  exatamente o objetivo de guardar segredo de cron ali.
+- **`authenticated_security_definer_function_executable`** (WARN, ~14 funções):
+  esperado. São as funções que existem para dar ao usuário autenticado um recorte
+  que a RLS sozinha não daria; todas checam a empresa na primeira linha. O aviso
+  é um lembrete de revisar, não um defeito.
+- **Leaked Password Protection** (WARN): é chave no painel do Supabase
+  (Authentication → Policies), não código — **passo manual do Gabriel**, se
+  quiser ligar a checagem contra o HaveIBeenPwned.
 
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
