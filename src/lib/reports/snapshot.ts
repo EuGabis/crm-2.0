@@ -174,15 +174,19 @@ export async function buildReportSnapshot(
         e.msgs += 1;
         if (m.template_name) e.templates += 1;
       }
-      // Tempo de resposta: só a 1ª resposta HUMANA após a entrada.
+      // Tempo de resposta: só a 1ª resposta HUMANA após a entrada. Atribui a quem
+      // ENVIOU (created_by, quando existe) OU, na falta, ao RESPONSÁVEL da conversa
+      // — assim conversas já finalizadas (que perdem o dono) ainda creditam o
+      // atendente pelo autor da mensagem.
       if (!automated && lastIn != null) {
-        if (owner) {
+        const responder = actor ?? owner;
+        if (responder) {
           const min = (t - lastIn) / 60000;
           if (min >= 0 && min <= MAX_RESPONSE_MIN) {
-            const cur = respByUser.get(owner) ?? { total: 0, count: 0 };
+            const cur = respByUser.get(responder) ?? { total: 0, count: 0 };
             cur.total += min;
             cur.count += 1;
-            respByUser.set(owner, cur);
+            respByUser.set(responder, cur);
           }
         }
         lastIn = null; // uma resposta por entrada
