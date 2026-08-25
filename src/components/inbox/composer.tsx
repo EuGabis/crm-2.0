@@ -476,6 +476,21 @@ export function Composer({ conversationId }: { conversationId: string }) {
             send();
           }
         }}
+        onPaste={(e) => {
+          // Colar um print (Ctrl+V) manda como imagem no WhatsApp. Só intercepta
+          // se o clipboard tiver imagem e não estiver em nota interna; texto cola
+          // normal. Envio de mídia não vale para nota interna.
+          if (internal) return;
+          const items = Array.from(e.clipboardData?.items ?? []);
+          const imgItem = items.find((it) => it.type.startsWith("image/"));
+          if (!imgItem) return;
+          const blob = imgItem.getAsFile();
+          if (!blob) return;
+          e.preventDefault();
+          const ext = (imgItem.type.split("/")[1] || "png").replace("jpeg", "jpg");
+          const file = new File([blob], `print.${ext}`, { type: imgItem.type });
+          void uploadFile(file);
+        }}
         placeholder={
           blocked
             ? "Fora da janela de 24h — envie um template para retomar"
