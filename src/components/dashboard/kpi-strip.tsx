@@ -246,17 +246,38 @@ export function KpiStrip() {
               ) : (
                 <p className="mt-1 truncate text-[11px] text-slate-400">{k.hint}</p>
               )}
-              <div className="-mx-4 -mb-4 mt-2 h-10">
+              {/*
+                O índice sob o cursor vem da POSIÇÃO DO MOUSE neste container, e
+                não do `onMouseMove` do Recharts.
+                ⚠️ A primeira tentativa lia `activeTooltipIndex` do estado do
+                gráfico e não funcionava: no Recharts 3 esse campo é
+                `string | null` (`TooltipIndex`), não `number`, então a checagem
+                de tipo descartava todo hover EM SILÊNCIO — o ponto e a linha do
+                cursor apareciam (isso é interno do Recharts) e o texto nunca
+                trocava. Medir aqui não depende de detalhe interno de versão.
+                `Math.round` e não `Math.floor`: é o ponto MAIS PRÓXIMO do
+                cursor, o mesmo critério que o Recharts usa para escolher qual
+                `activeDot` desenhar — com `floor` os dois discordariam nas
+                bordas e o texto falaria de um ponto diferente do marcado.
+              */}
+              <div
+                className="-mx-4 -mb-4 mt-2 h-10"
+                onMouseMove={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  if (r.width === 0 || k.serie.length === 0) return;
+                  const p = (e.clientX - r.left) / r.width;
+                  const i = Math.round(p * (k.serie.length - 1));
+                  setAtivo({
+                    kpi: k.key,
+                    i: Math.min(k.serie.length - 1, Math.max(0, i)),
+                  });
+                }}
+                onMouseLeave={() => setAtivo(null)}
+              >
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart
                     data={k.serie}
                     margin={{ top: 4, bottom: 0, left: 0, right: 0 }}
-                    onMouseMove={(estado) => {
-                      const i = (estado as { activeTooltipIndex?: number })
-                        ?.activeTooltipIndex;
-                      if (typeof i === "number") setAtivo({ kpi: k.key, i });
-                    }}
-                    onMouseLeave={() => setAtivo(null)}
                   >
                     <defs>
                       <linearGradient id={`kpi-${k.key}`} x1="0" y1="0" x2="0" y2="1">
