@@ -963,14 +963,27 @@ export const conversationActions = {
           assigned_to: null,
         }
       : { closed_at: null, closed_by: null };
-    // SEM .select(): ao soltar o responsável, o próprio usuário pode perder a
-    // visibilidade da linha pela RLS e o select voltaria vazio — fazendo o close
-    // reportar falha mesmo tendo funcionado. Atualizamos o store localmente.
-    const { error } = await supabase
-      .from("conversations")
-      .update(patch)
-      .eq("id", conversationId);
-    if (error) return false;
+    // Via função SECURITY DEFINER (0089): finaliza/reabre por fora da RLS,
+    // autorizando dono, admin OU supervisor do setor. Conserta o caso em que
+    // finalizar dava "Não foi possível" e o status não mudava (conversa aberta
+    // sem atribuir via get_conversation, de outro setor, etc.).
+    const { data: rpcOk, error: rpcErr } = await supabase.rpc("finish_conversation", {
+      conv_id: conversationId,
+      p_done: done,
+    });
+    if (rpcErr) {
+      // Fallback: função ainda não aplicada (0089) → update direto (dono/admin).
+      // SEM .select(): ao soltar o responsável, a RLS pode esconder a linha e o
+      // select voltaria vazio, reportando falha mesmo tendo funcionado.
+      const { error } = await supabase
+        .from("conversations")
+        .update(patch)
+        .eq("id", conversationId);
+      if (error) return false;
+    } else if (rpcOk !== true) {
+      // Função respondeu que o usuário não pode agir nesta conversa.
+      return false;
+    }
     const s = useConvStore.getState();
     s.patch({
       conversations: s.conversations.map((c) =>
