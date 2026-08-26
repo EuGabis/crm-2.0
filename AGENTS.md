@@ -1031,6 +1031,29 @@ resolvem o autor com `await autor()`, que chama `ensureSession()` se preciso.
 Conversa sem responsável aparece agrupada como "Sem responsável" (188 de 245, e
 46 delas nunca respondidas): é informação de gestão, não erro a esconder.
 
+### Baixar relatório (CSV)
+
+Botão "Baixar relatório" no topo da aba, ao lado de "Mais filtros".
+
+- **Uma linha por conversa, não os totais.** Quem baixa relatório de SLA vai
+  montar tabela dinâmica, cruzar com a planilha da equipe ou procurar caso a
+  caso; os KPIs a planilha recalcula a partir das linhas — o contrário não.
+- ⚠️ **Exporta o RECORTE ATIVO**, não o período inteiro. A tela toda reflete o
+  filtro (chips, gráficos, tabelas); um arquivo que ignorasse os filtros não
+  bateria com nada do que está em tela. O nome do arquivo carrega o período e um
+  `-filtrado` quando há recorte — dois downloads do mesmo dia com filtros
+  diferentes não podem virar o mesmo nome.
+- ⚠️ Detalhes que fazem o Excel em pt-BR abrir direito, os mesmos da exportação
+  de Contatos: separador **`;`**, **BOM** na frente (sem ele os acentos viram
+  "AtendÃ­vel") e **decimal com vírgula** — com ponto, o Excel lê `14.5` como
+  texto e a coluna deixa de somar.
+- A coluna `situacao` já vem resolvida ("dentro da meta" / "fora da meta" /
+  "esperando agora" / "sem resposta (finalizada)"), para a planilha não precisar
+  reproduzir a regra do SLA em fórmula.
+- `csvDeAtendimentos` fica em `lib/reports/sla.ts`, junto da agregação — foi
+  conferida com dados de teste (aspas no nome do contato, decimal, fuso de São
+  Paulo, conversa sem responsável).
+
 A tela usa as classes claras de sempre (`bg-white`, `text-slate-900`) e o dark
 mode vem dos overrides de `globals.css` — não espalhe `dark:` aqui.
 
