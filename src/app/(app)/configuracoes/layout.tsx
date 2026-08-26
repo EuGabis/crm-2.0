@@ -21,7 +21,6 @@ const GROUPS: { title: string; items: { label: string; href?: string }[] }[] = [
     items: [
       { label: "Calendários", href: "/configuracoes/calendarios" },
       { label: "Serviços de e-mail", href: "/configuracoes/email" },
-      { label: "Sistema telefônico", href: "/configuracoes/telefonia" },
       { label: "WhatsApp", href: "/configuracoes/whatsapp" },
     ],
   },

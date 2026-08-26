@@ -163,8 +163,8 @@ export function OpportunityCard({
       toast.error("Contato sem telefone cadastrado");
       return;
     }
-    // O webphone saiu da barra superior (não completava chamada); quem liga de
-    // verdade é o discador do aparelho.
+    // Quem liga é o discador do APARELHO — o webphone do CRM foi removido por
+    // prometer ligação sem ter provedor de voz.
     window.location.href = telHref(contact.phone);
   };
 

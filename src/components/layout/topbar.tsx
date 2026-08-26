@@ -25,7 +25,7 @@ import {
 import { NotificationsPanel } from "./notifications-panel";
 
 /**
- * Suporte, Webphone e o botão verde de ligar SAÍRAM da barra superior
+ * Suporte e o botão verde de ligar SAÍRAM da barra superior
  * (2026-08-24): nenhum dos três fazia o que prometia. Sobraram a aparência
  * (tema/fonte), a central de avisos e o menu do usuário.
  */
