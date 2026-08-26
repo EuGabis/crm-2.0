@@ -40,8 +40,8 @@ export const financeiroFlow: BotFlow = {
       listButton: "Ver setores",
       options: [
         { id: "financeiro", title: "Financeiro", value: "financeiro", next: "menu_financeiro" },
-        { id: "secretaria", title: "Secretaria", value: "secretaria", next: "sec_confirma" },
-        { id: "vendas", title: "Vendas", value: "vendas", next: "vendas_confirma" },
+        { id: "secretaria", title: "Secretaria", value: "secretaria", next: "sec_fim" },
+        { id: "vendas", title: "Vendas", value: "vendas", next: "vendas_fim" },
       ],
       next: "menu_financeiro",
     },
@@ -94,22 +94,18 @@ export const financeiroFlow: BotFlow = {
     // Financeiro: escolha o atendente na aba Bot (assignTo vazio = rodízio do número).
     fin_transfere: { id: "fin_transfere", type: "handoff", to: "usuario", assignTo: "" },
 
-    // ---- Secretaria ----
-    sec_confirma: {
-      id: "sec_confirma",
-      type: "message",
-      text: "Certo! Vou te encaminhar para a Secretaria. " + CONFIRMA,
-      next: "sec_transfere",
+    // ---- Secretaria: manda o número e encerra (não transfere) ----
+    sec_fim: {
+      id: "sec_fim",
+      type: "end",
+      text: "Para falar com a Secretaria, chame diretamente no número +55 11 94767-1223. 😊",
     },
-    sec_transfere: { id: "sec_transfere", type: "handoff", to: "usuario", assignTo: "" },
 
-    // ---- Vendas ----
-    vendas_confirma: {
-      id: "vendas_confirma",
-      type: "message",
-      text: "Show! Vou te encaminhar para o nosso time de Vendas. " + CONFIRMA,
-      next: "vendas_transfere",
+    // ---- Vendas: manda o número e encerra (não transfere) ----
+    vendas_fim: {
+      id: "vendas_fim",
+      type: "end",
+      text: "Para falar com o time de Vendas, chame diretamente no número +55 11 99009-3005. 😊",
     },
-    vendas_transfere: { id: "vendas_transfere", type: "handoff", to: "usuario", assignTo: "" },
   },
 };
