@@ -370,6 +370,82 @@ function pedirTranscricao(
 }
 
 /**
+ * O texto da transcrição, cortado em 2 linhas com "ver mais".
+ *
+ * Um áudio de dois minutos vira um parágrafo que ocupa mais espaço que a
+ * conversa inteira: o balão empurra tudo para fora da tela e quem só quer
+ * acompanhar o fio perde o fio. Duas linhas dão o assunto; o resto é sob
+ * demanda.
+ *
+ * ⚠️ O botão só aparece quando o texto REALMENTE passa de duas linhas, e isso é
+ * medido no elemento (`scrollHeight > clientHeight`), não estimado por contagem
+ * de caracteres: a largura do balão muda com a janela, e um "ver mais" que não
+ * revela nada é pior que não ter botão.
+ */
+function TranscricaoTexto({ texto, out }: { texto: string; out: boolean }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [expandido, setExpandido] = useState(false);
+  const [temMais, setTemMais] = useState(false);
+
+  useEffect(() => {
+    const medir = () => {
+      const el = ref.current;
+      if (!el) return;
+      // Enquanto expandido não há corte para medir — a resposta anterior vale.
+      if (expandido) return;
+      // +1 absorve o arredondamento de altura de linha fracionária, que faria
+      // todo texto de exatamente duas linhas parecer cortado.
+      setTemMais(el.scrollHeight > el.clientHeight + 1);
+    };
+    // `requestAnimationFrame`: medir precisa do layout já calculado, e assim o
+    // `setState` sai do corpo síncrono do efeito (que dispara cascata).
+    const id = requestAnimationFrame(medir);
+    // A largura do balão muda com a janela: o que cabia em duas linhas pode
+    // passar a não caber.
+    window.addEventListener("resize", medir);
+    return () => {
+      cancelAnimationFrame(id);
+      window.removeEventListener("resize", medir);
+    };
+  }, [texto, expandido]);
+
+  return (
+    <div
+      className={cn(
+        "border-l-2 pl-2",
+        out ? "border-white/30" : "border-slate-300"
+      )}
+    >
+      <p
+        ref={ref}
+        className={cn(
+          // `whitespace-pre-line` é o que faz as quebras aparecerem: o texto
+          // vem do banco com uma linha em branco entre os parágrafos e, no
+          // HTML, quebra de linha conta como espaço — sem isto tudo volta a
+          // ser o bloco corrido que era o problema.
+          "whitespace-pre-line text-[11px] leading-relaxed",
+          !expandido && "line-clamp-2",
+          out ? "text-white/80" : "text-slate-500"
+        )}
+      >
+        {texto}
+      </p>
+      {(temMais || expandido) && (
+        <button
+          onClick={() => setExpandido((v) => !v)}
+          className={cn(
+            "mt-0.5 text-[10px] font-semibold hover:underline",
+            out ? "text-white/70" : "text-indigo-600"
+          )}
+        >
+          {expandido ? "ver menos" : "ver mais"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
  * Transcrição do áudio, embaixo do player.
  *
  * A fila do tick transcreve tudo sozinha (migração 0085), então o normal é o
@@ -431,20 +507,7 @@ function Transcricao({ message, out }: { message: Message; out: boolean }) {
   };
 
   if (texto) {
-    return (
-      <p
-        className={cn(
-          // `whitespace-pre-line` é o que faz as quebras aparecerem: o texto
-          // vem do banco com uma linha em branco entre os parágrafos e, no
-          // HTML, quebra de linha conta como espaço — sem isto tudo volta a
-          // ser o bloco corrido que era o problema.
-          "whitespace-pre-line border-l-2 pl-2 text-[11px] leading-relaxed",
-          out ? "border-white/30 text-white/80" : "border-slate-300 text-slate-500"
-        )}
-      >
-        {texto}
-      </p>
-    );
+    return <TranscricaoTexto texto={texto} out={out} />;
   }
 
   // Enquanto está na fila, nada de botão: clicar não adiantaria e o texto chega

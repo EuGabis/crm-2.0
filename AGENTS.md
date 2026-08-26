@@ -1292,6 +1292,15 @@ fone, no ritmo de quem falou. Transcrito, ele entra na **busca global do inbox**
   ⚠️ Na tela precisa de **`whitespace-pre-line`**: no HTML, quebra de linha conta
   como espaço, e sem isso o texto volta a ser um bloco corrido mesmo estando
   quebrado no banco.
+- **Cortado em 2 linhas, com "ver mais"** (2026-08-26): um áudio de dois minutos
+  transcrito ocupa mais espaço que a conversa inteira, e o balão empurra o fio
+  para fora da tela. Duas linhas dão o assunto; o resto é sob demanda.
+  ⚠️ O botão só aparece quando o texto REALMENTE passa de duas linhas, medido no
+  elemento (`scrollHeight > clientHeight`) e não estimado por contagem de
+  caracteres: a largura do balão muda com a janela, e um "ver mais" que não
+  revela nada é pior que não ter botão. A medição roda em
+  `requestAnimationFrame` (precisa do layout pronto, e assim o `setState` sai do
+  corpo síncrono do efeito) e escuta `resize`.
   A migração **0086** reenfileirou as transcrições longas já gravadas (47 de 89)
   para ganharem as quebras — as curtas não, porque não há o que quebrar e seria
   pagar de novo pelo mesmo resultado.
