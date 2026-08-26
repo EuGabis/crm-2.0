@@ -1552,10 +1552,27 @@ vale para quem ATENDE. Hoje o webhook confere o papel do dono e só usa
 `assigned_to` quando ele é `role = 'user'`; sem dono elegível, a conversa segue o
 caminho normal (bot → rodízio → fila do setor).
 
-⚠️ **Não mexa no `owner_id` para consertar isso.** A tentação é limpar os 32 mil,
-mas essa coluna entra nas policies de `contacts` (`private.sees_all`, modo "ver
-apenas dados atribuídos") — zerar mudaria QUEM VÊ O QUÊ, um estrago bem maior que
-o bug. A correção é na leitura, não no dado.
+**Sobre limpar o `owner_id`** (feito depois, na 0091): a preocupação inicial era
+que a coluna entrasse na visibilidade. Fui conferir as policies de `contacts`
+antes de mexer, e o quadro é este:
+- **SELECT: `location_id in private.user_locations()` — NÃO usa `owner_id`.** Todo
+  membro já via todos os contatos da empresa. Zerar não muda nada aqui.
+- **DELETE: `private.sees_all(location_id) or owner_id = auth.uid()`.** Os admins
+  têm `only_assigned = false`, logo `sees_all` é true e continuam podendo
+  excluir; e quem tem `only_assigned = true` já não podia excluir esses contatos,
+  porque o dono era o admin.
+- INSERT/UPDATE: só `location_id`.
+
+Conferido como o usuário de risco (o único com `only_assigned = true`) DEPOIS da
+limpeza: continua vendo os 41.401 contatos. ⚠️ Só ADMIN foi limpo —
+`owner_id` de atendente é atribuição real de trabalho (Cibelle tem 186), e zerar
+tiraria dela o direito de excluir os próprios contatos pela policy de DELETE.
+
+⚠️ **A origem também foi corrigida:** a rota `/api/contacts/import` NÃO grava mais
+`owner_id`. Carga de base não define proprietário — era isso que transformava
+quem importava em "dono" de 41 mil pessoas que nunca atendeu. O cadastro
+individual (`dbContactActions.add`) continua gravando: ali é uma ação deliberada
+de quem está criando o contato.
 
 A migração **0090** devolveu para a fila as conversas que já tinham caído assim,
 com critério ESTREITO — as três condições juntas: atribuída a admin que é o dono

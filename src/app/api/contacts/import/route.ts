@@ -64,7 +64,12 @@ export async function POST(request: Request) {
     doc: r.doc?.trim() ? r.doc.trim().slice(0, 32) : null,
     company: r.company?.trim() ? r.company.trim().slice(0, 200) : null,
     tags: Array.isArray(r.tags) ? r.tags.slice(0, 30) : [],
-    owner_id: user.id,
+    // ⚠️ Importação NÃO define proprietário, e isso é a correção de um bug real:
+    // carimbar `owner_id` com quem importa transformou o admin em "proprietário"
+    // de 41 mil contatos do CRM antigo — gente que ele nunca atendeu. Pior, o
+    // webhook lia isso como "atendente responsável" e mandava a conversa para
+    // ele. Carga de base é carga de base; proprietário é quem atende, e isso se
+    // define quando alguém assume.
   }));
 
   let inserted = 0;
