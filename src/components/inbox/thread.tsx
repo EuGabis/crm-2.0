@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -200,75 +200,31 @@ function useMediaUrl(path?: string) {
  * necessidade é sempre ouvir MAIS RÁPIDO — o cliente que mandou três minutos de
  * áudio, não o que falou rápido demais.
  */
-const VELOCIDADES = [1, 1.25, 1.5, 2] as const;
-const CHAVE_VELOCIDADE = "lito.audio.velocidade";
-
 /**
- * A velocidade escolhida, lida com `useSyncExternalStore` — o mesmo padrão da
- * sidebar minimizável, e pelos mesmos motivos: o servidor não tem
- * `localStorage` (o snapshot do servidor é 1x e o React reconcilia na
- * hidratação, sem mismatch), `setState` dentro de efeito dispara renderização
- * em cascata, e de graça o evento `storage` sincroniza as abas abertas do CRM.
+ * Velocidades do player. Sem 0,5x de propósito: em áudio de atendimento a
+ * necessidade é sempre ouvir MAIS RÁPIDO — o cliente que mandou três minutos de
+ * áudio, não o que falou rápido demais.
  *
- * ⚠️ `getSnapshot` tem que devolver um valor ESTÁVEL entre chamadas, senão o
- * React entra em laço de renderização — daí o cache no módulo em vez de ler o
- * `localStorage` a cada chamada.
+ * ⚠️ A escolha é DE CADA ÁUDIO, e não uma preferência guardada. A primeira
+ * versão salvava em `localStorage` (o padrão da sidebar minimizável) e o efeito
+ * era o oposto do esperado: acelerar um áudio acelerava todos os outros da
+ * conversa de uma vez. Aqui cada balão nasce em 1× e só muda o que a pessoa
+ * mexeu — ela está decidindo sobre AQUELE áudio, não configurando o CRM.
  */
-let cacheVelocidade: number | null = null;
-const ouvintesVelocidade = new Set<() => void>();
-
-function lerVelocidade(): number {
-  if (cacheVelocidade !== null) return cacheVelocidade;
-  try {
-    const salvo = Number(localStorage.getItem(CHAVE_VELOCIDADE));
-    cacheVelocidade = VELOCIDADES.includes(salvo as (typeof VELOCIDADES)[number]) ? salvo : 1;
-  } catch {
-    cacheVelocidade = 1; // janela privada, storage bloqueado
-  }
-  return cacheVelocidade;
-}
-
-function gravarVelocidade(v: number) {
-  cacheVelocidade = v;
-  try {
-    localStorage.setItem(CHAVE_VELOCIDADE, String(v));
-  } catch {
-    // sem storage a escolha vale só para esta sessão
-  }
-  // O evento nativo `storage` NÃO dispara na aba que escreveu — daí o conjunto
-  // de ouvintes no módulo.
-  ouvintesVelocidade.forEach((cb) => cb());
-}
-
-function assinarVelocidade(cb: () => void): () => void {
-  ouvintesVelocidade.add(cb);
-  const daOutraAba = (e: StorageEvent) => {
-    if (e.key === CHAVE_VELOCIDADE) {
-      cacheVelocidade = null;
-      cb();
-    }
-  };
-  window.addEventListener("storage", daOutraAba);
-  return () => {
-    ouvintesVelocidade.delete(cb);
-    window.removeEventListener("storage", daOutraAba);
-  };
-}
+const VELOCIDADES = [1, 1.25, 1.5, 2] as const;
 
 function AudioPlayer({ url, duration, out }: { url: string | null; duration?: string; out: boolean }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [pct, setPct] = useState(0);
-  // A preferência é por DISPOSITIVO: quem ouve tudo em 1,5x quer isso no próximo
-  // áudio também, e guardar "na conta" imporia a escolha no celular de quem
-  // prefere 1x. O snapshot do servidor é 1x.
-  const velocidade = useSyncExternalStore(assinarVelocidade, lerVelocidade, () => 1);
+  const [velocidade, setVelocidade] = useState<number>(1);
 
   const trocarVelocidade = () => {
     const proxima = VELOCIDADES[(VELOCIDADES.indexOf(velocidade as 1) + 1) % VELOCIDADES.length];
-    gravarVelocidade(proxima);
+    setVelocidade(proxima);
     // ⚠️ `playbackRate` tem que ser aplicado ao ELEMENTO: não é atributo
-    // controlado pelo React e volta a 1 se só o estado mudar.
+    // controlado pelo React e volta a 1 se só o estado mudar. Aplicado já aqui
+    // para a troca valer no meio da reprodução, sem precisar pausar.
     if (audioRef.current) audioRef.current.playbackRate = proxima;
   };
 

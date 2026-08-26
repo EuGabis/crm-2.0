@@ -1273,14 +1273,15 @@ fone, no ritmo de quem falou. Transcrito, ele entra na **busca global do inbox**
   para ganharem as quebras — as curtas não, porque não há o que quebrar e seria
   pagar de novo pelo mesmo resultado.
 - **Velocidade de reprodução** (1×, 1,25×, 1,5×, 2×) no player, sem 0,5x: em
-  áudio de atendimento a necessidade é sempre ouvir MAIS RÁPIDO. A preferência é
-  por dispositivo e usa **`useSyncExternalStore`**, o mesmo padrão da sidebar
-  minimizável e pelos mesmos motivos (o servidor não tem `localStorage`,
-  `setState` em efeito dispara cascata, e o evento `storage` sincroniza as abas
-  de graça). ⚠️ `getSnapshot` precisa devolver valor ESTÁVEL — daí o cache no
-  módulo em vez de ler o `localStorage` a cada chamada. E ⚠️ `playbackRate` é
-  propriedade do ELEMENTO, não atributo controlado pelo React: sem aplicá-la no
-  `onPlay` e na troca, o áudio volta a 1×.
+  áudio de atendimento a necessidade é sempre ouvir MAIS RÁPIDO.
+  ⚠️ **A escolha é DE CADA ÁUDIO, não uma preferência do usuário.** A primeira
+  versão guardava em `localStorage` (copiando o padrão da sidebar minimizável) e
+  o efeito foi o oposto do esperado: acelerar um áudio acelerava todos os outros
+  da conversa junto. Quem clica ali está decidindo sobre AQUELE áudio — não
+  configurando o CRM. Cada balão nasce em 1×.
+  ⚠️ `playbackRate` é propriedade do ELEMENTO, não atributo controlado pelo
+  React: sem aplicá-la no `onPlay` E na troca, o áudio volta a 1× (aplicar na
+  troca é o que faz a mudança valer no meio da reprodução, sem pausar).
 - Rota `POST /api/messages/transcribe` para transcrever na hora (o áudio que
   acabou de chegar, ou o que falhou). **A sessão AUTORIZA e a service role
   EXECUTA** (padrão do `resolveGuruUserToken`): o `select` passa pela RLS, então
