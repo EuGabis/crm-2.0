@@ -84,6 +84,10 @@ export async function transcreverMensagem(messageId: string): Promise<ResultadoT
     // Fixar o idioma melhora bastante o resultado em áudio curto e com ruído,
     // onde a detecção automática às vezes escolhe espanhol.
     form.append("language", "pt");
+    // `verbose_json` traz os SEGMENTOS com tempo de início e fim. É o que
+    // permite quebrar o texto onde a pessoa realmente pausou, em vez de
+    // devolver um bloco corrido de mil caracteres. Ver `emParagrafos`.
+    form.append("response_format", "verbose_json");
 
     const res = await fetch(URL_TRANSCRICAO, {
       method: "POST",
@@ -98,7 +102,7 @@ export async function transcreverMensagem(messageId: string): Promise<ResultadoT
       });
     }
 
-    const texto = String(json?.text ?? "").trim();
+    const texto = emParagrafos(json);
     if (!texto) {
       // Áudio sem fala (toque, silêncio, ruído) não é falha — e retentar não
       // muda o resultado.
@@ -111,6 +115,57 @@ export async function transcreverMensagem(messageId: string): Promise<ResultadoT
   } catch (e: any) {
     return marcar(messageId, { status: "falhou", erro: e?.message ?? "erro inesperado" });
   }
+}
+
+/**
+ * Junta os segmentos do Whisper em parágrafos.
+ *
+ * O texto vinha num bloco só: um áudio de dois minutos virava um parágrafo de
+ * mil caracteres, que é justamente o que ninguém lê. Aqui a quebra acontece
+ * onde a pessoa PAUSOU — o `verbose_json` dá início e fim de cada segmento, e
+ * uma pausa longa entre um e outro é o fim de um pensamento.
+ *
+ * O limite de caracteres existe como rede: quem fala sem respirar não gera
+ * pausa nenhuma, e sem ele voltaria o bloco corrido. A quebra por tamanho só
+ * acontece DEPOIS de um fim de frase, para não cortar no meio de uma oração.
+ */
+function emParagrafos(json: any): string {
+  const bruto = String(json?.text ?? "").trim();
+  const segmentos: { text?: string; start?: number; end?: number }[] = Array.isArray(
+    json?.segments
+  )
+    ? json.segments
+    : [];
+  if (segmentos.length === 0) return bruto;
+
+  // Pausa a partir da qual se considera troca de assunto. 0,7 s é o que separa
+  // "respirar no meio da frase" de "terminei a ideia" na fala corrida.
+  const PAUSA = 0.7;
+  const MAX_PARAGRAFO = 320;
+
+  const paragrafos: string[] = [];
+  let atual = "";
+  let fimAnterior: number | null = null;
+
+  for (const seg of segmentos) {
+    const trecho = String(seg.text ?? "").trim();
+    if (!trecho) continue;
+    const pausou = fimAnterior !== null && (seg.start ?? 0) - fimAnterior >= PAUSA;
+    const terminouFrase = /[.!?…]$/.test(atual.trim());
+    const longo = atual.length >= MAX_PARAGRAFO;
+
+    if (atual && ((pausou && terminouFrase) || (longo && terminouFrase))) {
+      paragrafos.push(atual.trim());
+      atual = trecho;
+    } else {
+      atual = atual ? `${atual} ${trecho}` : trecho;
+    }
+    fimAnterior = seg.end ?? fimAnterior;
+  }
+  if (atual.trim()) paragrafos.push(atual.trim());
+
+  // Um parágrafo só = nada mudou; devolve o texto da API, que já vem pontuado.
+  return paragrafos.length > 1 ? paragrafos.join("\n\n") : bruto;
 }
 
 async function marcar(

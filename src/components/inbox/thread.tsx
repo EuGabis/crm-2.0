@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -195,17 +195,95 @@ function useMediaUrl(path?: string) {
 }
 
 /** Player de áudio real (elemento <audio>) com a mesma UI de onda. */
+/**
+ * Velocidades do player. Sem 0,5x de propósito: em áudio de atendimento a
+ * necessidade é sempre ouvir MAIS RÁPIDO — o cliente que mandou três minutos de
+ * áudio, não o que falou rápido demais.
+ */
+const VELOCIDADES = [1, 1.25, 1.5, 2] as const;
+const CHAVE_VELOCIDADE = "lito.audio.velocidade";
+
+/**
+ * A velocidade escolhida, lida com `useSyncExternalStore` — o mesmo padrão da
+ * sidebar minimizável, e pelos mesmos motivos: o servidor não tem
+ * `localStorage` (o snapshot do servidor é 1x e o React reconcilia na
+ * hidratação, sem mismatch), `setState` dentro de efeito dispara renderização
+ * em cascata, e de graça o evento `storage` sincroniza as abas abertas do CRM.
+ *
+ * ⚠️ `getSnapshot` tem que devolver um valor ESTÁVEL entre chamadas, senão o
+ * React entra em laço de renderização — daí o cache no módulo em vez de ler o
+ * `localStorage` a cada chamada.
+ */
+let cacheVelocidade: number | null = null;
+const ouvintesVelocidade = new Set<() => void>();
+
+function lerVelocidade(): number {
+  if (cacheVelocidade !== null) return cacheVelocidade;
+  try {
+    const salvo = Number(localStorage.getItem(CHAVE_VELOCIDADE));
+    cacheVelocidade = VELOCIDADES.includes(salvo as (typeof VELOCIDADES)[number]) ? salvo : 1;
+  } catch {
+    cacheVelocidade = 1; // janela privada, storage bloqueado
+  }
+  return cacheVelocidade;
+}
+
+function gravarVelocidade(v: number) {
+  cacheVelocidade = v;
+  try {
+    localStorage.setItem(CHAVE_VELOCIDADE, String(v));
+  } catch {
+    // sem storage a escolha vale só para esta sessão
+  }
+  // O evento nativo `storage` NÃO dispara na aba que escreveu — daí o conjunto
+  // de ouvintes no módulo.
+  ouvintesVelocidade.forEach((cb) => cb());
+}
+
+function assinarVelocidade(cb: () => void): () => void {
+  ouvintesVelocidade.add(cb);
+  const daOutraAba = (e: StorageEvent) => {
+    if (e.key === CHAVE_VELOCIDADE) {
+      cacheVelocidade = null;
+      cb();
+    }
+  };
+  window.addEventListener("storage", daOutraAba);
+  return () => {
+    ouvintesVelocidade.delete(cb);
+    window.removeEventListener("storage", daOutraAba);
+  };
+}
+
 function AudioPlayer({ url, duration, out }: { url: string | null; duration?: string; out: boolean }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [pct, setPct] = useState(0);
+  // A preferência é por DISPOSITIVO: quem ouve tudo em 1,5x quer isso no próximo
+  // áudio também, e guardar "na conta" imporia a escolha no celular de quem
+  // prefere 1x. O snapshot do servidor é 1x.
+  const velocidade = useSyncExternalStore(assinarVelocidade, lerVelocidade, () => 1);
+
+  const trocarVelocidade = () => {
+    const proxima = VELOCIDADES[(VELOCIDADES.indexOf(velocidade as 1) + 1) % VELOCIDADES.length];
+    gravarVelocidade(proxima);
+    // ⚠️ `playbackRate` tem que ser aplicado ao ELEMENTO: não é atributo
+    // controlado pelo React e volta a 1 se só o estado mudar.
+    if (audioRef.current) audioRef.current.playbackRate = proxima;
+  };
+
   return (
     <div className="flex items-center gap-2">
       <audio
         ref={audioRef}
         src={url ?? undefined}
         preload="none"
-        onPlay={() => setPlaying(true)}
+        // A taxa é aplicada no play porque o elemento só existe de verdade a
+        // partir dele: definir antes de haver mídia carregada não persiste.
+        onPlay={(e) => {
+          e.currentTarget.playbackRate = velocidade;
+          setPlaying(true);
+        }}
         onPause={() => setPlaying(false)}
         onEnded={() => {
           setPlaying(false);
@@ -244,6 +322,24 @@ function AudioPlayer({ url, duration, out }: { url: string | null; duration?: st
         ))}
       </div>
       {duration && <span className={cn("text-[10px]", out ? "text-indigo-100" : "text-slate-500")}>{duration}</span>}
+      <button
+        onClick={trocarVelocidade}
+        disabled={!url}
+        title="Velocidade de reprodução"
+        className={cn(
+          "shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold tabular-nums disabled:opacity-50",
+          velocidade === 1
+            ? out
+              ? "text-indigo-100 hover:bg-white/15"
+              : "text-slate-400 hover:bg-slate-100"
+            : out
+              ? "bg-white/25 text-white"
+              : "bg-indigo-100 text-indigo-700"
+        )}
+      >
+        {/* "1,25×" e não "1.25x": o CRM é todo pt-BR. */}
+        {velocidade.toLocaleString("pt-BR")}×
+      </button>
     </div>
   );
 }
@@ -354,7 +450,11 @@ function Transcricao({ message, out }: { message: Message; out: boolean }) {
     return (
       <p
         className={cn(
-          "border-l-2 pl-2 text-[11px] leading-relaxed",
+          // `whitespace-pre-line` é o que faz as quebras aparecerem: o texto
+          // vem do banco com uma linha em branco entre os parágrafos e, no
+          // HTML, quebra de linha conta como espaço — sem isto tudo volta a
+          // ser o bloco corrido que era o problema.
+          "whitespace-pre-line border-l-2 pl-2 text-[11px] leading-relaxed",
           out ? "border-white/30 text-white/80" : "border-slate-300 text-slate-500"
         )}
       >
