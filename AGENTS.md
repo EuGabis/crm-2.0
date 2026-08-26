@@ -1529,6 +1529,43 @@ Lita — **`text-red-500` sozinho aparece em 24 lugares** do app.
 Conferido no CSS COMPILADO (`.next/static/chunks/*.css`), não só no fonte: as
 regras `.dark .text-indigo-500,...{color:#a5b4fc}` estão lá.
 
+## ⚠️ `contacts.owner_id` NÃO é o atendente responsável (bug de 2026-08-26)
+
+Sintoma: um ADMIN começou a receber conversas novas na caixa dele, sem ter
+assumido nada. Não era o rodízio.
+
+**Causa:** `contacts.owner_id` guarda quem INSERIU o contato — e a importação do
+CRM antigo deixou os admins como donos de quase toda a base (32.018 contatos de
+um, 8.947 do outro). O webhook do WhatsApp tratava "dono do contato" como
+"atendente responsável":
+
+```ts
+...(ownerId ? { assigned_to: ownerId, bot_paused: true } : {}),
+```
+
+Ou seja: **qualquer um daqueles 32 mil contatos que mandasse mensagem caía direto
+na caixa do admin** — e com `bot_paused`, então nem o bot atendia nem o rodízio
+distribuía. O lead ficava parado ali.
+
+A intenção original é boa (o cliente volta e cai com quem já o atendia), mas só
+vale para quem ATENDE. Hoje o webhook confere o papel do dono e só usa
+`assigned_to` quando ele é `role = 'user'`; sem dono elegível, a conversa segue o
+caminho normal (bot → rodízio → fila do setor).
+
+⚠️ **Não mexa no `owner_id` para consertar isso.** A tentação é limpar os 32 mil,
+mas essa coluna entra nas policies de `contacts` (`private.sees_all`, modo "ver
+apenas dados atribuídos") — zerar mudaria QUEM VÊ O QUÊ, um estrago bem maior que
+o bug. A correção é na leitura, não no dado.
+
+A migração **0090** devolveu para a fila as conversas que já tinham caído assim,
+com critério ESTREITO — as três condições juntas: atribuída a admin que é o dono
+do contato, **sem nenhum evento** (evento = alguém assumiu ou transferiu à mão, e
+decisão humana não se desfaz) e **sem nenhuma resposta humana** (se já
+respondeu, o atendimento começou; tirar de quem está atendendo é pior que o bug).
+Das 3 conversas afetadas, 2 voltaram para a fila e 1 ficou onde estava.
+`bot_paused` continua `true` de propósito: liberar o bot agora faria ele disparar
+mensagem automática para clientes que escreveram horas antes.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
