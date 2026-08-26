@@ -1504,6 +1504,31 @@ Só toca em prévia VAZIA — prévia preenchida pode ter vindo da transcrição
 áudio (0085) e sobrescrever com rótulo genérico perderia informação. As 18 que
 continuaram vazias são conversas **sem nenhuma mensagem**, onde vazio é o certo.
 
+## Dark mode: o tom de texto que faltava no remapeamento
+
+Sintoma: no painel **"Lita ajuda"**, o bloco "Próximo passo" ficava com texto
+invisível no dark — e o resumo do atendimento, ilegível.
+
+A causa é o desenho do dark mode deste projeto, que remapeia CLASSE POR CLASSE
+em `globals.css` (`.dark .bg-indigo-50 {...}`) em vez de espalhar `dark:` pelas
+telas. É uma boa decisão — telas novas ganham dark de graça — mas com uma
+armadilha: **o que não está na lista fica com o valor claro**. O bloco usava
+`bg-indigo-50` + `text-indigo-900`; o FUNDO tinha override e o TEXTO não, então
+sobrou texto escuro sobre fundo escuro.
+
+⚠️ **Ao usar uma cor nova em texto, confira se ela está no remapeamento.** Não é
+o Tailwind que erra: sem a regra, ele mantém o tom claro, que no fundo escuro
+desaparece. Vale para todo tom fora dos 600/700, que eram os únicos cobertos em
+indigo.
+
+Os tons acrescentados (aditivo, no fim do arquivo) são os que o app realmente
+usa e não estavam cobertos: `indigo-500/800/900`, `red-500`, `rose-700/800`,
+`amber-500`, `emerald-500/800/900`, `sky-500/800/900`, `blue-500`. Não era só a
+Lita — **`text-red-500` sozinho aparece em 24 lugares** do app.
+
+Conferido no CSS COMPILADO (`.next/static/chunks/*.css`), não só no fonte: as
+regras `.dark .text-indigo-500,...{color:#a5b4fc}` estão lá.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
