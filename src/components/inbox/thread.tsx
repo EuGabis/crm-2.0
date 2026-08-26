@@ -326,6 +326,41 @@ function AudioPlayer({ url, duration, out }: { url: string | null; duration?: st
   );
 }
 
+/**
+ * Legenda de imagem, vídeo ou arquivo — o texto que veio JUNTO com a mídia.
+ *
+ * ⚠️ O balão renderizava a mídia e DESCARTAVA o `message.body`: quem mandava uma
+ * foto escrevendo "tento clicar e aparece essa informação" via só a foto, e a
+ * pergunta desaparecia da conversa (17 imagens e 1 vídeo neste banco). O texto
+ * sempre esteve gravado — o webhook guarda `caption` em `body` —, só não era
+ * exibido.
+ *
+ * ⚠️ Por tipo, porque `body` NÃO significa a mesma coisa em todos:
+ * - `audio`: é a DURAÇÃO ("1:59"), consumida pelo player. Mostrar aqui repetiria
+ *   o tempo embaixo da onda.
+ * - `file`: no que o atendente ENVIA, o composer grava o nome do arquivo; no que
+ *   o cliente MANDA, é a legenda. Como o nome já aparece no próprio bloco do
+ *   arquivo, só mostro quando o texto difere de `mediaName` — senão o nome
+ *   apareceria duas vezes.
+ * - `image` / `video`: é sempre legenda.
+ */
+function LegendaMidia({ message, out }: { message: Message; out: boolean }) {
+  const texto = (message.body ?? "").trim();
+  if (!texto || message.type === "audio") return null;
+  if (message.type === "file" && texto === (message.mediaName ?? "").trim()) return null;
+
+  return (
+    <p
+      className={cn(
+        "mt-1.5 whitespace-pre-wrap text-sm [overflow-wrap:anywhere]",
+        out ? "text-white" : "text-slate-800"
+      )}
+    >
+      {texto}
+    </p>
+  );
+}
+
 /** Conteúdo de mensagens de mídia: imagem, áudio ou arquivo. */
 /**
  * Pedidos de transcrição em SÉRIE, com teto por carregamento de página.
@@ -732,7 +767,10 @@ function MessageBubble({
         message.type === "image" ||
         message.type === "video" ||
         message.type === "file" ? (
-          <MediaContent message={message} out={isOut && !message.internal} />
+          <>
+            <MediaContent message={message} out={isOut && !message.internal} />
+            <LegendaMidia message={message} out={isOut && !message.internal} />
+          </>
         ) : (
           <span className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</span>
         )}
