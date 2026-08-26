@@ -119,6 +119,12 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
   // na URL. Antes era um <Link> estático pra /conversas, que caía na primeira
   // conversa da lista — nunca a do contato clicado.
   const openConversation = async () => {
+    // WhatsApp precisa de telefone. Avisa aqui (cedo) em vez de deixar o envio do
+    // template falhar depois com "Contato sem telefone".
+    if (!contact.phone?.trim()) {
+      toast.error("Contato sem telefone — adicione um número em Editar para conversar no WhatsApp.");
+      return;
+    }
     setOpeningChat(true);
     const res = await conversationActions.openForContact(contact.id);
     setOpeningChat(false);
