@@ -77,6 +77,7 @@ export async function POST(request: Request) {
   let skipped = 0;
   let merged = 0;
   let filled = 0;
+  let filledEmail = 0;
   let firstError: string | null = null;
 
   // Insere um lote; se falhar, reparte ao meio até isolar a(s) linha(s) ruim(ns).
@@ -173,7 +174,18 @@ export async function POST(request: Request) {
       if (fErr) firstError ??= fErr.message;
       else if (typeof f === "number") filled += f;
     }
+
+    // Recupera e-mail (0090): simétrico ao telefone. Quando o contato existente
+    // casou por TELEFONE/documento e está sem e-mail, preenche com o do arquivo.
+    const toFillEmail = existing.filter((r) => (r.email ?? "").includes("@"));
+    if (toFillEmail.length) {
+      const { data: fe, error: feErr } = await supabase.rpc("fill_missing_contact_email", {
+        p_rows: toFillEmail.map((r) => ({ phone: r.phone, doc: r.doc ?? "", email: r.email })),
+      });
+      if (feErr) firstError ??= feErr.message;
+      else if (typeof fe === "number") filledEmail += fe;
+    }
   }
 
-  return Response.json({ inserted, failed, skipped, merged, filled, error: firstError });
+  return Response.json({ inserted, failed, skipped, merged, filled, filledEmail, error: firstError });
 }

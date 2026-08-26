@@ -356,7 +356,8 @@ export function ImportDialog({
 
     const merged = r.merged ?? 0;
     const filled = r.filled ?? 0;
-    const processed = r.inserted + merged + filled;
+    const filledEmail = r.filledEmail ?? 0;
+    const processed = r.inserted + merged + filled + filledEmail;
     if (processed > 0) {
       await logBulk(
         `Importação CSV — ${fileName ?? "arquivo"}${listTrim ? ` (lista: ${listTrim})` : ""}`,
@@ -393,6 +394,7 @@ export function ImportDialog({
     if (r.inserted) partes.push(`${nf.format(r.inserted)} novo(s)`);
     if (merged) partes.push(`${nf.format(merged)} já existente(s) marcado(s)`);
     if (filled) partes.push(`${nf.format(filled)} telefone(s) recuperado(s)`);
+    if (filledEmail) partes.push(`${nf.format(filledEmail)} e-mail(s) recuperado(s)`);
     const resumo = partes.join(" + ") || `${nf.format(processed)} contato(s)`;
     const naLista = listTrim ? ` na lista "${listTrim}"` : "";
     if (r.failed > 0) {
