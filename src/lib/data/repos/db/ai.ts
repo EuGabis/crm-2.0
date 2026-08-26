@@ -51,9 +51,11 @@ function useLocationId(): string | null {
   const [locationId, setLocationId] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
+    // `ensureSession`, não `load()`: aqui só se precisa saber a empresa, e
+    // `load()` baixaria a lista inteira de contatos de brinde.
     void useDbStore
       .getState()
-      .load()
+      .ensureSession()
       .then(() => {
         if (active) setLocationId(useDbStore.getState().locationId);
       });
@@ -119,4 +121,46 @@ export function useAiUsage() {
     };
   }, [locationId]);
   return state;
+}
+
+/**
+ * Histórico das análises que o USUÁRIO ATUAL pediu na aba Análise IA.
+ *
+ * Só as próprias, e não as da empresa: a policy de leitura de `ai_logs` é por
+ * location, então sem o filtro dois administradores veriam as perguntas um do
+ * outro embaralhadas na mesma lista — e o que a pessoa quer reler é o que ELA
+ * perguntou.
+ *
+ * ⚠️ `recarregar` existe porque a lista não se atualiza sozinha: a análise nova
+ * é gravada pela ROTA (no servidor), então o client não fica sabendo do insert.
+ */
+export function useAiAnalyses(feature = "reports-analysis", limit = 30) {
+  const locationId = useLocationId();
+  const [analises, setAnalises] = useState<AiLog[]>([]);
+  const [carregando, setCarregando] = useState(true);
+  const [gatilho, setGatilho] = useState(0);
+
+  useEffect(() => {
+    if (!locationId) return;
+    let ativo = true;
+    const userId = useDbStore.getState().userId;
+    void createClient()
+      .from("ai_logs")
+      .select("*")
+      .eq("location_id", locationId)
+      .eq("feature", feature)
+      .eq("created_by", userId ?? "")
+      .order("created_at", { ascending: false })
+      .limit(limit)
+      .then(({ data }: any) => {
+        if (!ativo) return;
+        setAnalises(((data ?? []) as any[]).map(mapLog));
+        setCarregando(false);
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [locationId, feature, limit, gatilho]);
+
+  return { analises, carregando, recarregar: () => setGatilho((g) => g + 1) };
 }

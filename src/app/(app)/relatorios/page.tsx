@@ -2,7 +2,9 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Loader2, Sparkles } from "lucide-react";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { Loader2, MessageSquare, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { SubNav } from "@/components/layout/subnav";
 import { GoogleAdsReport } from "@/components/reports/google-ads-report";
@@ -11,6 +13,8 @@ import { Button } from "@/components/ui/button";
 import { formatBRL } from "@/lib/data/repos/opportunities";
 import { usePipelineDb } from "@/lib/data/repos/db/pipeline";
 import { useMyMembership } from "@/lib/data/repos/db/team";
+import { useAiAnalyses } from "@/lib/data/repos/db/ai";
+import { cn } from "@/lib/utils";
 import { useIsSupervisor } from "@/lib/data/repos/db/sector";
 import { SectorReport } from "@/components/relatorios/sector-report";
 
@@ -27,6 +31,10 @@ function AnaliseIA() {
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Qual análise está aberta: `null` = a que acabou de ser feita. Guardar o id
+  // (e não só o texto) é o que permite destacar a linha correspondente na lista.
+  const [abertaId, setAbertaId] = useState<string | null>(null);
+  const { analises, recarregar } = useAiAnalyses();
 
   const ask = async (q?: string) => {
     const pergunta = (q ?? question).trim();
@@ -49,6 +57,11 @@ function AnaliseIA() {
         return;
       }
       setAnswer(json.answer ?? "");
+      setAbertaId(json.id ?? null);
+      // A rota é quem grava o registro, então o client não fica sabendo do
+      // insert: sem isto a análise que acabou de sair só apareceria na lista
+      // depois de um F5.
+      recarregar();
     } catch {
       toast.error("Falha de conexão");
     } finally {
@@ -109,6 +122,61 @@ function AnaliseIA() {
         <div className="mt-4 rounded-xl border bg-white p-4">
           <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-indigo-500">Resposta</p>
           <div className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{answer}</div>
+        </div>
+      )}
+
+      {/* Histórico. A análise responde sobre um retrato dos dados que muda a cada
+          consulta, então reler o que foi perguntado (e o que a IA respondeu na
+          época) é a única forma de comparar dois momentos — antes isso se perdia
+          ao trocar de pergunta. */}
+      {analises.length > 0 && (
+        <div className="mt-6">
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            Suas análises anteriores
+          </p>
+          <div className="divide-y overflow-hidden rounded-xl border bg-white">
+            {analises.map((a) => {
+              const aberta = abertaId === a.id;
+              return (
+                <button
+                  key={a.id}
+                  onClick={() => {
+                    // Reabrir a mesma linha fecha, para a lista voltar a caber
+                    // na tela sem precisar rolar até o fim da resposta.
+                    if (aberta) {
+                      setAbertaId(null);
+                      setAnswer(null);
+                      return;
+                    }
+                    setAbertaId(a.id);
+                    setQuestion(a.prompt);
+                    setAnswer(a.response);
+                  }}
+                  className={cn(
+                    "flex w-full items-start gap-3 px-4 py-2.5 text-left hover:bg-slate-50",
+                    aberta && "bg-indigo-50/60"
+                  )}
+                >
+                  <MessageSquare
+                    className={cn(
+                      "mt-0.5 size-3.5 shrink-0",
+                      aberta ? "text-indigo-600" : "text-slate-300"
+                    )}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-medium text-slate-700">
+                      {a.prompt}
+                    </span>
+                    <span className="block truncate text-[10px] text-slate-400">
+                      {format(new Date(a.createdAt), "d 'de' MMM, HH:mm", { locale: ptBR })}
+                      {" · "}
+                      {a.response.slice(0, 70)}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

@@ -1,10 +1,14 @@
 import { createClient } from "@/lib/supabase/server";
-import { chat } from "@/lib/ai/openai";
+import { chat, defaultModel } from "@/lib/ai/openai";
 import { buildReportSnapshot } from "@/lib/reports/snapshot";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 export const dynamic = "force-dynamic";
+
+/** Chave desta feature em `ai_logs` — é o que separa o histórico da Análise IA
+ *  dos testes de agente e do Content AI, que dividem a mesma tabela. */
+export const ANALISE_FEATURE = "reports-analysis";
 
 /**
  * Aba "Análise IA" do Relatórios (admin). Monta um retrato dos dados REAIS da
@@ -58,6 +62,8 @@ export async function POST(request: Request) {
     "técnicos do JSON.";
 
   let answer = "";
+  let usage = { promptTokens: 0, completionTokens: 0 };
+  let modelo = "";
   try {
     const res = await chat(
       [
@@ -67,6 +73,8 @@ export async function POST(request: Request) {
       { temperature: 0.2 },
     );
     answer = res.text.trim();
+    usage = res.usage;
+    modelo = defaultModel();
   } catch (e: any) {
     return Response.json(
       { error: e?.message?.includes("OPENAI_API_KEY") ? "IA não configurada no servidor" : "Falha ao consultar a IA" },
@@ -74,5 +82,33 @@ export async function POST(request: Request) {
     );
   }
 
-  return Response.json({ answer });
+  // Histórico: cada análise fica registrada para o admin reler depois. Grava a
+  // PERGUNTA, não o JSON gigante do snapshot — o retrato dos dados muda a cada
+  // consulta e guardar centenas de KB por pergunta encheria a tabela sem
+  // acrescentar nada ao que a pessoa quer rever.
+  //
+  // ⚠️ Best-effort de propósito: se o log falhar, a resposta ainda tem que
+  // chegar. Perder a linha do histórico é ruim; perder a análise que a pessoa
+  // acabou de esperar é pior.
+  const { data: registro, error: erroLog } = await supabase
+    .from("ai_logs")
+    .insert({
+      location_id: membership.location_id,
+      feature: ANALISE_FEATURE,
+      model: modelo,
+      prompt: question,
+      response: answer,
+      prompt_tokens: usage.promptTokens,
+      completion_tokens: usage.completionTokens,
+      created_by: user.id,
+    })
+    .select("id, created_at")
+    .maybeSingle();
+  if (erroLog) console.warn("[analise-ia] falha ao gravar historico:", erroLog.message);
+
+  return Response.json({
+    answer,
+    id: registro?.id ?? null,
+    createdAt: registro?.created_at ?? null,
+  });
 }

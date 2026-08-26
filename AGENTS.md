@@ -1319,6 +1319,37 @@ card do funil. Ele nunca dependeu do webphone: usa `telHref()` de
 Se um dia entrar provedor de voz, é `git revert` neste commit — mas repare que o
 que faltava nunca foi a interface, era o provedor.
 
+## Análise IA: histórico das perguntas (sem migração)
+
+A aba respondia e esquecia: trocar de pergunta apagava a anterior da tela e nada
+ficava gravado. Como a análise responde sobre um RETRATO dos dados que muda a
+cada consulta, reler a pergunta antiga junto com a resposta daquele momento é a
+única forma de comparar dois instantes da operação.
+
+- **Sem tabela nova**: `ai_logs` (migração 0026) já existia com prompt, resposta,
+  modelo, tokens e `created_by`. A rota `/api/relatorios/analise` simplesmente
+  **não gravava** — nenhuma linha com `feature = 'reports-analysis'` existia no
+  banco. Agora grava, e a chave da feature é o que separa este histórico dos
+  testes de agente e do Content AI, que dividem a mesma tabela.
+- ⚠️ **Grava a PERGUNTA, não o snapshot.** O JSON do retrato tem centenas de KB e
+  muda a cada consulta: guardá-lo encheria a tabela sem acrescentar nada ao que a
+  pessoa quer rever.
+- ⚠️ **O log é best-effort.** Falha ao gravar vira `console.warn` e a resposta
+  segue: perder a linha do histórico é ruim, perder a análise que a pessoa
+  acabou de esperar é pior.
+- ⚠️ **A lista é só do PRÓPRIO usuário** (`created_by`). A policy de leitura de
+  `ai_logs` é por location, então sem esse filtro dois administradores veriam as
+  perguntas um do outro embaralhadas — e o que se quer reler é o que EU perguntei.
+- **`recarregar()` no hook não é enfeite**: quem grava é a ROTA, no servidor,
+  então o client não fica sabendo do insert e a análise recém-feita só apareceria
+  na lista depois de um F5.
+- Clicar numa linha traz pergunta e resposta de volta para a área principal;
+  clicar na mesma linha fecha (senão a lista fica empurrada para fora da tela
+  pela resposta aberta).
+
+De passagem: `useLocationId` em `db/ai.ts` chamava `load()` e baixava os 41 mil
+contatos só para descobrir a empresa — trocado por `ensureSession()`.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
