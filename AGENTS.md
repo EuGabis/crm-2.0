@@ -1299,6 +1299,25 @@ com `language=pt` é boa até em nome próprio e jargão do negócio ("mecânico
 aeronaves", "o instrutor, o Júnior"). Para acompanhar:
 `select transcription_status, count(*) from messages where type='audio' group by 1;`
 
+## 🗑️ Sistema telefônico / webphone REMOVIDO (2026-08-26)
+
+A pedido do Gabriel: não há provedor de VoIP integrado, então a tela prometia
+uma capacidade que o CRM não tem. Saíram **Configurações → Sistema telefônico**
+(`/configuracoes/telefonia`), o item do menu, `layout/webphone-panel.tsx` e
+`layout/webphone-store.ts`.
+
+O painel já vinha morrendo em etapas: virou popover da barra superior, saiu de lá
+em 2026-08-24 por prometer ligação e não completar nenhuma, e ficou só como uma
+tela de configuração que ninguém usava. Removido junto porque a página era o
+ÚNICO consumidor dos dois arquivos — mesma decisão do Canva: código morto sai, o
+histórico do git guarda.
+
+⚠️ **O botão verde "Ligar" continua funcionando** no cabeçalho da conversa e no
+card do funil. Ele nunca dependeu do webphone: usa `telHref()` de
+**`src/lib/phone.ts`** (que FICA), abrindo o discador do próprio aparelho.
+Se um dia entrar provedor de voz, é `git revert` neste commit — mas repare que o
+que faltava nunca foi a interface, era o provedor.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em

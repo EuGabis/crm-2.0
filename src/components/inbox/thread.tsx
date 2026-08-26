@@ -963,8 +963,9 @@ export function Thread({
                 toast.error("Contato sem telefone cadastrado");
                 return;
               }
-              // O webphone saiu da barra superior (não completava chamada), e
-              // quem de fato liga é o discador do aparelho.
+              // Quem liga é o discador do APARELHO. O webphone do CRM foi
+              // removido: prometia ligação e não completava nenhuma, porque
+              // nunca houve provedor de voz conectado.
               window.location.href = telHref(contact.phone);
             }}
             title="Ligar para este número"
