@@ -91,6 +91,34 @@ export async function POST(request: Request) {
   return Response.json({ ok: true });
 }
 
+/**
+ * Prévia da conversa para mídia recebida.
+ *
+ * ⚠️ O webhook gravava `last_message_preview: body` direto, e `body` é a LEGENDA
+ * — vazia na maioria das fotos. Resultado: a linha da conversa ficava em branco
+ * na lista (30 conversas neste banco). Aqui a legenda é usada quando existe e,
+ * quando não, entra o rótulo com ícone — a MESMA convenção que o composer já usa
+ * no envio (`📷 Imagem`, `🎤 Áudio`...), para receber e enviar não descreverem a
+ * mesma coisa de dois jeitos na mesma lista.
+ */
+function previaDeMidia(msgType: string, legenda: string, nomeArquivo?: string): string {
+  const texto = (legenda ?? "").trim();
+  if (texto) {
+    return msgType === "image"
+      ? `📷 ${texto}`
+      : msgType === "video"
+        ? `🎬 ${texto}`
+        : msgType === "file"
+          ? `📎 ${texto}`
+          : texto;
+  }
+  if (msgType === "image") return "📷 Imagem";
+  if (msgType === "video") return "🎬 Vídeo";
+  if (msgType === "audio") return "🎤 Áudio";
+  if (msgType === "file") return `📎 ${nomeArquivo || "Arquivo"}`;
+  return texto;
+}
+
 async function handleIncoming(db: any, channel: any, value: any, m: any) {
   const waId = m.id;
   if (!waId) return;
@@ -239,7 +267,7 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
         channel_id: channel.id,
         unread_count: 1,
         last_message_at: nowIso,
-        last_message_preview: body,
+        last_message_preview: previaDeMidia(msgType, body, media.media_name),
         ...(ownerId ? { assigned_to: ownerId, bot_paused: true } : {}),
       })
       .select("id")
@@ -259,7 +287,7 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
         // channel_id NÃO é reescrito: a conversa já é a deste número e fica nele.
         unread_count: (conv.unread_count ?? 0) + 1,
         last_message_at: nowIso,
-        last_message_preview: body,
+        last_message_preview: previaDeMidia(msgType, body, media.media_name),
         // O cliente escreveu: a conversa volta para a caixa mesmo que alguém
         // tenha finalizado ou arquivado antes (0029). Perder mensagem de
         // cliente é pior do que desfazer um arquivamento.

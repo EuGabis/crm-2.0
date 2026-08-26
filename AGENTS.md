@@ -1474,6 +1474,36 @@ pergunta é "e agora?".
   funciona quase sempre e quebra justamente quando o modelo resolve explicar
   antes — e aí o `JSON.parse` estoura em produção. O parse continua defensivo.
 
+## Mídia com legenda: o texto que se perdia (2026-08-26)
+
+Foto ou arquivo enviado COM mensagem junto: a mídia aparecia e o texto
+desaparecia. O balão renderizava `MediaContent` e **descartava o
+`message.body`** — quem mandava uma foto escrevendo "tento clicar e aparece
+essa informação" via só a foto, e a pergunta sumia da conversa. O texto sempre
+esteve gravado (o webhook guarda `caption` em `body`); só não era exibido.
+Eram 17 imagens e 1 vídeo neste banco.
+
+⚠️ **`body` NÃO significa a mesma coisa em toda mídia** — foi por isso que a
+correção precisou ser por tipo:
+- `audio`: é a **duração** ("1:59"), consumida pelo player. Mostrar repetiria o
+  tempo embaixo da onda.
+- `file`: no que o atendente ENVIA, o composer grava o nome do arquivo; no que o
+  cliente MANDA, é a legenda. Como o nome já aparece no bloco do arquivo, a
+  legenda só é exibida quando difere de `mediaName`.
+- `image` / `video`: é sempre legenda.
+
+**O mesmo defeito, do outro lado:** o webhook gravava
+`last_message_preview: body` direto, então mídia sem legenda deixava a linha da
+conversa **em branco** na lista — 30 conversas. Agora usa `previaDeMidia`, com a
+MESMA convenção de ícones que o composer já usava no envio (`📷 Imagem`,
+`🎤 Áudio`, `📎 <arquivo>`): receber e enviar não podem descrever a mesma coisa
+de dois jeitos na mesma lista.
+
+A migração **0089** recompõe as prévias já gravadas em branco (12 recuperadas).
+Só toca em prévia VAZIA — prévia preenchida pode ter vindo da transcrição do
+áudio (0085) e sobrescrever com rótulo genérico perderia informação. As 18 que
+continuaram vazias são conversas **sem nenhuma mensagem**, onde vazio é o certo.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
