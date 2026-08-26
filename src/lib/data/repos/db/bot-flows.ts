@@ -6,6 +6,7 @@ import { useDbStore } from "./contacts";
 import type { BotFlow } from "@/lib/bot/types";
 import { triagemFlow } from "@/lib/bot/flows/triagem";
 import { secretariaFlow } from "@/lib/bot/flows/secretaria";
+import { financeiroFlow } from "@/lib/bot/flows/financeiro";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -13,6 +14,7 @@ import { secretariaFlow } from "@/lib/bot/flows/secretaria";
 const DEFAULTS: Record<string, BotFlow> = {
   [triagemFlow.key]: triagemFlow,
   [secretariaFlow.key]: secretariaFlow,
+  [financeiroFlow.key]: financeiroFlow,
 };
 
 /**
