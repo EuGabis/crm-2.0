@@ -38,11 +38,10 @@ export async function POST(request: Request) {
   // última entrada (janela 24h), mensagem citada e — se veio no payload — o canal.
   const [profRes, convRes, lastInRes, replyRes, channelParamRes] = await Promise.all([
     supabase.from("profiles").select("name").eq("id", user.id).maybeSingle(),
-    supabase
-      .from("conversations")
-      .select("id, contact_id, location_id, channel_id")
-      .eq("id", conversationId)
-      .maybeSingle(),
+    // Via função (0086): acha a conversa mesmo quando a RLS a esconde do remetente
+    // (conversa no bot / de outro setor, aberta por contato). O "assumir" abaixo
+    // resolve a posse antes de gravar.
+    supabase.rpc("get_conversation", { conv_id: conversationId }),
     supabase
       .from("messages")
       .select("created_at")
@@ -91,6 +90,19 @@ export async function POST(request: Request) {
   if (!to) return Response.json({ error: "Contato sem telefone" }, { status: 400 });
   if ((countRes.count ?? 0) >= channel.daily_limit) {
     return Response.json({ error: "Limite diário do canal atingido" }, { status: 429 });
+  }
+
+  // ASSUME a conversa ao enviar (0087): atribui a quem envia + pausa o bot, por
+  // fora da RLS. Sem isto, gravar a mensagem numa conversa sem dono / no bot /
+  // de outro setor seria barrado. Recusa só se for de OUTRO atendente.
+  const { data: claimed } = await supabase.rpc("assign_conversation_to_self", {
+    conv_id: conversationId,
+  });
+  if (claimed === false) {
+    return Response.json(
+      { error: "Esta conversa está atribuída a outro atendente." },
+      { status: 403 },
+    );
   }
 
   const within24h =
@@ -171,9 +183,7 @@ export async function POST(request: Request) {
       closed_by: null,
       archived_at: null,
       archived_by: null,
-      // Enviar TEMPLATE (única forma de falar com a conversa finalizada) reabre E
-      // atribui a quem enviou — o atendente assume o retorno do cliente.
-      ...(template ? { assigned_to: user.id } : {}),
+      // A atribuição a quem enviou já foi feita por assign_conversation_to_self.
     })
     .eq("id", conversationId);
 
