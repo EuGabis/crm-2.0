@@ -1072,33 +1072,22 @@ export const conversationActions = {
         .maybeSingle();
       if (full) return { id: addToStore(full) };
 
-      // Não vejo. Se está SEM dono, tento assumir (reivindico) — mas o banco só
-      // deixa se o número for do MEU setor e a conversa não estiver com o bot.
+      // Não vejo. Se está SEM dono, só ABRO para ver (sem atribuir) — a atribuição
+      // acontece apenas no envio do TEMPLATE. Antes reivindicávamos aqui, o que
+      // atribuía a conversa a quem só queria abrir (o gap relatado pelo Gabriel).
       if (existing.assigned_to == null) {
-        const { data: claimed } = await supabase.rpc("claim_conversation", {
+        const { data: row } = await supabase.rpc("get_conversation", {
           conv_id: existing.conv_id,
         });
-        if (claimed) {
-          const { data: mine } = await supabase
-            .from("conversations")
-            .select("*")
-            .eq("id", existing.conv_id)
-            .maybeSingle();
-          if (mine) return { id: addToStore(mine) };
-        }
-        // Sem dono, mas o claim foi negado → é de outro setor ou está com o bot.
-        return {
-          id: null,
-          error: "Esta conversa é de outro setor ou ainda está com o assistente.",
-        };
+        if (row) return { id: addToStore(row) };
+        return { id: null, error: "Não foi possível abrir a conversa." };
       }
-      // É de OUTRO atendente → não abro nem duplico.
+      // É de OUTRO atendente → não abro nem duplico (não sequestra a conversa dele).
       return { id: null, error: "Esta conversa está atribuída a outro atendente." };
     }
 
-    // Não existe conversa → cria ATRIBUÍDA a quem abriu (assim ele consegue ver).
-    const uid = useDbStore.getState().userId;
-    const id = await conversationActions.open(contactId, "whatsapp", uid);
+    // Não existe conversa → cria SEM responsável (a atribuição vem só com o template).
+    const id = await conversationActions.open(contactId, "whatsapp", null);
     return { id };
   },
 
