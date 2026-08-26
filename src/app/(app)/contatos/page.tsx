@@ -57,7 +57,12 @@ export default function ContatosPage() {
   // Busca, ordenação e página vivem AQUI (e não dentro da tabela) porque agora
   // são os parâmetros de uma consulta ao banco, não estado de desenho.
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
+  // Abre em ordem ALFABÉTICA por nome (antes abria pelos mais recentes). O clique
+  // nos cabeçalhos continua reordenando por outras colunas.
+  const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>({
+    key: "nome",
+    dir: "asc",
+  });
   const [page, setPage] = useState(0);
 
   const { rows, total, loading, error, refresh } = useContactsSearch({
