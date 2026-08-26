@@ -436,12 +436,16 @@ function TerminalSelect({
             ? "usuario"
             : "humano";
   const assignTo = node.type === "handoff" ? node.assignTo ?? "" : "";
+  const selectCls =
+    "h-9 w-full rounded-lg border bg-white px-2.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-400";
+  const labelCls =
+    "block text-[10px] font-semibold uppercase tracking-wide text-slate-400";
   return (
-    <div className="space-y-2">
-      <label className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-        Ao terminar:
+    <div className="space-y-2.5 rounded-lg border bg-slate-50 p-2.5">
+      <div className="space-y-1">
+        <label className={labelCls}>Ao terminar</label>
         <select
-          className="h-8 rounded-lg border px-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+          className={selectCls}
           value={value}
           onChange={(e) => {
             const v = e.target.value;
@@ -458,23 +462,28 @@ function TerminalSelect({
           <option value="ia">Deixar o Agente de IA responder</option>
           <option value="encerrar">Só enviar a mensagem e encerrar</option>
         </select>
-      </label>
+      </div>
       {value === "usuario" && (
-        <label className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-          Atendente:
+        <div className="space-y-1">
+          <label className={labelCls}>Atendente</label>
           <select
-            className="h-8 rounded-lg border px-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            className={selectCls}
             value={assignTo}
             onChange={(e) => onPatch(node.id, { type: "handoff", to: "usuario", assignTo: e.target.value })}
           >
-            <option value="">Escolher atendente...</option>
+            <option value="">Escolher atendente…</option>
             {team.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.name}
               </option>
             ))}
           </select>
-        </label>
+          {!assignTo && (
+            <p className="text-[10px] text-amber-600">
+              Sem atendente escolhido, cai no rodízio do número.
+            </p>
+          )}
+        </div>
       )}
     </div>
   );
