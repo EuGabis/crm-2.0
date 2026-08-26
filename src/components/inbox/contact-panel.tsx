@@ -36,6 +36,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ContactPaymentsSummary, formatDoc } from "@/components/payments/lead-payments-panel";
+import { HandoffPanel } from "./handoff-panel";
 import {
   AppointmentsPanel,
   FilesPanel,
@@ -228,7 +229,7 @@ export function ContactPanel({
   conversationId?: string;
 }) {
   const [panel, setPanel] = useState<Panel>("campos");
-  const [tab, setTab] = useState<"todos" | "dnd" | "acoes">("todos");
+  const [tab, setTab] = useState<"todos" | "resumo" | "dnd" | "acoes">("todos");
   const [pipelineOpen, setPipelineOpen] = useState(false);
   // Seções abertas do acordeão. Controlado (e não `defaultValue`) porque
   // "Resumo pagamentos" só consulta a Guru quando o usuário abre a seção.
@@ -360,6 +361,7 @@ export function ContactPanel({
               {(
                 [
                   ["todos", "Todos os campos"],
+                  ["resumo", "Resumo"],
                   ["dnd", "DND"],
                   ["acoes", "Ações"],
                 ] as const
@@ -434,6 +436,18 @@ export function ContactPanel({
                   </Badge>
                 </div>
               )}
+              {/* Resumo do último atendimento + Lita. Montado só quando a aba
+                  está aberta: a Lita é uma chamada de IA e não pode disparar em
+                  toda conversa que o atendente abre — o botão é o gatilho. */}
+              {tab === "resumo" && conversationId && (
+                <HandoffPanel conversationId={conversationId} />
+              )}
+              {tab === "resumo" && !conversationId && (
+                <p className="px-1 py-3 text-[11px] text-slate-400">
+                  Abra uma conversa para ver o resumo e pedir ajuda da Lita.
+                </p>
+              )}
+
               {tab === "acoes" && (
                 <div className="space-y-2">
                   <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">

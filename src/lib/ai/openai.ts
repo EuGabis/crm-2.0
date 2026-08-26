@@ -18,7 +18,13 @@ function apiKey(): string {
 
 export async function chat(
   messages: { role: "system" | "user" | "assistant"; content: string }[],
-  opts?: { model?: string; temperature?: number },
+  /**
+   * `json: true` liga o modo JSON da OpenAI (`response_format`), que garante
+   * resposta parseável. Sem ele, pedir JSON no prompt funciona na maioria das
+   * vezes e falha justamente quando o modelo decide explicar antes — e aí o
+   * `JSON.parse` quebra em produção.
+   */
+  opts?: { model?: string; temperature?: number; json?: boolean },
 ): Promise<{ text: string; usage: { promptTokens: number; completionTokens: number } }> {
   const res = await fetch(OPENAI_URL, {
     method: "POST",
@@ -30,6 +36,7 @@ export async function chat(
       model: opts?.model || defaultModel(),
       messages,
       temperature: opts?.temperature ?? 0.7,
+      ...(opts?.json ? { response_format: { type: "json_object" } } : {}),
     }),
   });
   const json: any = await res.json().catch(() => ({}));

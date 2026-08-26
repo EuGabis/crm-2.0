@@ -1434,6 +1434,46 @@ numa **faixa no topo da conversa**.
   RLS decide o que entra no resumo e quem não vê a conversa recebe 404 sem gastar
   chamada.
 
+## "Lita ajuda" e o resumo na barra lateral (aba Resumo das Conversas)
+
+O resumo do atendimento (0087) **saiu da faixa no topo do thread** e virou a aba
+**Resumo** da barra lateral, ao lado de "Todos os campos", "DND" e "Ações" —
+junto de Contato e Resumo pagamentos, que é onde o atendente já olha esse tipo de
+informação.
+
+⚠️ **Por que sair da faixa:** como faixa, o resumo empurrava a conversa para
+baixo em TODA abertura, mesmo depois de lido, e competia com a faixa de estado
+("Finalizada por X") logo abaixo — duas tarjas antes da primeira mensagem. Na
+lateral ele fica disponível sem custar espaço do fio.
+
+**Lita ajuda** (`/api/conversations/assist`, feature `lita-assist` em `ai_logs`)
+é a outra metade da aba: a IA lê o atendimento e ajuda QUEM ESTÁ ATENDENDO.
+Diferente do resumo, que conta o passado para o próximo atendente, aqui a
+pergunta é "e agora?".
+
+- ⚠️ **A classificação do tipo vem PRIMEIRO no prompt, e isso é o cerne.** Um
+  chamado de VENDAS e uma dúvida de ALUNO pedem condutas opostas: no primeiro o
+  objetivo é avançar para a matrícula, no segundo é resolver e **não** empurrar
+  venda. Sem classificar, a IA devolve o mesmo conselho genérico para os dois.
+  Tipos: `vendas`, `aluno`, `cobranca`, `suporte`, `outro`.
+- Devolve `situacao`, `proximo_passo` (destacado — é a única coisa que o
+  atendente precisa decidir agora), `sugestoes` e `atencao` (riscos, promessas
+  não cumpridas, pedido do cliente sem resposta). Lista vazia é resposta válida:
+  inventar ponto de atenção onde não há treina a pessoa a ignorar a seção.
+- **Lê a transcrição dos áudios** (0085) e **o resumo anterior** (0087) junto das
+  mensagens. Sem a transcrição, conversa em áudio chega como pilha de "(áudio)";
+  sem o resumo, o combinado de um atendimento anterior fica fora da análise.
+- O rodapé diz em quantas mensagens ela se baseou e se havia resumo — é o que
+  permite calibrar a confiança: análise de 4 mensagens vale menos que a de 60.
+- ⚠️ **Só roda no clique**, e o painel só monta quando a aba está aberta: uma
+  chamada de IA por conversa aberta seria caro e inútil (o atendente abre dezenas
+  por dia).
+- O prompt proíbe inventar valor, prazo, nome de curso ou política da empresa, e
+  manda dizer o que PERGUNTAR quando falta informação. `chat()` ganhou
+  `json: true` (o `response_format` da OpenAI): pedir JSON só no texto do prompt
+  funciona quase sempre e quebra justamente quando o modelo resolve explicar
+  antes — e aí o `JSON.parse` estoura em produção. O parse continua defensivo.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
