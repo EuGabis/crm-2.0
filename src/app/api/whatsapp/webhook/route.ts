@@ -261,7 +261,30 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
       .select("owner_id")
       .eq("id", contact.id)
       .maybeSingle();
-    const ownerId: string | null = ct?.owner_id ?? null;
+    let ownerId: string | null = ct?.owner_id ?? null;
+
+    // ⚠️ Dono do contato NÃO é o mesmo que atendente responsável, e tratar os
+    // dois como sinônimo dava um bug grande: `contacts.owner_id` é gravado com
+    // quem INSERIU o contato, então a importação do CRM antigo deixou um admin
+    // como dono de 32 mil contatos. Cada um deles que mandasse mensagem caía
+    // direto na caixa desse admin — com `bot_paused`, então nem o bot atendia,
+    // nem o rodízio distribuía.
+    //
+    // A intenção original vale (o cliente volta e cai com quem já o atendia),
+    // mas só faz sentido para quem ATENDE: admin não entra em fila.
+    if (ownerId) {
+      const { data: donoMembro } = await db
+        .from("location_members")
+        .select("role")
+        .eq("user_id", ownerId)
+        .eq("location_id", channel.location_id)
+        .maybeSingle();
+      if (donoMembro?.role !== "user") ownerId = null;
+    }
+    // Duas condições INDEPENDENTES, e as duas precisam valer: o dono tem de ser
+    // atendente (acima) E o número não pode ter bot — com bot, quem tria é ele,
+    // inclusive para contato conhecido. Sem dono elegível ou com bot no número,
+    // a conversa segue o caminho normal (bot → rodízio → fila do setor).
     const assignToOwner = ownerId && !channel.bot_flow;
     const { data: created, error: convErr } = await db
       .from("conversations")
