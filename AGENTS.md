@@ -727,7 +727,8 @@ Cloud API → celular.
   0056 = view `payment_new_sales` (o que conta como VENDA NOVA);
   **próxima migração livre: 0086** (0078 = busca de contatos no servidor,
   0079 = SLA de atendimento, 0080 = avisos de segurança, 0085 = transcrição de
-  áudio; as 0080–0084 do outro Claude são de setor/rodízio).
+  áudio, 0086 = transcrição em parágrafos; as 0080–0084 do outro Claude são de
+  setor/rodízio).
 - Env (privadas, nunca `NEXT_PUBLIC_`): `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`,
   `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_GRAPH_VERSION` (default `v21.0`).
 - **Mídia real (imagem/áudio/vídeo)** — helpers em `src/lib/whatsapp/client.ts`
@@ -1258,6 +1259,28 @@ fone, no ritmo de quem falou. Transcrito, ele entra na **busca global do inbox**
   170 gravações do histórico) e arriscar o timeout da rota — que abortaria o
   tique INTEIRO, junto com as automações e as mensagens agendadas, que moram no
   mesmo lugar.
+- **Parágrafos, não bloco corrido.** A primeira versão gravava o texto como a
+  API devolvia: um áudio de dois minutos virava um parágrafo de 1.800
+  caracteres, que é justamente o que ninguém lê. Hoje o pedido usa
+  `response_format=verbose_json` e a quebra sai dos SEGMENTOS com tempo — onde a
+  pessoa pausou (0,7 s é o que separa "respirar no meio da frase" de "terminei a
+  ideia"). O limite de 320 caracteres é rede para quem fala sem respirar, e só
+  corta DEPOIS de um fim de frase, para não partir a oração no meio.
+  ⚠️ Na tela precisa de **`whitespace-pre-line`**: no HTML, quebra de linha conta
+  como espaço, e sem isso o texto volta a ser um bloco corrido mesmo estando
+  quebrado no banco.
+  A migração **0086** reenfileirou as transcrições longas já gravadas (47 de 89)
+  para ganharem as quebras — as curtas não, porque não há o que quebrar e seria
+  pagar de novo pelo mesmo resultado.
+- **Velocidade de reprodução** (1×, 1,25×, 1,5×, 2×) no player, sem 0,5x: em
+  áudio de atendimento a necessidade é sempre ouvir MAIS RÁPIDO. A preferência é
+  por dispositivo e usa **`useSyncExternalStore`**, o mesmo padrão da sidebar
+  minimizável e pelos mesmos motivos (o servidor não tem `localStorage`,
+  `setState` em efeito dispara cascata, e o evento `storage` sincroniza as abas
+  de graça). ⚠️ `getSnapshot` precisa devolver valor ESTÁVEL — daí o cache no
+  módulo em vez de ler o `localStorage` a cada chamada. E ⚠️ `playbackRate` é
+  propriedade do ELEMENTO, não atributo controlado pelo React: sem aplicá-la no
+  `onPlay` e na troca, o áudio volta a 1×.
 - Rota `POST /api/messages/transcribe` para transcrever na hora (o áudio que
   acabou de chegar, ou o que falhou). **A sessão AUTORIZA e a service role
   EXECUTA** (padrão do `resolveGuruUserToken`): o `select` passa pela RLS, então
