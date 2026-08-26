@@ -7,6 +7,7 @@ import {
   Archive,
   CalendarDays,
   Check,
+  ClipboardList,
   CheckCheck,
   CheckCircle2,
   CornerUpLeft,
@@ -21,6 +22,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import { toast } from "sonner";
+import { HandoffSummaryDialog } from "./handoff-summary-dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,6 +46,7 @@ import {
   useConversation,
   useConvStore,
   useMessages,
+  useLastHandoffSummary,
   useMessagesLoading,
   useReplyStore,
 } from "@/lib/data/repos/db/conversations";
@@ -65,7 +68,18 @@ function AssignPicker({
   const { me } = useMyMembership();
   const owner = members.find((m) => m.userId === conversation.assignedTo) ?? null;
 
-  const set = async (userId: string | null) => {
+  // Transferência para OUTRA pessoa passa pelo resumo primeiro. Assumir para si
+  // ou devolver para a caixa do grupo não pede: não há "próximo atendente" a
+  // quem contar o que aconteceu.
+  const [pendente, setPendente] = useState<{ userId: string; nome: string } | null>(null);
+
+  const set = async (userId: string | null, resumo?: string) => {
+    if (resumo !== undefined && resumo.trim()) {
+      // Grava ANTES do assign: depois de transferir eu posso perder a
+      // visibilidade da conversa. A função é SECURITY DEFINER, mas a ordem
+      // também mantém o resumo acima do evento "transferida para X" no thread.
+      await conversationActions.saveHandoffSummary(conversation.id, "transferencia", resumo);
+    }
     const ok = await conversationActions.assign(conversation.id, userId);
     if (!ok) {
       toast.error("Não foi possível alterar o responsável");
@@ -144,7 +158,11 @@ function AssignPicker({
         {members
           .filter((m) => m.userId !== me?.userId)
           .map((m) => (
-            <DropdownMenuItem key={m.userId} className="text-xs" onClick={() => void set(m.userId)}>
+            <DropdownMenuItem
+              key={m.userId}
+              className="text-xs"
+              onClick={() => setPendente({ userId: m.userId, nome: m.name })}
+            >
               {m.name}
             </DropdownMenuItem>
           ))}
@@ -154,6 +172,18 @@ function AssignPicker({
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>
+      <HandoffSummaryDialog
+        open={pendente !== null}
+        conversationId={pendente ? conversation.id : null}
+        kind="transferencia"
+        destino={pendente?.nome}
+        onCancel={() => setPendente(null)}
+        onConfirm={async (resumo) => {
+          const alvo = pendente;
+          setPendente(null);
+          if (alvo) await set(alvo.userId, resumo);
+        }}
+      />
     </DropdownMenu>
   );
 }
@@ -677,6 +707,51 @@ function MessageBubble({
  * e quando, com o caminho de volta ao lado (migração 0029). Sem isso, abrir uma
  * conversa finalizada dá a impressão de que ela ainda está na fila.
  */
+/**
+ * Resumo do último atendimento, no topo da conversa.
+ *
+ * É o ponto da feature: quem abre a conversa — outro atendente que assumiu, ou
+ * quem atende o cliente que voltou a chamar meses depois — lê em duas linhas o
+ * que já foi tratado, sem rolar o histórico. Fica ACIMA das mensagens de
+ * propósito; como nota no meio do fio, em conversa longa ninguém acha.
+ */
+function HandoffBanner({
+  resumo,
+  aberto,
+  onToggle,
+}: {
+  resumo: { body: string; kind: string; createdAt: string; autor: string };
+  aberto: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="border-b border-amber-200 bg-amber-50/70 px-4 py-2">
+      <button onClick={onToggle} className="flex w-full items-center gap-2 text-left">
+        <ClipboardList className="size-3.5 shrink-0 text-amber-600" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-[11px] font-bold uppercase tracking-wide text-amber-700">
+            Resumo do último atendimento
+          </span>
+          <span className="block text-[10px] text-amber-600/80">
+            {resumo.kind === "transferencia" ? "ao transferir" : "ao finalizar"} · {resumo.autor} ·{" "}
+            {format(new Date(resumo.createdAt), "d 'de' MMM, HH:mm", { locale: ptBR })}
+          </span>
+        </span>
+        <span className="shrink-0 text-[10px] font-medium text-amber-700">
+          {aberto ? "recolher" : "ver"}
+        </span>
+      </button>
+      {aberto && (
+        // `whitespace-pre-line`: o resumo pode vir em várias linhas, e no HTML
+        // quebra de linha conta como espaço.
+        <p className="mt-1.5 whitespace-pre-line pl-5 text-xs leading-relaxed text-amber-900">
+          {resumo.body}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function StatusBanner({ conversation }: { conversation: Conversation }) {
   const { members } = useTeam();
   if (!conversation.closedAt && !conversation.archivedAt) return null;
@@ -757,10 +832,21 @@ export function Thread({
    */
   const [confirmStatus, setConfirmStatus] = useState<"finalizar" | "arquivar" | null>(null);
   const [statusBusy, setStatusBusy] = useState(false);
+  const { resumo: resumoAnterior, recarregar: recarregarResumo } =
+    useLastHandoffSummary(conversationId);
+  // A faixa começa ABERTA: o objetivo é que quem assume não precise procurar. O
+  // recolher existe para conversa longa em que a pessoa já leu.
+  const [resumoAberto, setResumoAberto] = useState(true);
 
-  const applyStatus = async () => {
+  const applyStatus = async (resumo?: string) => {
     if (!conversation || !confirmStatus) return;
     setStatusBusy(true);
+    // O resumo vai ANTES de fechar: a nota pertence ao atendimento que está
+    // sendo encerrado, e o Realtime já a coloca no thread.
+    if (resumo?.trim()) {
+      await conversationActions.saveHandoffSummary(conversation.id, "finalizacao", resumo);
+      recarregarResumo();
+    }
     const ok =
       confirmStatus === "finalizar"
         ? await conversationActions.close(conversation.id, true)
@@ -934,8 +1020,18 @@ export function Thread({
               <Trash2 className="size-4" />
             </button>
           )}
+          {/* Finalizar passa pelo resumo; arquivar mantém a confirmação simples —
+              arquivar é tirar da vista, não encerrar um atendimento, então não
+              há o que contar para o próximo. */}
+          <HandoffSummaryDialog
+            open={confirmStatus === "finalizar"}
+            conversationId={confirmStatus === "finalizar" ? conversationId : null}
+            kind="finalizacao"
+            onCancel={() => setConfirmStatus(null)}
+            onConfirm={(resumo) => applyStatus(resumo)}
+          />
           <Dialog
-            open={confirmStatus !== null}
+            open={confirmStatus === "arquivar"}
             onOpenChange={(o) => !o && setConfirmStatus(null)}
           >
             <DialogContent className="sm:max-w-sm">
@@ -1022,6 +1118,13 @@ export function Thread({
           </Dialog>
         </div>
       </div>
+      {resumoAnterior && (
+        <HandoffBanner
+          resumo={resumoAnterior}
+          aberto={resumoAberto}
+          onToggle={() => setResumoAberto((v) => !v)}
+        />
+      )}
       <StatusBanner conversation={conversation} />
       <div
         ref={scrollRef}

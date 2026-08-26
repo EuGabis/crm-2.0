@@ -1379,6 +1379,52 @@ cada consulta, reler a pergunta antiga junto com a resposta daquele momento é a
 De passagem: `useLocationId` em `db/ai.ts` chamava `load()` e baixava os 41 mil
 contatos só para descobrir a empresa — trocado por `ensureSession()`.
 
+## Resumo do atendimento na finalização e na transferência (migração 0087)
+
+O que aconteceu no atendimento ficava só na cabeça de quem atendeu. Quem assume
+a conversa depois — ou atende o mesmo cliente quando ele volta a chamar semanas
+mais tarde — tinha que rolar o histórico inteiro para descobrir o que já foi
+tratado.
+
+**Decisões do Gabriel:** resumo **opcional**, com **rascunho de IA**, e exibido
+numa **faixa no topo da conversa**.
+
+- ⚠️ **É NOTA INTERNA marcada, não tabela nova**: `messages.handoff_kind`
+  (`finalizacao` | `transferencia`; NULL = nota comum). A nota interna já é onde
+  vivem os comentários da conversa (botão "Nota" do card, ação `nota-interna` das
+  automações, painel Observações) — tabela separada faria o resumo escrito aqui
+  não aparecer lá, e o comentário de lá não contar como resumo.
+- ⚠️ **Gravado por `public.save_handoff_summary` (SECURITY DEFINER)**, espelhando
+  `log_conversation_event` (0084) pelo MESMO motivo: ao transferir, a conversa
+  deixa de ser minha no instante seguinte e o `insert` direto é barrado pela RLS
+  — justamente no caso em que o resumo mais importa. O autor vem de `auth.uid()`,
+  nunca de parâmetro.
+- `public.last_handoff_summary(conv)` alimenta a faixa. Lê por FUNÇÃO e não da
+  lista de mensagens do store porque quem abre a conversa pode não ter
+  visibilidade das mensagens antigas (atendente que só vê as suas, conversa de
+  outro setor) — e é exatamente essa pessoa que precisa do resumo.
+- **O rascunho é o que torna o opcional viável.** Com ~150 finalizações/mês
+  (medido), um campo vazio ficaria vazio; e obrigar produziria uma fileira de
+  "ok"/"resolvido" — preenchido e sem informação, pior que vazio porque dá
+  aparência de histórico. "Finalizar sem resumo" é botão visível, não um X no
+  canto.
+- ⚠️ **O rascunho inclui a TRANSCRIÇÃO dos áudios** (0085). Sem isso, uma
+  conversa toda em áudio chegaria à IA como uma pilha de "(áudio)" e o resumo
+  sairia sem conteúdo.
+- ⚠️ **Falha da IA não trava a finalização**: o campo continua editável, a pessoa
+  escreve à mão ou segue sem resumo. Um `toast.info`, não um erro.
+- **Arquivar NÃO pede resumo** — arquivar é tirar da vista, não encerrar um
+  atendimento, então não há o que contar ao próximo. Só finalizar e transferir.
+- **Transferir só pede resumo ao passar para OUTRA pessoa.** Assumir para si ou
+  devolver à caixa do grupo não pede: não há "próximo atendente" a quem contar.
+- O resumo é gravado ANTES do `close`/`assign`: a nota pertence ao atendimento
+  que está sendo encerrado, e assim ela fica acima do evento "transferida para X"
+  no fio.
+- Rota `POST /api/conversations/summary` gera o rascunho (feature
+  `handoff-summary` em `ai_logs`). A sessão do usuário lê as mensagens, então a
+  RLS decide o que entra no resumo e quem não vê a conversa recebe 404 sem gastar
+  chamada.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
