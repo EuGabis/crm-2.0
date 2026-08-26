@@ -196,7 +196,9 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
   const findConv = () =>
     db
       .from("conversations")
-      .select("id, unread_count, closed_at, archived_at")
+      .select(
+        "id, unread_count, closed_at, archived_at, closed_by, archived_by, bot_paused, assigned_to",
+      )
       .eq("location_id", channel.location_id)
       .eq("contact_id", contact.id)
       .eq("channel_id", channel.id)
@@ -205,9 +207,19 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
       .maybeSingle();
 
   let { data: conv } = await findConv();
-  // Conversa fechada/arquivada + cliente escreveu de novo = reabrir E reiniciar o
-  // agente do zero (nova sessão), sem precisar apagar a conversa.
+  // Conversa fechada/arquivada + cliente escreveu de novo = reabrir.
   const wasClosed = !!(conv && (conv.closed_at || conv.archived_at));
+  // Um HUMANO já atendeu esta conversa (assumiu via template/envio → bot_paused,
+  // ou finalizou/arquivou). Nesse caso reabrir NÃO pode soltar o bot nem
+  // redistribuir: o bot está PROIBIDO de reentrar. Devolve direto pra quem
+  // atendeu e mantém o bot pausado. Só re-triamos quem era 100% do bot.
+  const humanHandled = !!(
+    conv &&
+    (conv.bot_paused || conv.closed_by || conv.archived_by || conv.assigned_to)
+  );
+  const reopenHandler: string | null = conv
+    ? conv.closed_by ?? conv.archived_by ?? conv.assigned_to ?? null
+    : null;
   if (!conv) {
     // Contato já tem dono? A conversa nova vai DIRETO pra ele (é o lead dele) e o
     // bot NÃO roda — não faz sentido triar/redistribuir um contato conhecido.
@@ -255,18 +267,23 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
         closed_by: null,
         archived_at: null,
         archived_by: null,
-        // Reabriu do fechado: solta o bot para poder recomeçar.
-        ...(wasClosed ? { bot_paused: false } : {}),
-        // Reabriu do fechado E o número tem bot: o contato volta pra FILA — tira o
-        // dono anterior pra o bot re-qualificar e redistribuir (pode ir pra outro).
-        ...(wasClosed && channel.bot_flow ? { assigned_to: null } : {}),
+        // Humano já atendeu: o bot fica PAUSADO (não reentra em hipótese alguma) e
+        // a conversa volta direto pra quem atendeu (não pra fila do bot).
+        ...(wasClosed && humanHandled
+          ? { bot_paused: true, ...(reopenHandler ? { assigned_to: reopenHandler } : {}) }
+          : {}),
+        // Reabriu do fechado E era 100% do bot: solta o bot para recomeçar e,
+        // se o número tem fluxo, volta pra FILA (tira o dono pra re-triar/redistribuir).
+        ...(wasClosed && !humanHandled ? { bot_paused: false } : {}),
+        ...(wasClosed && !humanHandled && channel.bot_flow ? { assigned_to: null } : {}),
       })
       .eq("id", conv.id);
   }
   if (!conv) return;
 
-  // Reabriu uma conversa fechada: zera a sessão do agente para ele iniciar de novo.
-  if (wasClosed) {
+  // Reabriu uma conversa que era 100% do bot: zera a sessão para ele iniciar de
+  // novo. Se um humano atendeu, a sessão fica intacta e o bot não reentra.
+  if (wasClosed && !humanHandled) {
     await db.from("bot_sessions").delete().eq("conversation_id", conv.id);
   }
 
