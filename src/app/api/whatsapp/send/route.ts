@@ -187,5 +187,16 @@ export async function POST(request: Request) {
     })
     .eq("id", conversationId);
 
+  // Log inline (pílula): o template REABRE a conversa fora da janela de 24h e a
+  // ATRIBUI a quem enviou. Registra no histórico igual "finalizada/reaberta por".
+  // Via função SECURITY DEFINER (0084) porque a conversa pode ter vindo do bot/
+  // outro setor e o insert direto seria barrado pela RLS.
+  if (template) {
+    await supabase.rpc("log_conversation_event", {
+      conv_id: conversationId,
+      p_body: `Conversa aberta e atribuída para ${senderName || "o atendente"}`,
+    });
+  }
+
   return Response.json({ ok: true, id: msg.id, waMessageId, message: msg });
 }
