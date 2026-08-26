@@ -271,3 +271,20 @@
 /* Transição suave ao alternar tema */
 html { transition: background-color 0.2s ease; }
 body { transition: background-color 0.2s ease, color 0.2s ease; }
+
+/* ------------------------------------------------------------------
+   Tons que faltavam no remapeamento acima (aditivo).
+   Sintoma que levou a isto: no painel "Lita ajuda", o bloco "Próximo
+   passo" usa `bg-indigo-50` + `text-indigo-900`. O fundo tinha override e
+   o TEXTO não — resultado: texto escuro sobre fundo escuro, ilegível.
+   Estes são os tons que o app realmente usa e que não estavam cobertos;
+   `text-red-500` sozinho aparece em 24 lugares.
+   ⚠️ Ao usar uma cor nova em texto, confira se ela está aqui: sem o
+   override o Tailwind mantém o tom claro, que no fundo escuro desaparece.
+   ------------------------------------------------------------------ */
+.dark .text-indigo-500, .dark .text-indigo-800, .dark .text-indigo-900 { color: #a5b4fc; }
+.dark .text-red-500, .dark .text-rose-700, .dark .text-rose-800 { color: #fca5a5; }
+.dark .text-amber-500 { color: #fcd34d; }
+.dark .text-emerald-500, .dark .text-emerald-800, .dark .text-emerald-900 { color: #6ee7b7; }
+.dark .text-sky-500, .dark .text-sky-800, .dark .text-sky-900,
+.dark .text-blue-500 { color: #7dd3fc; }
