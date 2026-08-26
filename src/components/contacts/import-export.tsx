@@ -202,6 +202,12 @@ function parseCsv(text: string, known: Set<string>): ParseResult {
     }
 
     const keys = identityKeys({ doc, phone, email });
+    // Sem NENHUMA forma de contato (telefone, e-mail ou documento) não dá para
+    // deduplicar — a cada importação vira um contato NOVO (duplicado inútil). Pula.
+    if (keys.length === 0) {
+      ignored++;
+      continue;
+    }
     if (keys.some((k) => known.has(k))) {
       existing++;
       continue;
@@ -506,7 +512,7 @@ export function ImportDialog({
                   <li>{nf.format(result.duplicates)} repetidos no próprio arquivo</li>
                 )}
                 {result.ignored > 0 && (
-                  <li>{nf.format(result.ignored)} sem nome, e-mail e telefone</li>
+                  <li>{nf.format(result.ignored)} sem telefone, e-mail e documento (ignorados)</li>
                 )}
               </ul>
             )}
