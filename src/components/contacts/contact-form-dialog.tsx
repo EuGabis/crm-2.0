@@ -46,8 +46,8 @@ export function ContactFormDialog({
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const submit = async () => {
-    if (!form.firstName.trim() || !form.lastName.trim()) {
-      toast.error("Nome e sobrenome são obrigatórios");
+    if (!form.firstName.trim()) {
+      toast.error("O nome é obrigatório");
       return;
     }
     if (form.phone.trim()) {
@@ -107,7 +107,7 @@ export function ContactFormDialog({
             <Input value={form.firstName} onChange={set("firstName")} className="h-8" />
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">Sobrenome *</Label>
+            <Label className="text-xs">Sobrenome</Label>
             <Input value={form.lastName} onChange={set("lastName")} className="h-8" />
           </div>
           <div className="col-span-2 space-y-1">
