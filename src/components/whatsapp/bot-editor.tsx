@@ -485,6 +485,22 @@ function TerminalSelect({
           )}
         </div>
       )}
+      {value === "encerrar" && (
+        <label className="flex items-start gap-2 text-[11px] text-slate-600">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={node.type === "end" ? !!node.finish : false}
+            onChange={(e) => onPatch(node.id, { type: "end", finish: e.target.checked })}
+          />
+          <span>
+            Finalizar a conversa ao encerrar
+            <span className="block text-[10px] text-slate-400">
+              Sai da caixa ativa. Se o cliente voltar, o bot atende de novo.
+            </span>
+          </span>
+        </label>
+      )}
     </div>
   );
 }

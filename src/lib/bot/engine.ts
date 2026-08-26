@@ -553,6 +553,15 @@ async function advance(
       return;
     } else if (node.type === "end") {
       if (node.text) await botSend(ctx, render(node.text, vars));
+      // `finish`: finaliza a conversa (sai da caixa ativa). Se o cliente voltar,
+      // o webhook re-tria pelo bot (conversa finalizada = novo atendimento).
+      if (node.finish) {
+        await ctx.db
+          .from("conversations")
+          .update({ closed_at: new Date().toISOString(), closed_by: null })
+          .eq("id", ctx.conversationId);
+        await botLogEvent(ctx, "Conversa finalizada pelo bot");
+      }
       await saveSession(ctx, nodeId, "concluido", vars);
       return;
     } else {

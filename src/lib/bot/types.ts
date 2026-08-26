@@ -103,8 +103,9 @@ export type BotNode =
   // online (≤ 5 min). Atribui a conversa + dono do card. Se ninguém online, marca
   // "aguardando distribuição" para o admin distribuir depois (Etapa B).
   | { id: string; type: "distribute"; text?: string; pipeline?: string }
-  // Encerra o bot sem handoff.
-  | { id: string; type: "end"; text?: string };
+  // Encerra o bot sem handoff. `finish`: além de encerrar o bot, FINALIZA a
+  // conversa (sai da caixa ativa) — ex.: mandou o cliente falar em outro número.
+  | { id: string; type: "end"; text?: string; finish?: boolean };
 
 export interface BotFlow {
   key: string;

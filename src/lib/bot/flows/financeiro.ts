@@ -94,17 +94,19 @@ export const financeiroFlow: BotFlow = {
     // Financeiro: escolha o atendente na aba Bot (assignTo vazio = rodízio do número).
     fin_transfere: { id: "fin_transfere", type: "handoff", to: "usuario", assignTo: "" },
 
-    // ---- Secretaria: manda o número e encerra (não transfere) ----
+    // ---- Secretaria: manda o número e FINALIZA (não transfere) ----
     sec_fim: {
       id: "sec_fim",
       type: "end",
+      finish: true,
       text: "Para falar com a Secretaria, chame diretamente no número +55 11 94767-1223. 😊",
     },
 
-    // ---- Vendas: manda o número e encerra (não transfere) ----
+    // ---- Vendas: manda o número e FINALIZA (não transfere) ----
     vendas_fim: {
       id: "vendas_fim",
       type: "end",
+      finish: true,
       text: "Para falar com o time de Vendas, chame diretamente no número +55 11 99009-3005. 😊",
     },
   },
