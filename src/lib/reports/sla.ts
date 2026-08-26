@@ -307,3 +307,77 @@ export function dur(min: number | null | undefined): string {
   const d = Math.floor(h / 24);
   return `${d}d ${h % 24}h`;
 }
+
+/**
+ * Relatório dos atendimentos em CSV, com o RECORTE ATIVO da tela.
+ *
+ * Uma linha por conversa, e não os totais: quem baixa um relatório de SLA vai
+ * montar tabela dinâmica, cruzar com a planilha da equipe ou procurar caso a
+ * caso. Os KPIs a planilha recalcula sozinha a partir daqui — o contrário não é
+ * verdade.
+ *
+ * ⚠️ Exporta o que está FILTRADO, não o período inteiro. A tela toda reflete o
+ * recorte (chips no topo, gráficos, tabelas); um download que ignorasse os
+ * filtros entregaria um arquivo que não bate com nada do que está em tela.
+ */
+export function csvDeAtendimentos(
+  linhas: SlaLinha[],
+  nomeDe: Record<string, string>,
+  meta: number
+): string {
+  const cabecalho = [
+    "contato",
+    "canal",
+    "responsavel",
+    "primeira_mensagem",
+    "primeira_resposta",
+    "espera_util_min",
+    "espera_corrida_min",
+    "respondida",
+    "dentro_da_meta_" + meta + "min",
+    "situacao",
+    "conversa_finalizada",
+    "so_o_bot_respondeu",
+    "conversa_id",
+  ];
+
+  // Ponto e vírgula e BOM: é o que o Excel em pt-BR abre em colunas sem pedir
+  // importação, o mesmo padrão da exportação de Contatos.
+  const esc = (v: string | number | boolean) => `"${String(v).replaceAll('"', '""')}"`;
+  const dataHora = (iso: string | null) =>
+    iso
+      ? new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })
+      : "";
+  const sn = (b: boolean) => (b ? "sim" : "nao");
+
+  const corpo = linhas.map((l) => {
+    const situacao = !l.respondida
+      ? l.fechada
+        ? "sem resposta (finalizada)"
+        : "esperando agora"
+      : l.dentro_da_meta
+        ? "dentro da meta"
+        : "fora da meta";
+    return [
+      l.contato,
+      l.canal,
+      l.assigned_to ? (nomeDe[l.assigned_to] ?? "Atendente") : "Sem responsavel",
+      dataHora(l.primeira_entrada),
+      dataHora(l.primeira_resposta),
+      // Vírgula decimal: com ponto, o Excel em pt-BR lê 14.5 como texto (ou
+      // como 145) e a coluna deixa de somar.
+      String(l.espera_util_min).replace(".", ","),
+      String(l.espera_corrida_min).replace(".", ","),
+      sn(l.respondida),
+      sn(l.dentro_da_meta),
+      situacao,
+      sn(l.fechada),
+      sn(l.respondida_por_bot && !l.respondida),
+      l.conversation_id,
+    ]
+      .map(esc)
+      .join(";");
+  });
+
+  return [cabecalho.map(esc).join(";"), ...corpo].join("\r\n");
+}

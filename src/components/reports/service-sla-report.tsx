@@ -2,7 +2,16 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Clock, Filter, Loader2, Target, TimerOff, X } from "lucide-react";
+import {
+  AlertTriangle,
+  Clock,
+  Download,
+  Filter,
+  Loader2,
+  Target,
+  TimerOff,
+  X,
+} from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -23,6 +32,7 @@ import type { Channel } from "@/lib/data/types";
 import {
   agregar,
   aplicarFiltros,
+  csvDeAtendimentos,
   dur,
   FILTROS_VAZIOS,
   SEM_RESPONSAVEL,
@@ -31,6 +41,7 @@ import {
   type SlaFiltros,
   type SlaLinha,
 } from "@/lib/reports/sla";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 interface Resposta {
@@ -157,6 +168,27 @@ export function ServiceSlaReport() {
   const alternar = <C extends keyof SlaFiltros>(campo: C, valor: SlaFiltros[C]) =>
     setFiltros((f) => ({ ...f, [campo]: f[campo] === valor ? FILTROS_VAZIOS[campo] : valor }));
 
+  const baixarRelatorio = () => {
+    if (filtradas.length === 0) {
+      toast.error("Nada para exportar neste recorte");
+      return;
+    }
+    const csv = csvDeAtendimentos(filtradas, dados?.nomes ?? {}, dados?.meta ?? 15);
+    // BOM na frente: sem ele o Excel em pt-BR abre os acentos como "AtendÃ­vel".
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    // O nome do arquivo diz o período E se havia recorte: dois downloads do
+    // mesmo dia com filtros diferentes não podem virar o mesmo nome.
+    a.download = `atendimento-${dias}d${temFiltro(filtros) ? "-filtrado" : ""}-${new Date()
+      .toISOString()
+      .slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`${filtradas.length.toLocaleString("pt-BR")} atendimento(s) exportado(s)`);
+  };
+
   const chips: { rotulo: string; limpar: () => void }[] = [];
   if (filtros.faixa)
     chips.push({ rotulo: `espera: ${filtros.faixa}`, limpar: () => alternar("faixa", null) });
@@ -197,6 +229,15 @@ export function ServiceSlaReport() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            disabled={!dados || filtradas.length === 0}
+            onClick={baixarRelatorio}
+          >
+            <Download className="size-3.5" /> Baixar relatório
+          </Button>
           <Button
             variant="outline"
             size="sm"
