@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { create } from "zustand";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
@@ -887,6 +887,43 @@ export const conversationActions = {
   },
 
   /**
+   * Grava o resumo do atendimento (migração 0087) como nota interna marcada.
+   *
+   * ⚠️ Via função SECURITY DEFINER, e não `insert` direto, pelo mesmo motivo do
+   * `logEvent`: ao TRANSFERIR, a conversa deixa de ser minha no instante
+   * seguinte e a RLS barra a escrita — justamente no caso em que o resumo mais
+   * importa. Texto vazio não grava nada (a função devolve null).
+   */
+  async saveHandoffSummary(
+    conversationId: string,
+    kind: "finalizacao" | "transferencia",
+    body: string
+  ): Promise<boolean> {
+    if (!body.trim()) return true; // resumo é opcional: não escrever não é erro
+    const supabase = createClient();
+    const { data, error } = await supabase.rpc("save_handoff_summary", {
+      conv_id: conversationId,
+      p_kind: kind,
+      p_body: body,
+    });
+    if (error || !data) return false;
+    // A nota entra no thread na hora; o Realtime deduplica pelo id se vier de
+    // novo. Sem isto, quem acabou de escrever o resumo não o vê na conversa.
+    const { data: linha } = await supabase
+      .from("messages")
+      .select("*")
+      .eq("id", data)
+      .maybeSingle();
+    if (linha) {
+      const s = useConvStore.getState();
+      if (!s.messages.some((m) => m.id === linha.id)) {
+        s.patch({ messages: [...s.messages, mapMessage(linha)] });
+      }
+    }
+    return true;
+  },
+
+  /**
    * Finaliza (atendimento resolvido) ou reabre. Arquivar é outro eixo — uma
    * conversa pode estar finalizada e não arquivada, e vice-versa (0029).
    */
@@ -1296,4 +1333,61 @@ export function useInboxLiveSync(intervalMs = 15000) {
       window.removeEventListener("online", onVisible);
     };
   }, [intervalMs]);
+}
+
+export interface HandoffSummary {
+  id: string;
+  body: string;
+  kind: "finalizacao" | "transferencia";
+  createdAt: string;
+  autor: string;
+}
+
+/**
+ * O último resumo de repasse da conversa, para a faixa no topo do thread.
+ *
+ * Lê por FUNÇÃO e não da lista de mensagens do store: quem abre a conversa pode
+ * não ter visibilidade das mensagens antigas (atendente que só vê as suas,
+ * conversa que passou por outro setor) — e é exatamente essa pessoa que precisa
+ * do resumo.
+ */
+export function useLastHandoffSummary(conversationId: string | null) {
+  const [resumo, setResumo] = useState<HandoffSummary | null>(null);
+  const [gatilho, setGatilho] = useState(0);
+
+  useEffect(() => {
+    let ativo = true;
+    if (!conversationId) {
+      // Limpa em callback, não no corpo do efeito: `setState` síncrono ali
+      // dispara renderização em cascata (regra do React).
+      queueMicrotask(() => {
+        if (ativo) setResumo(null);
+      });
+      return () => {
+        ativo = false;
+      };
+    }
+    void createClient()
+      .rpc("last_handoff_summary", { conv_id: conversationId })
+      .then(({ data }: any) => {
+        if (!ativo) return;
+        const linha = (data ?? [])[0];
+        setResumo(
+          linha
+            ? {
+                id: linha.id,
+                body: linha.body,
+                kind: linha.handoff_kind,
+                createdAt: linha.created_at,
+                autor: linha.autor,
+              }
+            : null
+        );
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [conversationId, gatilho]);
+
+  return { resumo, recarregar: () => setGatilho((g) => g + 1) };
 }
