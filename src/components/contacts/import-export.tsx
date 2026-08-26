@@ -336,9 +336,10 @@ export function ImportDialog({
     // minúsculas, como o parser já grava tags) e cria a lista casando essa tag.
     const listTrim = listName.trim();
     const tag = listTrim.toLowerCase();
-    // Com lista: envia o arquivo INTEIRO (o servidor não duplica os já existentes,
-    // mas marca a tag neles). Sem lista: só os novos (pré-filtrados).
-    const base = listTrim ? fullRows : result.rows;
+    // Envia o arquivo INTEIRO (o servidor deduplica: insere os novos, e nos já
+    // existentes marca a tag e RECUPERA o telefone vazio). Sem enviar os
+    // existentes, a recuperação de telefone/tag não aconteceria.
+    const base = fullRows.length ? fullRows : result.rows;
     const rows = tag
       ? base.map((r) => (r.tags.includes(tag) ? r : { ...r, tags: [...r.tags, tag] }))
       : base;
@@ -348,7 +349,8 @@ export function ImportDialog({
     setImporting(false);
 
     const merged = r.merged ?? 0;
-    const processed = r.inserted + merged;
+    const filled = r.filled ?? 0;
+    const processed = r.inserted + merged + filled;
     if (processed > 0) {
       await logBulk(
         `Importação CSV — ${fileName ?? "arquivo"}${listTrim ? ` (lista: ${listTrim})` : ""}`,
@@ -384,6 +386,7 @@ export function ImportDialog({
     const partes: string[] = [];
     if (r.inserted) partes.push(`${nf.format(r.inserted)} novo(s)`);
     if (merged) partes.push(`${nf.format(merged)} já existente(s) marcado(s)`);
+    if (filled) partes.push(`${nf.format(filled)} telefone(s) recuperado(s)`);
     const resumo = partes.join(" + ") || `${nf.format(processed)} contato(s)`;
     const naLista = listTrim ? ` na lista "${listTrim}"` : "";
     if (r.failed > 0) {

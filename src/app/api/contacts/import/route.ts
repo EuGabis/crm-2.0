@@ -71,6 +71,7 @@ export async function POST(request: Request) {
   let failed = 0;
   let skipped = 0;
   let merged = 0;
+  let filled = 0;
   let firstError: string | null = null;
 
   // Insere um lote; se falhar, reparte ao meio até isolar a(s) linha(s) ruim(ns).
@@ -155,7 +156,19 @@ export async function POST(request: Request) {
       if (mErr) firstError ??= mErr.message;
       else if (typeof n === "number") merged += n;
     }
+
+    // Recupera telefone (0088): preenche o telefone VAZIO dos que já existem com o
+    // número do arquivo (casa por e-mail/doc). Conserta importações antigas que
+    // entraram sem telefone. Não sobrescreve quem já tem número.
+    const toFill = existing.filter((r) => (r.phone ?? "").trim());
+    if (toFill.length) {
+      const { data: f, error: fErr } = await supabase.rpc("fill_missing_contact_phone", {
+        p_rows: toFill.map((r) => ({ email: r.email, doc: r.doc ?? "", phone: r.phone })),
+      });
+      if (fErr) firstError ??= fErr.message;
+      else if (typeof f === "number") filled += f;
+    }
   }
 
-  return Response.json({ inserted, failed, skipped, merged, error: firstError });
+  return Response.json({ inserted, failed, skipped, merged, filled, error: firstError });
 }
