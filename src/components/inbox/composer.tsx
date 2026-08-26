@@ -342,30 +342,46 @@ export function Composer({ conversationId }: { conversationId: string }) {
       toast.error("Cadastre um canal de WhatsApp em Canais de atendimento para enviar.");
       return;
     }
-    // WhatsApp real: envia pela Cloud API (a mensagem volta pelo Realtime)
+    // WhatsApp real: envia pela Cloud API. Envio OTIMISTA — a mensagem aparece na
+    // hora (não espera o round-trip); ao voltar, troca pela real (ou desfaz).
     if (isWhatsapp && !internal && !scheduledFor) {
       const text = body.trim();
       if (!text) {
         toast.error("Escreva uma mensagem antes de enviar");
         return;
       }
-      setSending(true);
+      const replyId = replyTarget?.id;
+      const tempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const optimistic: Message = {
+        id: tempId,
+        conversationId,
+        direction: "out",
+        type: "text",
+        channel: "whatsapp",
+        body: text,
+        at: new Date().toISOString(),
+        status: "sent",
+        replyTo: replyId,
+      };
+      // Mostra na hora e libera o campo para a próxima mensagem.
+      setBody("");
+      clearReply();
+      conversationActions.pushOptimistic(optimistic);
       const res = await whatsappActions.send({
         conversationId,
         channelId: conversation?.channelId,
         text,
-        replyTo: replyTarget?.id,
+        replyTo: replyId,
       });
-      setSending(false);
+      conversationActions.dropOptimistic(tempId);
       if (res.ok) {
-        setBody("");
-        clearReply();
         conversationActions.pushSent(res.message);
-        toast.success("Mensagem enviada via WhatsApp");
       } else if (res.needsTemplate) {
+        setBody(text); // devolve o texto para o usuário
         setTemplateForced(true);
         setTemplateOpen(true);
       } else {
+        setBody(text);
         toast.error(res.error ?? "Não foi possível enviar");
       }
       return;

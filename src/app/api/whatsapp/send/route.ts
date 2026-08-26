@@ -21,15 +21,6 @@ export async function POST(request: Request) {
   } = await supabase.auth.getUser();
   if (!user) return Response.json({ error: "Não autenticado" }, { status: 401 });
 
-  // Nome do atendente que está enviando — vai como prefixo na mensagem para o
-  // cliente saber com quem está falando (ex.: "*Jenifer:* Olá!").
-  const { data: prof } = await supabase
-    .from("profiles")
-    .select("name")
-    .eq("id", user.id)
-    .maybeSingle();
-  const senderName = (prof?.name ?? "").trim();
-
   let body: any;
   try {
     body = await request.json();
@@ -39,71 +30,75 @@ export async function POST(request: Request) {
   const { conversationId, channelId, text, template, replyTo } = body ?? {};
   if (!conversationId) return Response.json({ error: "conversationId ausente" }, { status: 400 });
 
-  // conversa (RLS filtra por membership)
-  const { data: conv } = await supabase
-    .from("conversations")
-    .select("id, contact_id, location_id, channel_id")
-    .eq("id", conversationId)
-    .maybeSingle();
-  if (!conv) return Response.json({ error: "Conversa não encontrada" }, { status: 404 });
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
 
-  const { data: channel } = await supabase
-    .from("whatsapp_channels")
-    .select("*")
-    .eq("id", channelId ?? conv.channel_id)
-    .maybeSingle();
+  // Leituras independentes em PARALELO (antes eram ~7 em sequência, cada uma um
+  // round-trip somando latência ao Enviar): perfil (nome do remetente), conversa,
+  // última entrada (janela 24h), mensagem citada e — se veio no payload — o canal.
+  const [profRes, convRes, lastInRes, replyRes, channelParamRes] = await Promise.all([
+    supabase.from("profiles").select("name").eq("id", user.id).maybeSingle(),
+    supabase
+      .from("conversations")
+      .select("id, contact_id, location_id, channel_id")
+      .eq("id", conversationId)
+      .maybeSingle(),
+    supabase
+      .from("messages")
+      .select("created_at")
+      .eq("conversation_id", conversationId)
+      .eq("direction", "in")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    replyTo
+      ? supabase.from("messages").select("id, wa_message_id").eq("id", replyTo).maybeSingle()
+      : Promise.resolve({ data: null } as any),
+    channelId
+      ? supabase.from("whatsapp_channels").select("*").eq("id", channelId).maybeSingle()
+      : Promise.resolve({ data: null } as any),
+  ]);
+
+  const conv = convRes.data;
+  if (!conv) return Response.json({ error: "Conversa não encontrada" }, { status: 404 });
+  const senderName = (profRes.data?.name ?? "").trim();
+
+  // Canal: veio no payload (caso comum) → já temos; senão busca o da conversa.
+  let channel = channelParamRes.data;
+  if (!channel) {
+    const r = await supabase
+      .from("whatsapp_channels")
+      .select("*")
+      .eq("id", conv.channel_id)
+      .maybeSingle();
+    channel = r.data;
+  }
   if (!channel || !channel.active) {
     return Response.json({ error: "Canal de WhatsApp inválido ou inativo" }, { status: 400 });
   }
 
-  const { data: contact } = await supabase
-    .from("contacts")
-    .select("phone")
-    .eq("id", conv.contact_id)
-    .maybeSingle();
-  const to = toWhatsAppNumber(contact?.phone);
+  // Contato + limite diário em paralelo (ambos dependem só do que já temos).
+  const [contactRes, countRes] = await Promise.all([
+    supabase.from("contacts").select("phone").eq("id", conv.contact_id).maybeSingle(),
+    supabase
+      .from("messages")
+      .select("id", { count: "exact", head: true })
+      .eq("channel_id", channel.id)
+      .eq("direction", "out")
+      .gte("created_at", startOfDay.toISOString()),
+  ]);
+  const to = toWhatsAppNumber(contactRes.data?.phone);
   if (!to) return Response.json({ error: "Contato sem telefone" }, { status: 400 });
-
-  // limite diário (conta saídas do canal hoje)
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
-  const { count } = await supabase
-    .from("messages")
-    .select("id", { count: "exact", head: true })
-    .eq("channel_id", channel.id)
-    .eq("direction", "out")
-    .gte("created_at", startOfDay.toISOString());
-  if ((count ?? 0) >= channel.daily_limit) {
+  if ((countRes.count ?? 0) >= channel.daily_limit) {
     return Response.json({ error: "Limite diário do canal atingido" }, { status: 429 });
   }
 
-  // janela de 24h = última mensagem de entrada
-  const { data: lastIn } = await supabase
-    .from("messages")
-    .select("created_at")
-    .eq("conversation_id", conversationId)
-    .eq("direction", "in")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
   const within24h =
-    !!lastIn && Date.now() - new Date(lastIn.created_at).getTime() < DAY_MS;
+    !!lastInRes.data && Date.now() - new Date(lastInRes.data.created_at).getTime() < DAY_MS;
 
-  // Responder (0077): resolve a mensagem citada. Guarda o id local (para gravar
-  // o vínculo) e o id na Meta (para o WhatsApp mostrar a citação ao cliente).
-  let replyToLocal: string | null = null;
-  let replyToWaId: string | null = null;
-  if (replyTo) {
-    const { data: target } = await supabase
-      .from("messages")
-      .select("id, wa_message_id")
-      .eq("id", replyTo)
-      .maybeSingle();
-    if (target) {
-      replyToLocal = target.id;
-      replyToWaId = target.wa_message_id ?? null;
-    }
-  }
+  // Responder (0077): id local (grava o vínculo) e id na Meta (citação no WhatsApp).
+  const replyToLocal: string | null = replyRes.data?.id ?? null;
+  const replyToWaId: string | null = replyRes.data?.wa_message_id ?? null;
 
   let waResp: any;
   let bodyText: string;

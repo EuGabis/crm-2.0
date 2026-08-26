@@ -641,6 +641,18 @@ export const conversationActions = {
     if (!s.messages.some((x) => x.id === m.id)) s.patch({ messages: [...s.messages, m] });
   },
 
+  /** Adiciona uma mensagem OTIMISTA (aparece na hora, antes do servidor confirmar). */
+  pushOptimistic(m: Message): void {
+    const s = useConvStore.getState();
+    s.patch({ messages: [...s.messages, m] });
+  },
+
+  /** Remove uma mensagem só do store pelo id (troca a otimista pela real). */
+  dropOptimistic(id: string): void {
+    const s = useConvStore.getState();
+    s.patch({ messages: s.messages.filter((m) => m.id !== id) });
+  },
+
   /**
    * Envia uma mídia (imagem, arquivo ou áudio): sobe o binário para o bucket
    * privado e cria a mensagem com os metadados. `duration` só para áudio.
