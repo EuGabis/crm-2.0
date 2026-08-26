@@ -7,7 +7,6 @@ import {
   Archive,
   CalendarDays,
   Check,
-  ClipboardList,
   CheckCheck,
   CheckCircle2,
   CornerUpLeft,
@@ -46,7 +45,6 @@ import {
   useConversation,
   useConvStore,
   useMessages,
-  useLastHandoffSummary,
   useMessagesLoading,
   useReplyStore,
 } from "@/lib/data/repos/db/conversations";
@@ -770,51 +768,6 @@ function MessageBubble({
  * e quando, com o caminho de volta ao lado (migração 0029). Sem isso, abrir uma
  * conversa finalizada dá a impressão de que ela ainda está na fila.
  */
-/**
- * Resumo do último atendimento, no topo da conversa.
- *
- * É o ponto da feature: quem abre a conversa — outro atendente que assumiu, ou
- * quem atende o cliente que voltou a chamar meses depois — lê em duas linhas o
- * que já foi tratado, sem rolar o histórico. Fica ACIMA das mensagens de
- * propósito; como nota no meio do fio, em conversa longa ninguém acha.
- */
-function HandoffBanner({
-  resumo,
-  aberto,
-  onToggle,
-}: {
-  resumo: { body: string; kind: string; createdAt: string; autor: string };
-  aberto: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <div className="border-b border-amber-200 bg-amber-50/70 px-4 py-2">
-      <button onClick={onToggle} className="flex w-full items-center gap-2 text-left">
-        <ClipboardList className="size-3.5 shrink-0 text-amber-600" />
-        <span className="min-w-0 flex-1">
-          <span className="block text-[11px] font-bold uppercase tracking-wide text-amber-700">
-            Resumo do último atendimento
-          </span>
-          <span className="block text-[10px] text-amber-600/80">
-            {resumo.kind === "transferencia" ? "ao transferir" : "ao finalizar"} · {resumo.autor} ·{" "}
-            {format(new Date(resumo.createdAt), "d 'de' MMM, HH:mm", { locale: ptBR })}
-          </span>
-        </span>
-        <span className="shrink-0 text-[10px] font-medium text-amber-700">
-          {aberto ? "recolher" : "ver"}
-        </span>
-      </button>
-      {aberto && (
-        // `whitespace-pre-line`: o resumo pode vir em várias linhas, e no HTML
-        // quebra de linha conta como espaço.
-        <p className="mt-1.5 whitespace-pre-line pl-5 text-xs leading-relaxed text-amber-900">
-          {resumo.body}
-        </p>
-      )}
-    </div>
-  );
-}
-
 function StatusBanner({ conversation }: { conversation: Conversation }) {
   const { members } = useTeam();
   if (!conversation.closedAt && !conversation.archivedAt) return null;
@@ -895,11 +848,6 @@ export function Thread({
    */
   const [confirmStatus, setConfirmStatus] = useState<"finalizar" | "arquivar" | null>(null);
   const [statusBusy, setStatusBusy] = useState(false);
-  const { resumo: resumoAnterior, recarregar: recarregarResumo } =
-    useLastHandoffSummary(conversationId);
-  // A faixa começa ABERTA: o objetivo é que quem assume não precise procurar. O
-  // recolher existe para conversa longa em que a pessoa já leu.
-  const [resumoAberto, setResumoAberto] = useState(true);
 
   const applyStatus = async (resumo?: string) => {
     if (!conversation || !confirmStatus) return;
@@ -907,8 +855,9 @@ export function Thread({
     // O resumo vai ANTES de fechar: a nota pertence ao atendimento que está
     // sendo encerrado, e o Realtime já a coloca no thread.
     if (resumo?.trim()) {
+      // Sem recarregar nada aqui: o resumo agora vive na aba lateral, que busca
+      // ao ser aberta. Recarregar de dentro do thread seria estado morto.
       await conversationActions.saveHandoffSummary(conversation.id, "finalizacao", resumo);
-      recarregarResumo();
     }
     const ok =
       confirmStatus === "finalizar"
@@ -1181,13 +1130,6 @@ export function Thread({
           </Dialog>
         </div>
       </div>
-      {resumoAnterior && (
-        <HandoffBanner
-          resumo={resumoAnterior}
-          aberto={resumoAberto}
-          onToggle={() => setResumoAberto((v) => !v)}
-        />
-      )}
       <StatusBanner conversation={conversation} />
       <div
         ref={scrollRef}
