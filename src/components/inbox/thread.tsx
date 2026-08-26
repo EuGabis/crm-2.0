@@ -15,7 +15,6 @@ import {
   Loader2,
   Mail,
   Pause,
-  Phone,
   Play,
   Star,
   Trash2,
@@ -52,7 +51,6 @@ import { useMyMembership, useTeam } from "@/lib/data/repos/db/team";
 import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
 import type { Conversation, Message } from "@/lib/data/types";
 import { cn } from "@/lib/utils";
-import { telHref } from "@/lib/phone";
 
 /** Responsável pelo atendimento — grava em `conversations.assigned_to` (0024). */
 function AssignPicker({
@@ -912,22 +910,6 @@ export function Thread({
             )}
           >
             <Archive className="size-4" />
-          </button>
-          <button
-            onClick={() => {
-              if (!contact.phone?.trim()) {
-                toast.error("Contato sem telefone cadastrado");
-                return;
-              }
-              // Quem liga é o discador do APARELHO. O webphone do CRM foi
-              // removido: prometia ligação e não completava nenhuma, porque
-              // nunca houve provedor de voz conectado.
-              window.location.href = telHref(contact.phone);
-            }}
-            title="Ligar para este número"
-            className="flex items-center gap-1.5 rounded-full bg-[var(--lito-wa-green)] px-3 py-1 text-xs font-bold text-white hover:opacity-90"
-          >
-            <Phone className="size-3.5" /> Ligar
           </button>
           <button
             onClick={() => conversationActions.star(conversation.id)}

@@ -1336,11 +1336,17 @@ tela de configuração que ninguém usava. Removido junto porque a página era o
 ÚNICO consumidor dos dois arquivos — mesma decisão do Canva: código morto sai, o
 histórico do git guarda.
 
-⚠️ **O botão verde "Ligar" continua funcionando** no cabeçalho da conversa e no
-card do funil. Ele nunca dependeu do webphone: usa `telHref()` de
-**`src/lib/phone.ts`** (que FICA), abrindo o discador do próprio aparelho.
-Se um dia entrar provedor de voz, é `git revert` neste commit — mas repare que o
-que faltava nunca foi a interface, era o provedor.
+O botão verde **"Ligar" saiu também do cabeçalho da conversa** (2026-08-26): sem
+provedor de voz, o CRM não tem o que oferecer ali. Ele nunca dependeu do
+webphone — usava `telHref()` para abrir o discador do aparelho.
+
+⚠️ **Ainda existe um botão de ligar no CARD DO FUNIL** (`opportunity-card.tsx`),
+pelo mesmo `telHref()`. Foi mantido porque o pedido foi sobre a barra da
+conversa; se ele também sair, `src/lib/phone.ts` fica sem nenhum consumidor e
+pode ir junto.
+
+Se um dia entrar provedor de voz, é `git revert` nesses commits — mas repare que
+o que faltava nunca foi a interface, era o provedor.
 
 ## Análise IA: histórico das perguntas (sem migração)
 
