@@ -198,6 +198,28 @@ export function useReplyTarget(conversationId: string): Message | null {
 }
 
 /**
+ * "Abrir o seletor de template" ao entrar numa conversa — acionado de fora do
+ * composer (ex.: botão "Enviar template" no relatório de conversas quando a
+ * janela de 24h está fechada). O composer consome e limpa ao montar.
+ */
+interface TemplateIntentState {
+  conversationId: string | null;
+  request: (conversationId: string) => void;
+  consume: (conversationId: string) => boolean;
+}
+export const useTemplateIntentStore = create<TemplateIntentState>((set, get) => ({
+  conversationId: null,
+  request: (conversationId) => set({ conversationId }),
+  consume: (conversationId) => {
+    if (get().conversationId === conversationId) {
+      set({ conversationId: null });
+      return true;
+    }
+    return false;
+  },
+}));
+
+/**
  * Assina o Realtime da caixa de entrada — e pode ser chamada DE NOVO.
  *
  * O `.subscribe()` original só tratava `SUBSCRIBED`. Quando o websocket morre

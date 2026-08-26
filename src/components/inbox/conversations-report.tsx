@@ -4,11 +4,16 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Download, Loader2, MessageSquare, Send, User, UserCheck } from "lucide-react";
+import { Download, LayoutTemplate, Loader2, MessageSquare, Send, User, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { contactName } from "@/lib/data/repos/contacts";
 import { useDbContacts } from "@/lib/data/repos/db/contacts";
-import { conversationActions, useConversations, useConvStore } from "@/lib/data/repos/db/conversations";
+import {
+  conversationActions,
+  useConversations,
+  useConvStore,
+  useTemplateIntentStore,
+} from "@/lib/data/repos/db/conversations";
 import { useIsSupervisor, useSectorConversations, sectorActions } from "@/lib/data/repos/db/sector";
 import { useMyMembership, useTeam } from "@/lib/data/repos/db/team";
 import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
@@ -51,6 +56,8 @@ interface Row {
   inicio: string | null;
   channelId: string | null;
   assignedToId: string | null;
+  /** Janela de 24h aberta? (última entrada < 24h). WhatsApp only. */
+  windowOpen: boolean;
 }
 
 /** Status a partir de campos soltos (usado na visão de setor, sem o objeto Conversation). */
@@ -144,6 +151,21 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
     for (const m of messages) if (m.direction === "in") s.add(m.conversationId);
     return s;
   }, [messages]);
+  // Última mensagem de ENTRADA por conversa (as recentes já estão no store). Base
+  // da janela de 24h: janela aberta = houve entrada há menos de 24h.
+  const lastInAt = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const msg of messages) {
+      if (msg.direction !== "in") continue;
+      const t = new Date(msg.at).getTime();
+      if (t > (m.get(msg.conversationId) ?? 0)) m.set(msg.conversationId, t);
+    }
+    return m;
+  }, [messages]);
+  const isWindowOpen = (convId: string) => {
+    const t = lastInAt.get(convId);
+    return !!t && Date.now() - t < 24 * 60 * 60 * 1000;
+  };
 
   const rows: Row[] = useMemo(() => {
     // SUPERVISOR: monta a partir das conversas do SETOR (todas, de todos os
@@ -166,6 +188,7 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
           inicio: c.createdAt ?? c.lastMessageAt ?? null,
           channelId: c.channelId,
           assignedToId: c.assignedTo,
+          windowOpen: isWindowOpen(c.id),
         };
       });
     }
@@ -190,9 +213,11 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
         inicio: c.createdAt ?? c.lastMessageAt ?? null,
         channelId: c.channelId ?? null,
         assignedToId: c.assignedTo ?? null,
+        windowOpen: isWindowOpen(c.id),
       };
     });
-  }, [isSupervisor, sectorConvs, conversations, contactMap, channelMap, memberMap, inboundSet]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSupervisor, sectorConvs, conversations, contactMap, channelMap, memberMap, inboundSet, lastInAt]);
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -426,6 +451,25 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
                 </td>
                 <td className="whitespace-nowrap px-3 py-2">
                   <div className="flex items-center gap-1">
+                    {/* Estado da janela de 24h (só WhatsApp). Verde = aberta,
+                        âmbar = fechada (só template retoma). */}
+                    <span
+                      title={
+                        !r.channelId
+                          ? "—"
+                          : r.windowOpen
+                            ? "Janela de 24h aberta"
+                            : "Janela de 24h fechada — só template"
+                      }
+                      className={cn(
+                        "mr-0.5 size-2 shrink-0 rounded-full",
+                        !r.channelId
+                          ? "bg-slate-300"
+                          : r.windowOpen
+                            ? "bg-emerald-500"
+                            : "bg-amber-500"
+                      )}
+                    />
                     <Link
                       href={`/contatos/${r.contactId}`}
                       title="Abrir contato"
@@ -441,6 +485,19 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
                     >
                       <MessageSquare className="size-3.5" />
                     </button>
+                    {!r.windowOpen && r.channelId && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          useTemplateIntentStore.getState().request(r.id);
+                          onOpen?.(r.id);
+                        }}
+                        title="Janela de 24h fechada — enviar template"
+                        className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium text-amber-600 hover:bg-amber-50 hover:text-amber-700"
+                      >
+                        <LayoutTemplate className="size-3.5" /> Template
+                      </button>
+                    )}
                     {isSupervisor && r.assignedToId !== me?.userId && (
                       <button
                         type="button"

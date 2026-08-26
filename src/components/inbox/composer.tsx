@@ -47,6 +47,7 @@ import {
   useReplyStore,
   useReplyTarget,
   useSnippets,
+  useTemplateIntentStore,
 } from "@/lib/data/repos/db/conversations";
 import { whatsappActions } from "@/lib/data/repos/db/whatsapp";
 import { TemplatePicker } from "@/components/whatsapp/template-picker";
@@ -132,6 +133,17 @@ export function Composer({ conversationId }: { conversationId: string }) {
   useEffect(() => {
     clearReply();
   }, [conversationId, clearReply]);
+
+  // "Enviar template" vindo do relatório (janela de 24h fechada): abre o seletor
+  // de template ao entrar na conversa.
+  const templateIntentConv = useTemplateIntentStore((s) => s.conversationId);
+  useEffect(() => {
+    if (templateIntentConv && templateIntentConv === conversationId) {
+      useTemplateIntentStore.getState().consume(conversationId);
+      setTemplateForced(true);
+      setTemplateOpen(true);
+    }
+  }, [conversationId, templateIntentConv]);
   const messages = useMessages(conversationId);
 
   /**
