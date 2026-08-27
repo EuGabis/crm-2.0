@@ -22,6 +22,7 @@ import {
   Zap,
 } from "lucide-react";
 import { toast } from "sonner";
+import { inspecionarAudio, resumoDaInspecao } from "@/lib/whatsapp/audio";
 import OpusMediaRecorder from "opus-media-recorder";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -113,35 +114,6 @@ function msgSnippet(m: Message): string {
  * Mono também é o certo para recado de voz por si só: metade dos bytes, e voz
  * captada por um microfone não tem informação estéreo nenhuma para preservar.
  */
-/**
- * Lê quantos canais o arquivo OGG/Opus REALMENTE tem.
- *
- * As duas camadas de `microfoneMono` deveriam bastar, mas "deveria" não é
- * conferência: quem decide o número de canais é o microfone, o navegador e o
- * encoder, e nenhum dos três é nosso. Como a Meta só reclama DEPOIS (assíncrono,
- * pelo webhook de status), sem esta leitura um estéreo que escapasse voltaria a
- * ser um "falhou" sem explicação — o problema que acabou de ser resolvido.
- *
- * O `OpusHead` é o primeiro pacote do fluxo e o campo de canais é o byte 9 dele
- * (magia de 8 bytes + 1 de versão). Procuro a magia nos primeiros 200 bytes em
- * vez de assumir posição fixa, porque antes dela vem o cabeçalho da página Ogg,
- * cujo tamanho varia com a tabela de segmentos.
- *
- * Devolve `null` quando não achou o cabeçalho — aí é melhor não afirmar nada.
- */
-async function canaisDoOpus(blob: Blob): Promise<number | null> {
-  try {
-    const buf = new Uint8Array(await blob.slice(0, 200).arrayBuffer());
-    const magia = [0x4f, 0x70, 0x75, 0x73, 0x48, 0x65, 0x61, 0x64]; // "OpusHead"
-    for (let i = 0; i + magia.length + 1 < buf.length; i++) {
-      if (magia.every((b, k) => buf[i + k] === b)) return buf[i + 9] ?? null;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 async function microfoneMono(): Promise<{ stream: MediaStream; encerrar: () => void }> {
   const bruto = await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: { ideal: 1 }, sampleRate: { ideal: 48000 } },
@@ -367,16 +339,21 @@ export function Composer({ conversationId }: { conversationId: string }) {
         const secs = Math.max(1, Math.round((Date.now() - startedRef.current) / 1000));
         const blob = new Blob(chunksRef.current, { type: "audio/ogg" });
         const file = new File([blob], `audio-${secs}s.ogg`, { type: "audio/ogg" });
-        // Avisa, mas NÃO bloqueia: o mono é a explicação mais provável da recusa
-        // da Meta, não uma certeza. Travar o envio por causa de uma hipótese
-        // tiraria o áudio de quem talvez estivesse funcionando; o aviso dá o
-        // sinal e o motivo real, se houver recusa, agora fica gravado no balão.
-        const canais = await canaisDoOpus(blob);
-        if (canais !== null && canais > 1) {
-          console.warn(`[audio] gravado com ${canais} canais; o WhatsApp aceita só mono`);
-          toast.warning("O áudio saiu em estéreo e o WhatsApp pode recusar", {
-            description: "Se falhar, avise o suporte — é o microfone reportando 2 canais.",
-          });
+        /*
+         * Mesma inspeção que a rota faz nos bytes (`lib/whatsapp/audio.ts`), aqui
+         * só para avisar antes da viagem — a decisão de recusar é do servidor,
+         * que é quem grava o motivo no balão.
+         *
+         * ⚠️ A versão anterior desta checagem tinha um furo: era
+         * `if (canais !== null && canais > 1)`, então "não achei o cabeçalho
+         * OpusHead" (null) passava CALADO, indistinguível de mono — um arquivo
+         * WebM ou WAV não disparava aviso nenhum. `inspecionarAudio` nomeia esse
+         * caso em vez de devolver ausência de resultado.
+         */
+        const insp = inspecionarAudio(await blob.arrayBuffer());
+        if (!insp.aceitavel) {
+          console.warn(`[audio] ${insp.motivo} — ${resumoDaInspecao(insp)}`);
+          toast.warning(insp.motivo);
         }
         setUploading(true);
         const res = await conversationActions.sendMedia(conversationId, {

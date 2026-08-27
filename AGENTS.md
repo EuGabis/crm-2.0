@@ -1703,6 +1703,55 @@ De passagem: o microfone ficava ABERTO se a construção do gravador estourasse
 depois do `getUserMedia` (o `catch` não parava o track), deixando o indicador de
 gravação do navegador aceso sem nada gravando.
 
+## Áudio: "Media upload error" é CATEGORIA, não motivo (2026-08-27)
+
+Terceira rodada no mesmo sintoma, e a lição é sobre diagnóstico. O print do
+atendente trouxe dois fatos que fecharam o cerco:
+
+1. **o toast VERDE "Áudio enviado" apareceu** — e ele só aparece quando `wa.ok`,
+   logo a rota devolveu 200: upload E envio ACEITOS pela Meta;
+2. **o aviso de estéreo NÃO apareceu** — o arquivo estava mono.
+
+Ou seja: a hipótese do estéreo (seção acima) **não era a causa**. A correção do
+mono fica porque mono é o certo para recado de voz e a Meta exige, mas não era
+ela.
+
+⚠️ **`errors[0].title` é a CATEGORIA do erro, não o motivo — e era só ele que o
+webhook guardava.** "Media upload error" (131053) cobre arquivo vazio, codec
+errado, canais demais e tamanho, sem distinguir nenhum. O motivo específico vem
+em **`error_data.details`**, e era exatamente esse campo que se perdia. Isso
+custou rodadas de investigação: cada correção parecia não funcionar porque a
+mensagem de erro era a mesma para causas diferentes. O webhook agora grava
+`details · title · message · #código`, do mais específico para o mais genérico.
+
+⚠️ **Furo na minha própria checagem, que mascarava o caso mais provável.** A
+verificação no navegador era `if (canais !== null && canais > 1)`: o `null` —
+"não achei o cabeçalho OpusHead" — passava CALADO, **indistinguível de mono**. Um
+arquivo WebM ou WAV (que é o que sai se o codificador Opus não carregar) não
+disparava aviso nenhum, e eu li "sem aviso" como "está mono". Ausência de
+resultado nunca deve ser tratada como resultado bom.
+
+**`src/lib/whatsapp/audio.ts`** (`inspecionarAudio`) passa a nomear cada caso:
+vazio · contêiner ≠ ogg · ogg sem OpusHead · canais > 1 · aceitável. O contêiner
+sai dos BYTES DE ASSINATURA (OggS, EBML, RIFF/WAVE, ftyp, ID3), não do mime
+declarado — que é justamente o que pode estar mentindo. Testado com 11 casos
+sintéticos.
+
+⚠️ **A rota confere ANTES de mandar** (`kind === "audio"` → 422 com motivo
+específico) porque a Meta mente sobre o momento da recusa: aceitar o upload e
+recusar depois faz o toast dizer "enviado" e o balão dizer "falhou" na mesma
+tela. Conferindo aqui, o motivo é específico, verificável e não custa a viagem.
+**Inconclusivo NÃO bloqueia** — `inspecionarAudio` só reprova o que dá para
+afirmar pelos bytes.
+
+O módulo é UM e serve os dois lados (rota e composer): duas cópias da tabela de
+assinaturas divergiriam na primeira mudança.
+
+⏳ **Ainda não sabemos a causa raiz.** O que existe agora é o instrumento: na
+próxima tentativa, ou a rota recusa dizendo exatamente o que o arquivo é, ou a
+Meta responde com `error_data.details`. Os dois logam (`[send-media] áudio ...` e
+`[webhook] falha em ...`) para leitura nos logs da Vercel.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em

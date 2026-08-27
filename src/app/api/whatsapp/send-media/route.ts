@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { uploadMedia, sendMediaMessage } from "@/lib/whatsapp/client";
+import { inspecionarAudio, resumoDaInspecao } from "@/lib/whatsapp/audio";
 import { toWhatsAppNumber } from "@/lib/whatsapp/phone";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -152,6 +153,28 @@ export async function POST(request: Request) {
   const bytes = await blob.arrayBuffer();
   const sendBytes = bytes;
   const sendMime = mime || blob.type || "application/octet-stream";
+
+  /*
+   * ⚠️ **Conferir o áudio ANTES de mandar, porque a Meta mente sobre o momento
+   * da recusa.** Ela aceita o upload, devolve 200 com id de mensagem — o toast
+   * chegava a dizer "Áudio enviado" — e só recusa DEPOIS, ao processar, num
+   * webhook de status cujo `errors[0].title` é "Media upload error": um rótulo de
+   * CATEGORIA que não diz o que está errado.
+   *
+   * Lendo os bytes aqui, a recusa passa a ter motivo específico e verificável,
+   * gravado em `error_detail`, sem pagar a ida à Meta para receber um rótulo
+   * genérico de volta.
+   *
+   * Inconclusivo NÃO bloqueia: `inspecionarAudio` só reprova o que dá para
+   * afirmar pelos bytes (vazio, contêiner errado, sem Opus, canais > 1).
+   */
+  if (kind === "audio") {
+    const insp = inspecionarAudio(bytes);
+    console.log(`[send-media] áudio ${messageId}: ${resumoDaInspecao(insp)}`);
+    if (!insp.aceitavel) {
+      return recusar(`${insp.motivo} (${resumoDaInspecao(insp)})`, 422);
+    }
+  }
 
   let waResp: any;
   try {
