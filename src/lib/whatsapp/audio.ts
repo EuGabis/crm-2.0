@@ -122,3 +122,75 @@ export function inspecionarAudio(bytes: ArrayBuffer): InspecaoDeAudio {
 export function resumoDaInspecao(i: InspecaoDeAudio): string {
   return `container=${i.container} canais=${i.canais ?? "?"} taxa=${i.taxa ?? "?"} bytes=${i.bytes}`;
 }
+
+/* ------------------------------------------------------------------ *
+ * O mime que declaramos para a Meta
+ * ------------------------------------------------------------------ */
+
+/** Assinatura de bytes -> mime que a Cloud API aceita, sem parâmetros. */
+const MIME_POR_CONTAINER: Partial<Record<InspecaoDeAudio["container"], string>> = {
+  ogg: "audio/ogg",
+  mp3: "audio/mpeg",
+  mp4: "audio/mp4",
+  // `webm` e `wav` de propósito FORA: a Cloud API não aceita nenhum dos dois em
+  // áudio, e mapeá-los só trocaria a recusa da Meta por outra recusa da Meta.
+};
+
+/**
+ * Tira os parâmetros de um mime: `audio/ogg; codecs=opus` -> `audio/ogg`.
+ *
+ * ⚠️ **Foi exatamente isto que a Meta recusou**, e ela disse com todas as
+ * letras: "uploaded with mimetype as audio/ogg; codecs=opus, however on
+ * processing it is of type application/octet-stream". A lista de tipos aceitos
+ * da Cloud API tem `audio/ogg`, não a forma com parâmetro — e com o parâmetro
+ * ela não reconhece o arquivo, cai em `application/octet-stream` e acusa
+ * divergência entre o declarado e o real.
+ */
+export function mimeSemParametros(mime: string): string {
+  return mime.split(";")[0]!.trim().toLowerCase();
+}
+
+/**
+ * Mime a declarar no upload, **derivado dos BYTES** quando dá para reconhecê-los.
+ *
+ * ⚠️ A queixa da Meta é sobre DIVERGÊNCIA entre o tipo declarado e o conteúdo.
+ * Enquanto o valor declarado vem do cliente (`file.type` do navegador, guardado
+ * no Storage e devolvido no corpo da requisição), essa divergência é sempre
+ * possível: basta um navegador anotar o tipo de um jeito, um bundle antigo em
+ * cache, ou um arquivo renomeado à mão. Derivando do próprio conteúdo, a
+ * divergência deixa de existir por construção — não é conserto de um caso, é a
+ * remoção da classe inteira.
+ *
+ * O declarado ainda serve de reserva para o que não sabemos farejar (PDF, DOCX,
+ * imagem), mas SEM parâmetros: tirar o `; codecs=...` é correto em qualquer
+ * caso, porque a Cloud API compara com uma lista de tipos sem parâmetro.
+ */
+export function mimeParaUpload(
+  bytes: ArrayBuffer,
+  mimeDeclarado: string,
+  /** `true` quando a mensagem é do tipo áudio, mesmo que o mime não diga. */
+  ehAudio = false,
+): string {
+  const limpo = mimeSemParametros(mimeDeclarado) || "application/octet-stream";
+  /*
+   * ⚠️ Farejar também quando o declarado é `application/octet-stream` ou vazio
+   * fecha um furo que a primeira versão desta função tinha: a condição era só
+   * `limpo.startsWith("audio/")`, então um OGG legítimo cujo mime tinha se
+   * perdido no caminho (corpo sem `mime`, ou Storage devolvendo genérico) era
+   * enviado à Meta COMO octet-stream — a divergência exata que ela recusa. O
+   * teste com "ogg real, declarado octet" foi o que mostrou isso.
+   *
+   * `ehAudio` vem do `kind` da mensagem, que é a intenção do usuário e não
+   * depende de nenhum mime ter sobrevivido à viagem.
+   */
+  const valeFarejar =
+    ehAudio || limpo.startsWith("audio/") || limpo === "application/octet-stream" || !limpo;
+  if (valeFarejar) {
+    const container = containerDe(new Uint8Array(bytes.slice(0, 400)));
+    const porBytes = MIME_POR_CONTAINER[container];
+    // Só reescreve quando a assinatura é CONCLUSIVA: palpite nosso por cima de
+    // um mime declarado correto trocaria um erro por outro.
+    if (porBytes) return porBytes;
+  }
+  return limpo;
+}
