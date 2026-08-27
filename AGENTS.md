@@ -1809,6 +1809,21 @@ que é o que separa "o CRM declarou errado" de "a Meta recusou o arquivo certo".
 De quebra a coluna ficou verdadeira: ela guardava `file.type` do navegador, e foi
 exatamente essa alegação que se provou errada.
 
+⚠️ **A limpeza do mime foi repetida DENTRO de `uploadMedia`** (não só em
+`mimeParaUpload`, na rota). Não é redundância descuidada: essa é a única função
+que fala com o endpoint de mídia da Meta, então é ali que o contrato dela pode ser
+garantido para QUALQUER chamador — inclusive o próximo, que não vai lembrar da
+regra. Provado com teste que intercepta o `fetch` e lê o multipart: entrando
+`audio/ogg; codecs=opus`, `audio/ogg;codecs=opus`, `AUDIO/OGG` ou vazio, o campo
+`type` E o Content-Type da parte do arquivo saem sempre sem parâmetro (5/5).
+
+⚠️ **O log do `send-media` carrega o COMMIT** (`VERCEL_GIT_COMMIT_SHA`). Esta
+investigação voltou duas vezes ao mesmo ponto por não haver como saber, olhando o
+log, se o código no ar já tinha a correção. Com o SHA na linha, "é velho ou é
+novo?" deixa de ser dedução. ⚠️ **O log do WEBHOOK não serve para isso**: ele é o
+mensageiro da recusa, não quem enviou — o log que importa é o do `send-media`,
+alguns segundos ANTES.
+
 **Para saber se uma falha é velha ou nova:**
 ```sql
 select m.created_at, m.media_mime, m.status, left(m.error_detail, 80) as motivo

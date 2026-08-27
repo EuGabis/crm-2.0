@@ -172,10 +172,23 @@ export async function uploadMedia(
   mime: string,
   filename: string,
 ): Promise<string> {
+  /*
+   * ⚠️ **O mime é limpo AQUI, e não só em quem chama.** A Cloud API compara o
+   * tipo declarado com uma lista SEM parâmetros; recebendo
+   * `audio/ogg; codecs=opus` ela não reconhece o arquivo, cai em
+   * `application/octet-stream` e recusa com #131053 — a falha que voltou quatro
+   * vezes neste projeto.
+   *
+   * Já existe normalização na rota (`mimeParaUpload`), e ainda assim vale
+   * repetir na fronteira: esta é a única função que fala com o endpoint de
+   * mídia da Meta, então é aqui que o contrato dela pode ser garantido para
+   * QUALQUER chamador — inclusive o próximo, que não vai lembrar da regra.
+   */
+  const mimeLimpo = mime.split(";")[0]!.trim().toLowerCase() || "application/octet-stream";
   const form = new FormData();
   form.append("messaging_product", "whatsapp");
-  form.append("type", mime);
-  form.append("file", new Blob([bytes], { type: mime }), filename);
+  form.append("type", mimeLimpo);
+  form.append("file", new Blob([bytes], { type: mimeLimpo }), filename);
   // Token no query string (não no header). Numa requisição multipart (FormData) o
   // header Authorization estava sendo descartado, e a Meta respondia #190/HTTP 401
   // "Authentication Error" como se não houvesse token. O access_token na URL é o
