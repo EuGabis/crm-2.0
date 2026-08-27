@@ -1833,6 +1833,43 @@ select m.created_at, m.media_mime, m.status, left(m.error_detail, 80) as motivo
 -- media_mime com "; codecs=" = tentativa ANTIGA, de antes da correção.
 ```
 
+## `GET /api/version` — qual código está no ar
+
+⚠️ **Nasceu de uma investigação que voltou CINCO vezes ao mesmo ponto.** O áudio
+recusado pela Meta (#131053) foi corrigido, mesclado na `main`, e o erro continuou
+aparecendo com o texto ANTIGO. Sem saber qual commit estava em produção, três
+situações completamente diferentes ficavam indistinguíveis:
+
+1. a correção não funcionou;
+2. a correção **não foi para produção** — risco que este arquivo já documenta:
+   `vercel deploy` local, ou "Promote to Production" de um commit atrasado,
+   sobrescrevem a produção com código velho;
+3. a falha lida na tela era **antiga** — a recusa da Meta chega pelo webhook, de
+   forma assíncrona, e fica em `error_detail` até ser sobrescrita, então um balão
+   aberto hoje mostra o motivo da tentativa de ontem.
+
+Deduzir entre as três custou rodadas de ida e volta. Agora é uma conferência de
+dois segundos: abra `https://lito-crm.vercel.app/api/version` logado.
+
+⚠️ **404 ali JÁ É a resposta**: o código no ar é anterior a esta rota.
+
+O objeto traz `commit`, `branch`, `mensagem`, `ambiente` e um bloco `correcoes`
+com marcadores LITERAIS (`true` fixo no arquivo) das correções cuja ausência é
+difícil de perceber pela tela. Ao consertar algo que gere a dúvida "isso subiu?",
+acrescente uma linha ali.
+
+⚠️ **O log do WEBHOOK não responde essa pergunta** — ele é o mensageiro da
+recusa, não quem enviou. E a sequência de chamadas externas do `send-media`
+também não serve de pista: ela é IDÊNTICA no código antigo e no novo, porque a
+inspeção de bytes acontece em memória e não gera chamada.
+
+⚠️ **Sem log, o marcador por mensagem é `media_mime`** (ver a seção do áudio):
+ele guarda o mime REALMENTE enviado, então `; codecs=` ali significa tentativa
+feita pelo código antigo.
+
+Exige sessão (está dentro do matcher do `proxy.ts`): commit e branch não são
+segredo, mas também não precisam ficar abertos na internet.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
