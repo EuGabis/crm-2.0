@@ -32,7 +32,6 @@ import type { Channel } from "@/lib/data/types";
 import {
   agregar,
   aplicarFiltros,
-  csvDeAtendimentos,
   dur,
   FILTROS_VAZIOS,
   SEM_RESPONSAVEL,
@@ -41,6 +40,8 @@ import {
   type SlaFiltros,
   type SlaLinha,
 } from "@/lib/reports/sla";
+import { baixarRelatorioXlsx } from "@/lib/reports/sla-xlsx";
+import { useAccount } from "@/lib/data/repos/db/account";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -100,6 +101,8 @@ export function ServiceSlaReport() {
   const [carregando, setCarregando] = useState(true);
   const [filtros, setFiltros] = useState<SlaFiltros>(FILTROS_VAZIOS);
   const [painelAberto, setPainelAberto] = useState(false);
+  const [baixando, setBaixando] = useState(false);
+  const { company, profile } = useAccount();
 
   useEffect(() => {
     let ativo = true;
@@ -168,26 +171,53 @@ export function ServiceSlaReport() {
   const alternar = <C extends keyof SlaFiltros>(campo: C, valor: SlaFiltros[C]) =>
     setFiltros((f) => ({ ...f, [campo]: f[campo] === valor ? FILTROS_VAZIOS[campo] : valor }));
 
-  const baixarRelatorio = () => {
+  /**
+   * Relatório executivo em XLSX.
+   *
+   * ⚠️ **Substituiu o CSV, e a aba "Atendimentos" é o que impede isso de ser uma
+   * perda.** O CSV entregava uma linha por conversa, que é o que serve para
+   * tabela dinâmica e cruzamento com a planilha da equipe; essa aba mantém
+   * exatamente isso, com a situação já resolvida em texto. O resto das abas é o
+   * que ele nunca deu: resumo apresentável, gráficos e recortes prontos.
+   *
+   * ⚠️ **Exporta o RECORTE ATIVO**, não o período inteiro — a tela toda reflete
+   * os filtros, e um arquivo que os ignorasse não bateria com nada do que está
+   * em tela. Os chips ativos vão escritos no cabeçalho do Resumo e no nome do
+   * arquivo, senão dois downloads do mesmo dia com filtros diferentes seriam
+   * indistinguíveis.
+   */
+  const baixarRelatorio = async () => {
     if (filtradas.length === 0) {
       toast.error("Nada para exportar neste recorte");
       return;
     }
-    const csv = csvDeAtendimentos(filtradas, dados?.nomes ?? {}, dados?.meta ?? 15);
-    // BOM na frente: sem ele o Excel em pt-BR abre os acentos como "AtendÃ­vel".
-    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    // O nome do arquivo diz o período E se havia recorte: dois downloads do
-    // mesmo dia com filtros diferentes não podem virar o mesmo nome.
-    a.download = `atendimento-${dias}d${temFiltro(filtros) ? "-filtrado" : ""}-${new Date()
-      .toISOString()
-      .slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success(`${filtradas.length.toLocaleString("pt-BR")} atendimento(s) exportado(s)`);
+    setBaixando(true);
+    try {
+      await baixarRelatorioXlsx({
+        ag,
+        linhas: filtradas,
+        nomes: dados?.nomes ?? {},
+        meta: dados?.meta ?? 15,
+        dias,
+        de: ag.serie[0]?.rotulo ?? "—",
+        ate: ag.serie[ag.serie.length - 1]?.rotulo ?? "—",
+        empresa: company?.name ?? "Minha empresa",
+        usuario: profile?.name ?? "—",
+        recorte: chipsParaTexto(),
+      });
+      toast.success(`Relatório de ${filtradas.length.toLocaleString("pt-BR")} atendimento(s) gerado`);
+    } catch (e) {
+      // A biblioteca entra por import dinâmico: falha de rede na hora do clique
+      // é um cenário real, e o usuário precisa saber que não foi o dado.
+      console.error("[relatorio-sla]", e);
+      toast.error("Não foi possível gerar o relatório");
+    } finally {
+      setBaixando(false);
+    }
   };
+
+  /** Texto dos recortes ativos — vai no cabeçalho e no nome do arquivo. */
+  const chipsParaTexto = () => chips.map((c) => c.rotulo);
 
   const chips: { rotulo: string; limpar: () => void }[] = [];
   if (filtros.faixa)
@@ -233,10 +263,11 @@ export function ServiceSlaReport() {
             variant="outline"
             size="sm"
             className="h-8 gap-1.5 text-xs"
-            disabled={!dados || filtradas.length === 0}
-            onClick={baixarRelatorio}
+            disabled={!dados || filtradas.length === 0 || baixando}
+            onClick={() => void baixarRelatorio()}
           >
-            <Download className="size-3.5" /> Baixar relatório
+            <Download className="size-3.5" />
+            {baixando ? "Gerando..." : "Baixar relatório"}
           </Button>
           <Button
             variant="outline"
