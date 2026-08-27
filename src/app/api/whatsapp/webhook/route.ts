@@ -428,7 +428,27 @@ async function applyStatus(db: any, st: any) {
   }
   if (st.status === "failed") {
     patch.failed_at = nowIso;
-    patch.error_detail = st.errors?.[0]?.title || st.errors?.[0]?.message || "Falha na entrega";
+    /*
+     * ⚠️ **`title` é a CATEGORIA do erro, não o motivo.** Guardar só ele foi o
+     * que deixou o áudio em "Media upload error" por várias rodadas de
+     * investigação: esse rótulo cobre arquivo vazio, codec errado, canais
+     * demais e tamanho — sem distinguir nenhum. O motivo específico vem em
+     * `error_data.details`, e era exatamente ele que se perdia.
+     *
+     * A ordem é do mais específico para o mais genérico, e o código entra junto
+     * porque é por ele que se acha a causa na documentação da Meta.
+     */
+    const err = st.errors?.[0] as
+      | { code?: number; title?: string; message?: string; error_data?: { details?: string } }
+      | undefined;
+    const partes = [
+      err?.error_data?.details,
+      err?.title,
+      err?.message,
+      err?.code != null ? `#${err.code}` : null,
+    ].filter(Boolean);
+    patch.error_detail = partes.length ? partes.join(" · ").slice(0, 500) : "Falha na entrega";
+    if (err) console.log(`[webhook] falha em ${msg.id}: ${JSON.stringify(err)}`);
   }
   await db.from("messages").update(patch).eq("id", msg.id);
 }
