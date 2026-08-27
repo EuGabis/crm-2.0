@@ -48,3 +48,6 @@ crm_ideia.txt
 
 # claude code — configuração local da máquina
 .claude/settings.local.json
+
+# bloco gerado por scripts/apply-migration.mjs para colar no SQL Editor
+.migracao-para-colar.sql

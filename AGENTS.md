@@ -35,9 +35,17 @@ Supabase, em máquinas/contas diferentes. Eles **não conversam** — a única c
      shell (`layout`, `sidebar`, `topbar`).
    - **Alta colisão (edição só ADITIVA + `git pull --rebase` antes do push):**
      `AGENTS.md`, `src/proxy.ts`, `package.json`, `package-lock.json`, `.env.example`.
-5. **Migrações** (um banco só): antes de criar `supabase/migrations/00NN_*.sql`, `git pull`
-   e use o **próximo número livre** (nunca reutilize). Toda migração **idempotente**
-   (`... if not exists`, `drop policy if exists`). Diga no commit o que aplicar no SQL Editor.
+5. **Migrações** (um banco só): o nome é **`AAAAMMDDHHMM_nome.sql`**, e antes de
+   aplicar rode **`npm run db:apply <arquivo>`** (ou no mínimo `npm run db:check`).
+   Toda migração **idempotente** (`... if not exists`, `drop policy if exists`).
+   Diga no commit o que aplicar no SQL Editor.
+   ⚠️ **A regra que estava aqui — "`git pull` e use o próximo número livre" — ERA
+   O BUG**, não a solução: o número saía de um contador COMPARTILHADO que os dois
+   Claudes leem antes de qualquer um escrever. Os dois puxam, os dois veem 0085
+   como o maior, os dois escolhem 0086. Resultado medido: **12 números
+   duplicados** (0014, 0015, 0016, 0019, 0056, 0078, 0079, 0080, 0086, 0087,
+   0089, 0090). Data-hora não tem contador para ler. Ver "## Guarda das
+   migrações" abaixo.
 6. **Sincronize sempre:** `git pull --rebase origin main` antes de push e antes de tocar
    arquivo compartilhado. Conflito = mantenha AS DUAS contribuições, nunca descarte a do outro.
 7. **Segredos** nunca no git → `.env.example` (placeholder) + Vercel + nota aqui.
@@ -1126,9 +1134,34 @@ autenticado. As seis: `contact_conversation`, `claim_conversation`,
 
 ⚠️ **Ao criar função em `public`, faça SEMPRE o par**
 `revoke execute ... from public, anon` + `grant execute ... to authenticated`.
-É o que as funções das 0047/0048/0078/0079 já fazem — e é por isso que elas nunca
-apareceram nessa lista. Só o `grant to authenticated` não basta: ele não tira o
-EXECUTE que o PUBLIC ganhou de graça.
+Só o `grant to authenticated` não basta: ele não tira o EXECUTE que o PUBLIC
+ganhou de graça.
+
+🔴 **CORREÇÃO (2026-08-27): a frase que estava aqui era falsa.** Este parágrafo
+afirmava que "as funções das 0047/0048/0078/0079 já fazem o par, e é por isso
+que nunca apareceram nessa lista". A guarda de migração
+(`npm run db:audit`) varreu as 103 migrações e diz o contrário:
+**17 das 26 funções criadas em `public` recebem `grant execute` e NUNCA
+`revoke ... from public, anon`** — incluindo justamente
+`find_contact_by_phone` (0047), `lead_payment_profile` (0049),
+`search_contacts`/`contact_companies` (0078), `existing_contact_keys` (0078) e
+`sla_conversations` (0079). A 0080 revogou 6; as outras 17 nunca foram tocadas.
+
+⚠️ **Isto é leitura ESTÁTICA do repositório, não do banco** — não houve como
+conferir contra o Postgres (falta `DATABASE_URL` no `.env.local` e o CA em
+`scripts/`). Antes de agir, confirme com:
+```sql
+select p.proname, pg_get_function_identity_arguments(p.oid) as args,
+       has_function_privilege('anon', p.oid, 'execute') as anon_executa
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'public' order by 1;
+```
+O dano provável é menor do que na 0080 porque essas funções têm a checagem de
+empresa na primeira linha (padrão 0049), então `anon` — cujo
+`private.user_locations()` é vazio — recebe conjunto vazio em vez de dado. Mas
+"não vaza porque a guarda interna segura" é rede única: quem escrever a próxima
+função sem guarda ganha o vazamento inteiro. ⏳ **Falta a migração que fecha as
+17.**
 
 **`contact_conversation` ganhou checagem de empresa.** Ela nasceu sem checagem
 nenhuma, e ignorar a RLS é o propósito dela (o botão "Abrir conversa" do card
@@ -2279,6 +2312,115 @@ primeira mudança.
 Recharts saiu de `opportunity-widgets.tsx` (as três marcas agora são CSS), mas
 `TOOLTIP_STYLE` **continua exportado de lá** — é a casa dele e
 `funnel-widgets`/`payment-widgets` importam deste módulo.
+
+## Guarda das migrações (`npm run db:check` / `db:apply`)
+
+Pedido do Gabriel em 2026-08-27: "proteção para rodar querys do supabase,
+porque algumas estão dando conflitos — não só as nossas, a do outro Claude
+também". Ao medir, o conflito não era descuido: era **desenho**.
+
+### O que estava errado
+
+⚠️ **O número da migração vinha de um contador COMPARTILHADO.** A regra antiga
+mandava dar `git pull` e pegar "o próximo número livre" — o que só funciona se
+uma pessoa escreve de cada vez. Com dois Claudes, ambos puxam, ambos veem 0085
+como maior, ambos escolhem 0086. Resultado: **12 números duplicados**, e cada par
+é um de cada agente no mesmo dia (0078 `busca_de_contatos` × `import_dedup`;
+0087 `resumo_do_atendimento` × `assumir_ao_enviar`; 0090
+`devolve_lead_que_caiu_no_admin` × `recuperar_email_import`).
+
+⚠️ **O aplicador não registrava nada.** `apply-migration.mjs` era
+`begin; query(sql); commit;` e ponto: nenhuma checagem, nenhuma ideia se já
+tinha rodado, nenhum aviso de quantas linhas ia mexer. Combinado com o fato,
+já documentado, de que `supabase_migrations.schema_migrations` **não** registra
+o que é colado no SQL Editor, ninguém sabia o que estava aplicado — foi assim
+que a 0036 passou dias tida como pronta sem estar.
+
+⚠️ **`.env.local` não tem `DATABASE_URL` e falta o CA em `scripts/`**, então o
+aplicador **não roda** e o caminho real sempre foi colar no SQL Editor. Uma
+guarda que exigisse conexão não rodaria — e checagem que não roda é o que
+deixou os 12 números colidirem. Por isso a guarda é dividida: a estática
+funciona sem nada configurado, e sem conexão o script **gera
+`.migracao-para-colar.sql` já com o `insert` do registro no fim**, para que até o
+caminho manual fique registrado.
+
+### Como usar
+
+```bash
+npm run db:check                      # só o que mudou vs HEAD (use no commit)
+npm run db:audit                      # auditoria das 103 migrações
+npm run db:apply supabase/migrations/AAAAMMDDHHMM_nome.sql
+npm run db:apply <arq> -- --so-checar # sem tocar no banco
+```
+
+Com conexão, `db:apply` faz: guarda → "já rodou?" → **ensaio numa transação
+revertida, mostrando as linhas afetadas por comando** → confirmação digitada
+("aplicar") → aplica e registra **na mesma transação** (registro fora dela
+poderia dizer "aplicada" com a migração revertida).
+
+### Peças
+
+- `scripts/lib/sql-split.mjs` — divide o SQL em comandos.
+  ⚠️ **`split(";")` quebraria metade do repositório**: 50 das 103 migrações têm
+  corpo de função entre `$$` (com tags `$function$`, `$p$`), onde ponto e vírgula
+  é código. Trata também `--`, `/* */` **aninhado** (o Postgres aninha),
+  `'texto'` com `''`, `E'...'` com barra invertida, `"identificador"` e `$1`
+  (parâmetro, não delimitador). Testado: 10/10 casos unitários e **os 974
+  comandos das 103 migrações começam com palavra-chave SQL válida** — nenhum
+  corte no meio de corpo de função.
+- `scripts/lib/migration-checks.mjs` — as regras. **Cada uma existe por causa de
+  um problema que este repositório já teve, e o comentário dela diz qual.**
+- `scripts/check-migrations.mjs`, `scripts/apply-migration.mjs` — as CLIs.
+- Registro: **`private.migrations_aplicadas`** (arquivo, hash, quando, por quem,
+  nº de comandos, se foi forçada). No schema `private` com RLS ligada e **nenhuma
+  policy** — mesmo desenho de `private.automation_config`. A tabela é criada pelo
+  próprio script (`create ... if not exists`), sem arquivo de migração: uma
+  migração para criar o registro precisaria ser registrada num registro que
+  ainda não existe.
+- `LITO_AGENTE` no ambiente identifica quem aplicou; sem ela, `git config user.name`.
+
+### Decisões que valem a pena não refazer
+
+- ⚠️ **`db:check` olha só o que MUDOU, por padrão.** As 103 migrações antigas
+  acumulam 54 achados de idempotência que são história já aplicada. Checar tudo
+  por padrão faria a saída ser ignorada no primeiro dia; `--todos` existe para
+  quando a pergunta é a auditoria.
+- ⚠️ **As regras foram CALIBRADAS contra as 103 migrações, não chutadas.** A
+  regra de `security definer` sem checagem de empresa disparava **65 vezes**, das
+  quais 48 eram ruído: 36 funções do schema `private` (não exposto na API) e 12
+  `returns trigger` (gatilho roda no contexto de quem escreveu a linha — não há
+  "empresa do chamador" a conferir). Recortada para `public.*` e não-trigger,
+  caiu para 11.
+- ⚠️ **Um defeito meu que a calibração pegou:** a regra procurava
+  `private.user_locations()` no *esqueleto* do comando — e o esqueleto troca o
+  corpo entre `$$` por um marcador, que é exatamente onde a checagem mora. Ela
+  disparava em toda função definer de `public`, inclusive na
+  `lead_payment_profile`, que é a origem do padrão. A menção agora é procurada no
+  SQL cru; as regras estruturais seguem no esqueleto (senão a palavra "delete"
+  dentro de um comentário ou de um nome de policy viraria alerta).
+- ⚠️ **`drop policy/trigger/index/function if exists` NÃO conta como
+  destrutivo.** É o próprio idioma da idempotência do projeto; sinalizá-lo faria
+  o alerta aparecer em quase toda migração, que é o caminho mais curto para
+  ninguém mais ler o alerta.
+- **A gravidade do `revoke` ausente é graduada**, porque o estático não sabe se a
+  função já existia (medido: das 32 criações em `public`, **31** usam
+  `or replace`, e `create or replace` NÃO reseta grants). `grant` sem `revoke` é
+  o bug da 0080 em estado puro → **erro**. `create function` sem `or replace` é
+  nova por definição → **erro**. `or replace` que não mexe em privilégio →
+  **nota**.
+- O ensaio usa `try/finally` com `rollback` no `finally`: ensaio não pode deixar
+  rastro nem quando estoura no meio.
+- Arquivo **já registrado com hash DIFERENTE** é pior que "já rodou" — significa
+  que o arquivo mudou depois de aplicado e o banco discorda do repositório. O
+  script grita isso em vermelho separado.
+
+### O que a guarda achou de imediato
+
+Rodando `npm run db:audit` na primeira vez: **17 das 26 funções criadas em
+`public` recebem `grant execute` e nunca `revoke ... from public, anon`** — ver a
+correção em vermelho na seção "Avisos do linter de segurança do Supabase". A
+frase que o `AGENTS.md` tinha ali (de que 0047/0048/0078/0079 já faziam o par)
+estava errada.
 
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
