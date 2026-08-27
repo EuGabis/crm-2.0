@@ -205,15 +205,30 @@ export async function uploadMedia(
   return json.id as string;
 }
 
+/**
+ * Envia mídia já hospedada na Meta (`id`) ou por URL pública (`link`).
+ *
+ * ⚠️ **O `link` existe aqui para tirar o NOSSO upload da equação.** O áudio
+ * gerado pelo CRM se provou um Ogg/Opus impecável — mono, `pre-skip` correto,
+ * OpusTags, EOS, CRC de todas as páginas conferindo — e a Meta seguiu recusando
+ * com #131053 ("on processing it is of type application/octet-stream"). Depois
+ * de oito hipóteses sobre o ARQUIVO, todas erradas, a pergunta que faltava era
+ * outra: o problema é o arquivo ou a nossa transmissão dele?
+ *
+ * Com `link`, a Meta baixa o arquivo direto do nosso Storage e o multipart sai
+ * do caminho. Ou funciona — e o problema era o upload —, ou falha igual, e aí a
+ * causa não está em nada que o CRM controla.
+ */
 export function sendMediaMessage(
   phoneNumberId: string,
   to: string,
   kind: "image" | "audio" | "video" | "document",
-  mediaId: string,
+  /** `{ id }` para mídia já subida, `{ link }` para a Meta buscar sozinha. */
+  origem: { id: string } | { link: string },
   caption?: string,
   filename?: string,
 ) {
-  const media: Record<string, unknown> = { id: mediaId };
+  const media: Record<string, unknown> = "id" in origem ? { id: origem.id } : { link: origem.link };
   if (caption && kind !== "audio") media.caption = caption; // áudio não leva caption
   if (kind === "document" && filename) media.filename = filename; // nome do arquivo p/ o cliente
   return graph(`${phoneNumberId}/messages`, {

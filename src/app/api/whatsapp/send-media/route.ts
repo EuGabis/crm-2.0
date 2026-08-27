@@ -95,7 +95,9 @@ export async function GET() {
       /** Retrato do arquivo gravado na mensagem, preservado pelo webhook. */
       retratoNoBalao: true,
       /** `pre-skip=0` do opus-media-recorder corrigido, com CRC refeito. */
-      preSkipCorrigido: true
+      preSkipCorrigido: true,
+      /** Áudio enviado por URL assinada (a Meta baixa), não por upload multipart. */
+      audioPorLink: true
     },
   });
 }
@@ -202,6 +204,8 @@ export async function POST(request: Request) {
   const bytes = await blob.arrayBuffer();
   let sendBytes = bytes;
   let notaPreSkip = "";
+  /** Qual caminho de envio foi usado — entra no diagnóstico do balão. */
+  let viaLink = false;
   /*
    * ⚠️ **O mime declarado à Meta vem dos BYTES, não da alegação do cliente.**
    * A recusa que travou este bug por três rodadas foi, nas palavras dela:
@@ -283,8 +287,82 @@ export async function POST(request: Request) {
   try {
     const ext = (String(sendMime || "application/octet-stream").split("/")[1] || "bin").split(";")[0];
     const uploadName = kind === "document" && filename ? String(filename) : `media.${ext}`;
-    const mediaId = await uploadMedia(channel.phone_number_id, sendBytes, sendMime, uploadName);
-    waResp = await sendMediaMessage(channel.phone_number_id, to, kind, mediaId, caption, filename);
+    /*
+     * ⚠️ **Áudio vai por LINK, o resto por upload.**
+     *
+     * Depois de oito hipóteses sobre o arquivo — mime, estéreo, contêiner,
+     * fluxo, `pre-skip` — o áudio gerado aqui se provou um Ogg/Opus impecável
+     * (mono, preskip=312, OpusTags, EOS, `crc=8/8`) e a Meta seguiu recusando
+     * com #131053. Nesse ponto a pergunta deixa de ser "o que há de errado no
+     * arquivo?" e passa a ser "o problema é o arquivo ou a nossa transmissão?".
+     *
+     * Com `link`, a Meta baixa do nosso Storage e o multipart sai do caminho.
+     * O `content-type` que ela vê passa a ser o que o Storage serve, não o que
+     * montamos — e é a própria Meta reclamando de `content-type` desde a
+     * primeira rodada.
+     *
+     * Só áudio muda: imagem, vídeo e documento nunca deram problema, e trocar o
+     * caminho deles seria arriscar o que funciona para investigar o que não
+     * funciona.
+     *
+     * ⚠️ A URL é ASSINADA e curta (10 min): o bucket é privado, e uma URL de
+     * mídia de cliente não pode ficar pública nem valer para sempre. A Meta
+     * busca em segundos — a validade existe só para cobrir reprocessamento dela.
+     */
+    if (kind === "audio") {
+      /*
+       * ⚠️ **Regrava o objeto ANTES de assinar a URL, e sem isso o link seria um
+       * tiro no pé.** Dois motivos, e os dois anulariam a investigação:
+       *
+       *   1. o link serve os bytes ARMAZENADOS, que são os originais — com
+       *      `pre-skip = 0`. Assinar sem regravar desfaria silenciosamente a
+       *      correção do `pre-skip` feita alguns passos acima;
+       *   2. o link serve o `content-type` ARMAZENADO, gravado pelo navegador no
+       *      upload. Se ele tiver o parâmetro (`audio/ogg; codecs=opus`, que é o
+       *      que um bundle antigo em cache produz), a Meta veria exatamente a
+       *      string da qual ela reclama desde a primeira rodada — e aí o teste
+       *      não separaria nada.
+       *
+       * `upsert` no mesmo caminho, e não um arquivo temporário: o áudio do nosso
+       * próprio inbox passa a ser a versão corrigida (melhor, não pior) e não
+       * sobra lixo para limpar depois.
+       */
+      const { error: erroRegrava } = await admin.storage
+        .from("conversation-media")
+        .upload(mediaPath, sendBytes, { contentType: sendMime, upsert: true });
+      if (erroRegrava) {
+        return recusar(`Não foi possível regravar o áudio: ${erroRegrava.message}`, 502);
+      }
+
+      const { data: assinada, error: erroUrl } = await admin.storage
+        .from("conversation-media")
+        .createSignedUrl(mediaPath, 600);
+      if (erroUrl || !assinada?.signedUrl) {
+        return recusar(
+          `Não foi possível gerar a URL do áudio: ${erroUrl?.message ?? "sem URL"}`,
+          502,
+        );
+      }
+      viaLink = true;
+      waResp = await sendMediaMessage(
+        channel.phone_number_id,
+        to,
+        kind,
+        { link: assinada.signedUrl },
+        caption,
+        filename,
+      );
+    } else {
+      const mediaId = await uploadMedia(channel.phone_number_id, sendBytes, sendMime, uploadName);
+      waResp = await sendMediaMessage(
+        channel.phone_number_id,
+        to,
+        kind,
+        { id: mediaId },
+        caption,
+        filename,
+      );
+    }
   } catch (e) {
     // `graphError` já monta a mensagem com o código e o subcódigo da Meta — é
     // essa string que o atendente precisa ver, e era ela que se perdia.
@@ -320,7 +398,9 @@ export async function POST(request: Request) {
        * só no `console.log`, num painel do Vercel que ninguém acha na hora do
        * problema — e a investigação passou seis rodadas sem esse dado.
        */
-      error_detail: `[diag] ${retratoDoAudio(sendBytes)}${notaPreSkip ? ` ${notaPreSkip}` : ""}`,
+      error_detail:
+        `[diag] ${retratoDoAudio(sendBytes)}${notaPreSkip ? ` ${notaPreSkip}` : ""}` +
+        ` via=${viaLink ? "link" : "upload"}`,
       failed_at: null,
       /*
        * ⚠️ Grava o mime que REALMENTE foi enviado, não o que o cliente alegou.

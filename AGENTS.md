@@ -2010,6 +2010,50 @@ mexe.
 ⏳ Se um dia o `opus-media-recorder` for trocado ou corrigido, `corrigirPreSkip`
 vira no-op sozinha (só age quando o campo é 0) — não precisa ser removida.
 
+## Áudio por LINK: tirando o nosso upload da equação (2026-08-27)
+
+O `pre-skip` foi corrigido e conferido — o balão devolveu
+`head[... preskip=312 ...] ogg[... crc=8/8] preskip 0->312 (crc refeito, 8
+paginas conferidas)` — e a Meta **seguiu recusando** com #131053.
+
+Nesse ponto o arquivo está impecável por toda medida calculável: mono,
+`pre-skip` da RFC, OpusTags, EOS, CRC de todas as páginas conferindo, sem
+truncamento, granule coerente. **Oito hipóteses sobre o ARQUIVO, oito erradas.**
+A pergunta muda: o problema é o arquivo ou a nossa TRANSMISSÃO dele?
+
+⚠️ **`sendMediaMessage` passou a aceitar `{ link }` além de `{ id }`.** Com
+link, a Meta baixa o arquivo direto do nosso Storage e o multipart sai do
+caminho. Ou funciona — e o problema era o upload — ou falha igual, e aí a causa
+não está em nada que o CRM controla (número, WABA, permissão de nota de voz).
+Isso é bisseção, não mais um palpite.
+
+**Só ÁUDIO muda de caminho.** Imagem, vídeo e documento nunca deram problema, e
+trocar o caminho deles seria arriscar o que funciona para investigar o que não
+funciona.
+
+⚠️ **O objeto é REGRAVADO antes de a URL ser assinada, e sem isso o link seria
+um tiro no pé** — os dois motivos anulariam o teste:
+1. o link serve os bytes ARMAZENADOS, que são os originais, com `pre-skip = 0`;
+   assinar sem regravar desfaria em silêncio a correção feita alguns passos
+   antes;
+2. o link serve o `content-type` ARMAZENADO, gravado pelo navegador no upload. Se
+   ele tiver o parâmetro (`audio/ogg; codecs=opus` — o que um bundle antigo em
+   cache produz), a Meta veria exatamente a string da qual reclama desde a
+   primeira rodada.
+
+`upsert` no mesmo caminho, não arquivo temporário: o áudio do próprio inbox passa
+a ser a versão corrigida (melhor, não pior) e não sobra lixo para limpar.
+
+⚠️ A URL assinada vale **10 minutos**: o bucket é privado e URL de mídia de
+cliente não pode ficar pública nem valer para sempre. A Meta busca em segundos —
+a validade só cobre reprocessamento dela.
+
+O diagnóstico do balão passa a dizer `via=link` ou `via=upload`, então qual
+caminho foi usado deixa de ser suposição.
+
+⏳ **Se falhar por link também**, o CRM está fora de suspeita e o próximo passo é
+o painel da Meta (número, WABA, permissão de mensagem de voz) — não código.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
