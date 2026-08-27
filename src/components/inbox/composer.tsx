@@ -86,6 +86,91 @@ function msgSnippet(m: Message): string {
   return t.length > 120 ? `${t.slice(0, 120)}…` : t || "Mensagem";
 }
 
+/**
+ * Devolve o microfone garantidamente em UM canal.
+ *
+ * ⚠️ **A Cloud API do WhatsApp aceita `audio/ogg` só com OPUS e só MONO.** Áudio
+ * estéreo passa no upload (a Meta responde 200 e devolve id de mensagem) e é
+ * rejeitado depois, no processamento: o webhook de status volta com
+ * `errors[0].title = "Media upload error"` (código 131053). Foi o que apareceu
+ * no balão depois que o motivo passou a ser gravado.
+ *
+ * ⚠️ **O `opus-media-recorder` tira o número de canais do MICROFONE**, não de
+ * opção nossa — em `start()` ele faz
+ * `channelCount = track.getSettings().channelCount || 1` e monta o
+ * `ScriptProcessor` com esse valor. Então quem tem microfone/headset que
+ * reporta 2 canais gravava Opus estéreo, e a Meta descartava. É a explicação de
+ * "ALGUNS usuários": dependia do aparelho, não do CRM.
+ *
+ * Duas camadas, porque a primeira não é garantia:
+ *   1. pedir mono na constraint (`channelCount: 1`) — a maioria dos navegadores
+ *      atende, e aí não há trabalho extra;
+ *   2. se o track AINDA reportar mais de um canal, misturar para mono no Web
+ *      Audio. `{ exact: 1 }` na constraint resolveria em uma linha, mas lança
+ *      `OverconstrainedError` no aparelho que não sabe abrir em mono — e aí o
+ *      atendente perde a gravação inteira em vez de perder um canal.
+ *
+ * Mono também é o certo para recado de voz por si só: metade dos bytes, e voz
+ * captada por um microfone não tem informação estéreo nenhuma para preservar.
+ */
+/**
+ * Lê quantos canais o arquivo OGG/Opus REALMENTE tem.
+ *
+ * As duas camadas de `microfoneMono` deveriam bastar, mas "deveria" não é
+ * conferência: quem decide o número de canais é o microfone, o navegador e o
+ * encoder, e nenhum dos três é nosso. Como a Meta só reclama DEPOIS (assíncrono,
+ * pelo webhook de status), sem esta leitura um estéreo que escapasse voltaria a
+ * ser um "falhou" sem explicação — o problema que acabou de ser resolvido.
+ *
+ * O `OpusHead` é o primeiro pacote do fluxo e o campo de canais é o byte 9 dele
+ * (magia de 8 bytes + 1 de versão). Procuro a magia nos primeiros 200 bytes em
+ * vez de assumir posição fixa, porque antes dela vem o cabeçalho da página Ogg,
+ * cujo tamanho varia com a tabela de segmentos.
+ *
+ * Devolve `null` quando não achou o cabeçalho — aí é melhor não afirmar nada.
+ */
+async function canaisDoOpus(blob: Blob): Promise<number | null> {
+  try {
+    const buf = new Uint8Array(await blob.slice(0, 200).arrayBuffer());
+    const magia = [0x4f, 0x70, 0x75, 0x73, 0x48, 0x65, 0x61, 0x64]; // "OpusHead"
+    for (let i = 0; i + magia.length + 1 < buf.length; i++) {
+      if (magia.every((b, k) => buf[i + k] === b)) return buf[i + 9] ?? null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function microfoneMono(): Promise<{ stream: MediaStream; encerrar: () => void }> {
+  const bruto = await navigator.mediaDevices.getUserMedia({
+    audio: { channelCount: { ideal: 1 }, sampleRate: { ideal: 48000 } },
+  });
+  const canais = bruto.getAudioTracks()[0]?.getSettings().channelCount;
+  // `undefined` conta como mono: é o que o próprio opus-media-recorder assume
+  // (`|| 1`), então concordar com ele evita uma remixagem desnecessária.
+  if (canais === undefined || canais <= 1) {
+    return { stream: bruto, encerrar: () => bruto.getTracks().forEach((t) => t.stop()) };
+  }
+
+  const ctx = new AudioContext();
+  const destino = ctx.createMediaStreamDestination();
+  // `channelCount 1` + "explicit"/"speakers": o nó recebe N canais e entrega 1,
+  // somando — é a mistura que se quer, e não o descarte de um dos lados.
+  destino.channelCount = 1;
+  destino.channelCountMode = "explicit";
+  destino.channelInterpretation = "speakers";
+  ctx.createMediaStreamSource(bruto).connect(destino);
+  return {
+    stream: destino.stream,
+    encerrar: () => {
+      bruto.getTracks().forEach((t) => t.stop());
+      destino.stream.getTracks().forEach((t) => t.stop());
+      void ctx.close();
+    },
+  };
+}
+
 export function Composer({ conversationId }: { conversationId: string }) {
   const [channel, setChannel] = useState<Channel>("whatsapp");
   const [internal, setInternal] = useState(false);
@@ -250,8 +335,14 @@ export function Composer({ conversationId }: { conversationId: string }) {
       toast.error("Gravação de áudio não é suportada neste navegador");
       return;
     }
+    // Fora do try: se a construção do gravador estourar depois de o microfone
+    // abrir, o `catch` ainda precisa fechá-lo — senão o indicador de gravação do
+    // navegador fica aceso sem nada gravando.
+    let encerrar: (() => void) | null = null;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mic = await microfoneMono();
+      const stream = mic.stream;
+      encerrar = mic.encerrar;
       // Grava direto em ogg/opus no navegador (polyfill via WebAssembly) — é o
       // único formato de áudio que a Cloud API do WhatsApp aceita, e o
       // MediaRecorder nativo do Chrome/Edge só produz webm. Isso elimina a
@@ -269,13 +360,24 @@ export function Composer({ conversationId }: { conversationId: string }) {
         if (e.data.size) chunksRef.current.push(e.data);
       };
       mr.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
+        encerrar?.(); // para o microfone E fecha o AudioContext da remixagem
         if (timerRef.current) clearInterval(timerRef.current);
         setRecording(false);
         if (cancelRef.current) return;
         const secs = Math.max(1, Math.round((Date.now() - startedRef.current) / 1000));
         const blob = new Blob(chunksRef.current, { type: "audio/ogg" });
         const file = new File([blob], `audio-${secs}s.ogg`, { type: "audio/ogg" });
+        // Avisa, mas NÃO bloqueia: o mono é a explicação mais provável da recusa
+        // da Meta, não uma certeza. Travar o envio por causa de uma hipótese
+        // tiraria o áudio de quem talvez estivesse funcionando; o aviso dá o
+        // sinal e o motivo real, se houver recusa, agora fica gravado no balão.
+        const canais = await canaisDoOpus(blob);
+        if (canais !== null && canais > 1) {
+          console.warn(`[audio] gravado com ${canais} canais; o WhatsApp aceita só mono`);
+          toast.warning("O áudio saiu em estéreo e o WhatsApp pode recusar", {
+            description: "Se falhar, avise o suporte — é o microfone reportando 2 canais.",
+          });
+        }
         setUploading(true);
         const res = await conversationActions.sendMedia(conversationId, {
           file,
@@ -323,6 +425,7 @@ export function Composer({ conversationId }: { conversationId: string }) {
       setRecording(true);
       timerRef.current = setInterval(() => setRecSecs((s) => s + 1), 1000);
     } catch {
+      encerrar?.();
       toast.error("Não foi possível acessar o microfone — verifique a permissão");
     }
   };

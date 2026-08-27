@@ -1643,6 +1643,66 @@ select m.created_at, m.type, m.status, m.error_detail
  order by m.created_at desc limit 30;
 ```
 
+## Áudio recusado pela Meta: era ESTÉREO (2026-08-27)
+
+Continuação direta da seção acima. Com o motivo passando a ser gravado, o balão
+finalmente disse qual era: **"Não foi entregue: Media upload error"**.
+
+⚠️ **Esse texto veio do WEBHOOK, não da rota** — é `st.errors[0].title` em
+`webhook/route.ts`, e não o `graphError` da rota (que sempre anexa
+`· HTTP N · em upload /media`, ausente no balão). A diferença é o diagnóstico
+inteiro: **a Meta ACEITOU o upload**, devolveu id de mensagem, e só recusou
+DEPOIS, ao processar a mídia, reportando o erro 131053 de forma assíncrona. Ou
+seja, o problema é o ARQUIVO, não a chamada.
+
+⚠️ **A Cloud API aceita `audio/ogg` só com OPUS e só MONO** ("Mono input only",
+na doc da Meta). E o `opus-media-recorder` tira o número de canais do
+MICROFONE, não de opção nossa — em `start()`:
+```js
+this.channelCount = t[0].getSettings().channelCount || 1;
+this.processor = this.context.createScriptProcessor(4096, this.channelCount, this.channelCount);
+```
+Então quem usa microfone/headset que reporta 2 canais gravava Opus **estéreo**, e
+a Meta descartava. **É a explicação de "ALGUNS usuários": dependia do aparelho.**
+
+⚠️ **Taxa de amostragem foi descartada como suspeita, não ignorada**: a lib
+embute um reamostrador Speex (`_speex_resampler_init` em `OggOpusEncoder.js`),
+então os 44,1 kHz de algumas máquinas não são o problema.
+
+Também engana no diagnóstico o fato de o áudio **tocar no navegador e ser
+transcrito pelo Whisper** — os dois aceitam Opus estéreo sem reclamar. Só a
+Meta não.
+
+**A correção tem duas camadas em `microfoneMono()`**, porque a primeira não é
+garantia:
+1. pedir mono na constraint (`channelCount: { ideal: 1 }`) — a maioria dos
+   navegadores atende e não sobra trabalho;
+2. se o track AINDA reportar mais de um canal, misturar para mono no Web Audio
+   (`MediaStreamAudioDestination` com `channelCount 1` + `channelCountMode
+   "explicit"` + `channelInterpretation "speakers"`, que SOMA os canais em vez de
+   descartar um lado).
+
+⚠️ **`{ exact: 1 }` resolveria em uma linha e foi rejeitado de propósito**: lança
+`OverconstrainedError` no aparelho que não sabe abrir em mono, e aí o atendente
+perde a gravação inteira em vez de perder um canal.
+
+**`canaisDoOpus()` confere o resultado** lendo o byte 9 do `OpusHead` do arquivo
+gravado (magia de 8 bytes + 1 de versão). "Deveria bastar" não é conferência:
+quem decide os canais é o microfone, o navegador e o encoder, e nenhum dos três é
+nosso. A magia é PROCURADA nos primeiros 200 bytes, não lida em posição fixa,
+porque antes dela vem o cabeçalho da página Ogg, cujo tamanho varia com a tabela
+de segmentos. Testado com 7 casos sintéticos (mono/estéreo/6 canais, tabela de
+segmentos de tamanhos diferentes, lixo, buffer curto).
+
+⚠️ **O aviso de estéreo NÃO bloqueia o envio.** O mono é a explicação mais
+provável da recusa, não uma certeza — travar por hipótese tiraria o áudio de
+quem talvez estivesse funcionando. O aviso dá o sinal, e o motivo real, se houver
+recusa, agora fica gravado no balão.
+
+De passagem: o microfone ficava ABERTO se a construção do gravador estourasse
+depois do `getUserMedia` (o `catch` não parava o track), deixando o indicador de
+gravação do navegador aceso sem nada gravando.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
