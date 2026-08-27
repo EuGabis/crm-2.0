@@ -2152,6 +2152,52 @@ envio — a mensagem já foi aceita pela Meta nesse ponto do fluxo.
    transmissão recusados é sinal de olhar para fora, não de tentar o terceiro
    formato.
 
+## Áudio: era REGRESSÃO, e eu levei 11 rodadas para perguntar isso
+
+⚠️ **A informação que reorientou tudo: "ontem os áudios eram enviados
+normalmente e hoje parou".** Onze rodadas tratando como defeito estático — nove
+hipóteses sobre o arquivo, duas sobre a transmissão — quando a primeira pergunta
+devia ter sido **"quando parou de funcionar?"**. Regressão e defeito antigo pedem
+investigações opostas: uma olha o que mudou, a outra olha o que está errado.
+
+**A linha do tempo aponta um candidato:**
+
+| horário | evento |
+|---|---|
+| 27/08 **10:08** | deploy de `b36f0fe` — "abrir conversa escolhe canal do departamento do usuário" |
+| 27/08 **10:46** | primeiro relato de áudio falhando |
+
+`b36f0fe` mudou **qual canal (qual número) a conversa usa**: antes `open()` pegava
+o canal ativo MAIS ANTIGO, agora escolhe um vinculado ao departamento do usuário.
+Mídia é enviada em duas etapas contra o MESMO `phone_number_id`
+(`POST /{pnid}/media` e depois `POST /{pnid}/messages`), e a mídia fica **escopada
+nesse número** — #131053 é justamente o erro dessa família.
+
+⚠️ **O que a evidência JÁ descarta**, e isso vale para não reabrir becos sem
+saída:
+- **o arquivo**: válido byte a byte, em dois formatos independentes;
+- **a nossa transmissão**: round-trip com hash IDÊNTICO, e a Meta tipa a mídia
+  guardada como `audio/mp4`;
+- **o plano do Supabase**: não afeta o que a Meta faz com um arquivo que já está
+  íntegro na mão dela.
+
+O diagnóstico do balão passa a trazer
+`canal[id= pnid= waba= nome= pedido=cliente|conversa]`. Sem o número ali, "é o
+canal?" seguiria sendo suposição — e o campo `pedido` diz se o canal veio do
+cliente (`channelId` no corpo) ou da conversa, que é exatamente o que `b36f0fe`
+mexeu.
+
+⚠️ **Teste que discrimina em 5 segundos:** enviar uma IMAGEM na mesma conversa.
+Imagem e áudio passam pela MESMA rota, com o MESMO canal e o mesmo par
+upload+send. Se a imagem também falhar, o problema é do canal/número; se a imagem
+for e o áudio não, é específico de áudio naquele número.
+
+### Lição de método (a mais importante desta série)
+
+**Antes de formular a primeira hipótese, pergunte quando começou.** "Funcionava
+ontem" transforma o problema: a resposta está no `git log` daquele intervalo, não
+no domínio do problema. Custou onze rodadas.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
