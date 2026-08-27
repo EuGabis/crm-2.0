@@ -196,6 +196,9 @@ export function KpiStrip() {
         {kpis.map((k) => {
           const Icon = k.icon;
           const fatia = ativo?.kpi === k.key ? k.serie[ativo.i] : undefined;
+          // O acumulado é monótono, então o último ponto já diz se algo entrou
+          // no período — não precisa varrer a série inteira.
+          const semMovimento = (k.serie[k.serie.length - 1]?.v ?? 0) === 0;
           // Clicar no ponto abre só aquele intervalo; clicar no resto do card
           // abre o período inteiro. É o mesmo drilldown dos outros widgets.
           const abrir = () =>
@@ -260,6 +263,20 @@ export function KpiStrip() {
                 `activeDot` desenhar — com `floor` os dois discordariam nas
                 bordas e o texto falaria de um ponto diferente do marcado.
               */}
+              {/*
+                ⚠️ Série toda em zero NÃO desenha gráfico. O `<Area>` colocava a
+                linha na borda de baixo do container, onde metade do traço de
+                2 px é recortada — resultado: dois dos quatro cards apareciam
+                sem fiapo nenhum ("Receita ganha R$ 0" e "Ticket médio"), o que
+                se lê como widget quebrado, não como "não houve movimento".
+                Uma régua e a frase dizem o mesmo em texto, sem ambiguidade.
+              */}
+              {semMovimento ? (
+                <div className="-mx-4 -mb-4 mt-2 flex h-10 flex-col justify-end gap-1 px-4 pb-3">
+                  <p className="text-[10px] text-slate-300">sem movimento no período</p>
+                  <span className="h-px w-full bg-slate-200" aria-hidden />
+                </div>
+              ) : (
               <div
                 className="-mx-4 -mb-4 mt-2 h-10"
                 onMouseMove={(e) => {
@@ -302,6 +319,7 @@ export function KpiStrip() {
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
+              )}
             </button>
           );
         })}

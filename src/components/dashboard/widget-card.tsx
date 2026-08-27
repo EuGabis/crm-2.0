@@ -127,3 +127,154 @@ export function shortBRL(v: number): string {
   if (n >= 1_000) return `R$ ${(v / 1_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mil`;
   return `R$ ${v.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}`;
 }
+
+/* ------------------------------------------------------------------ *
+ * Marcas compartilhadas dos widgets
+ *
+ * As roscas do painel foram trocadas por barras rotuladas, e estas são as
+ * peças. Ficam aqui, e não copiadas em cada widget, porque quatro cards
+ * desenham a mesma marca — em cópias separadas a espessura da barra e o
+ * arredondamento divergiriam na primeira mudança.
+ *
+ * ⚠️ Toda fatia com valor > 0 tem largura MÍNIMA (`MIN_PX`). Era o defeito
+ * central das roscas: com 307 de 313 numa fatia, as duas de 1% viravam um fio
+ * invisível e o card dizia "só existe uma coisa aqui". Uma barra de 3 px é
+ * pequena e legível; zero é a única coisa que pode desaparecer.
+ * ------------------------------------------------------------------ */
+
+const MIN_PX = 3;
+
+/** Largura da marca: porcentagem real, com piso em pixel para o não-zero. */
+function larguraDaMarca(valor: number, total: number): string {
+  if (valor <= 0) return "0px";
+  const pct = total > 0 ? (valor / total) * 100 : 0;
+  return `max(${MIN_PX}px, ${pct.toFixed(2)}%)`;
+}
+
+/**
+ * Linha "nome + valor em cima, barra embaixo".
+ *
+ * Duas linhas, e não nome/barra/valor lado a lado, porque o mesmo componente
+ * serve o card de 1/3 (≈300 px) e o de 1/2: em linha única o nome da fase ou
+ * um valor em reais truncava no card estreito, que é justamente o rótulo que
+ * substitui a legenda da rosca.
+ */
+export function MarkedBarRow({
+  label,
+  labelHint,
+  value,
+  color,
+  share,
+  total,
+  hint,
+  onClick,
+}: {
+  label: string;
+  /** Texto discreto logo depois do nome (ex.: o valor em reais da fase). */
+  labelHint?: string;
+  /** Texto já formatado à direita (contagem, dinheiro...). */
+  value: string;
+  color: string;
+  /** Grandeza desta linha, na mesma unidade de `total`. */
+  share: number;
+  total: number;
+  /** Segundo texto, menor, depois do valor (ex.: a porcentagem). */
+  hint?: string;
+  onClick?: () => void;
+}) {
+  const vazia = share <= 0;
+  const Tag = onClick && !vazia ? "button" : "div";
+  return (
+    <Tag
+      {...(onClick && !vazia
+        ? { onClick, type: "button" as const, title: `Ver ${label}` }
+        : {})}
+      className={`block w-full rounded-md px-1 py-1 text-left transition-colors ${
+        onClick && !vazia ? "cursor-pointer hover:bg-slate-50" : ""
+      }`}
+    >
+      <div className="flex items-baseline gap-1.5">
+        <span
+          className="size-2 shrink-0 translate-y-[-1px] rounded-sm"
+          style={{ background: vazia ? "#e2e8f0" : color }}
+          aria-hidden
+        />
+        <span
+          className={`min-w-0 flex-1 truncate text-[11px] ${vazia ? "text-slate-400" : "text-slate-600"}`}
+          title={labelHint ? `${label} · ${labelHint}` : label}
+        >
+          {label}
+          {labelHint && <span className="ml-1.5 text-[10px] text-slate-400">{labelHint}</span>}
+        </span>
+        {/* O valor é rótulo DIRETO, não conteúdo de tooltip: a separação
+            vermelho/verde fica no piso da checagem de daltonismo, e é o texto
+            ao lado da marca que garante a leitura sem depender da cor. */}
+        <span
+          className={`shrink-0 text-[11px] font-semibold tabular-nums ${vazia ? "text-slate-300" : "text-slate-800"}`}
+        >
+          {value}
+        </span>
+        {hint && <span className="shrink-0 text-[10px] tabular-nums text-slate-400">{hint}</span>}
+      </div>
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
+        <div
+          className="h-full rounded-full"
+          style={{ width: larguraDaMarca(share, total), background: color }}
+        />
+      </div>
+    </Tag>
+  );
+}
+
+/**
+ * Barra única de composição (parte-do-todo em 100%).
+ *
+ * É o que substituiu a rosca de status. Uma rosca em que uma fatia tem 98% não
+ * mostra composição nenhuma — mostra um anel de uma cor; a barra dá a mesma
+ * informação em 6 px de altura e sobra espaço para os números aparecerem como
+ * texto, que é como o 1% fica legível.
+ */
+export function ShareBar({
+  parts,
+}: {
+  parts: { key: string; label: string; value: number; color: string }[];
+}) {
+  const total = parts.reduce((s, p) => s + p.value, 0);
+  if (total <= 0) return null;
+  return (
+    // `gap-[2px]`: separação entre fatias é VÃO da superfície, não contorno
+    // desenhado em volta de cada uma.
+    <div className="flex h-1.5 w-full gap-[2px] overflow-hidden rounded-full bg-slate-100">
+      {parts
+        .filter((p) => p.value > 0)
+        .map((p) => (
+          <div
+            key={p.key}
+            className="h-full rounded-full first:rounded-l-full last:rounded-r-full"
+            style={{ width: larguraDaMarca(p.value, total), background: p.color }}
+            title={`${p.label}: ${p.value}`}
+          />
+        ))}
+    </div>
+  );
+}
+
+/**
+ * Medidor de uma razão contra um limite (0–100%).
+ *
+ * Substituiu o anel radial da taxa de conversão: em 1% o arco era um risco de
+ * dois pixels no alto do anel — o número dizia uma coisa e o desenho, nada.
+ * Numa régua reta, 1% é 1% do comprimento e continua sendo um traço visível
+ * (mesmo piso de `MIN_PX`).
+ */
+export function Meter({ pct, color }: { pct: number; color: string }) {
+  const limitado = Math.max(0, Math.min(100, pct));
+  return (
+    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+      <div
+        className="h-full rounded-full transition-[width]"
+        style={{ width: larguraDaMarca(limitado, 100), background: color }}
+      />
+    </div>
+  );
+}

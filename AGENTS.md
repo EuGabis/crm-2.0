@@ -2197,6 +2197,88 @@ for e o áudio não, é específico de áudio naquele número.
 **Antes de formular a primeira hipótese, pergunte quando começou.** "Funcionava
 ontem" transforma o problema: a resposta está no `git log` daquele intervalo, não
 no domínio do problema. Custou onze rodadas.
+## Painel: as roscas saíram e as barras entraram (2026-08-27)
+
+Pedido: "melhorar o visual desses gráficos e cards para uma análise melhor". Ao
+medir os números reais em tela, o problema não era estética — **três dos cinco
+gráficos não conseguiam mostrar o dado que tinham**.
+
+⚠️ **A barra do funil MENTIA sobre a grandeza.** A largura era
+`Math.max(18, (count/max)*100)`, e o piso de 18% existia para o rótulo caber
+DENTRO da barra. Com os dados de hoje, **7 das 8 fases eram desenhadas a 18%**
+enquanto valiam de 0% a 6,8% — e uma fase VAZIA saía com barra de 18% de
+largura. A correção não foi mexer no piso: foi tirar o rótulo de dentro (nome à
+esquerda, contagem/valor à direita), o que liberou a barra para ser
+proporcional e tornou impossível texto cortado por marca pequena. De quebra a
+linha caiu de 40 px para 20 px, e um pipeline de 9 fases passou a caber ao lado
+do card vizinho em vez de esticar o painel.
+
+⚠️ **Rosca com uma fatia de 98% não mostra composição.** "Status da
+oportunidade" tinha 307 abertas de 313: a fatia de abertas tomava o anel e as
+duas de 1% (3 oportunidades cada) viravam um fio de um pixel. 150 px de altura
+para dizer "existe uma cor". Hoje é número grande + barra de composição de 6 px
++ três linhas rotuladas.
+
+⚠️ **Rosca de 9 fatias precisava de uma legenda de 9 linhas ao lado** —
+"Distribuição de fases". Ou seja, a informação já estava toda em texto e o anel
+era o que sobrava; e passando de ~6 fatias as vizinhas ficam indistinguíveis de
+qualquer jeito. Virou barra rotulada por fase.
+A ordem é **a do pipeline, não a do tamanho**: fase é categoria ORDENADA e é a
+sequência que responde "onde o funil está entupido".
+
+⚠️ **Anel radial em 1% é indistinguível de zero.** "Taxa de conversão" desenhava
+um risco de dois pixels no topo do anel enquanto o texto no meio dizia 1%.
+Razão contra um limite é **medidor reto**, não rosca. O card também passou a
+separar ganho / perda / ainda em aberto, porque conversão baixa pode ser
+"perdemos" ou "ninguém decidiu ainda" — conclusões opostas que o anel fundia — e
+a dar a taxa **entre as decididas**, a única comparável entre períodos de
+tamanhos diferentes.
+
+⚠️ **Dois dos quatro KPIs do topo apareciam sem fiapo de gráfico.** Série toda em
+zero (receita R$ 0, ticket R$ 0) fazia o `<Area>` desenhar a linha na borda de
+baixo do container, onde metade do traço de 2 px é recortada — o card parecia
+quebrado em vez de dizer "não houve movimento". Série zerada agora não desenha
+gráfico: mostra uma régua e a frase.
+
+**Peças compartilhadas** em `components/dashboard/widget-card.tsx`
+(`MarkedBarRow`, `ShareBar`, `Meter`) — quatro cards desenham a mesma marca, e
+em cópias separadas a espessura da barra e o arredondamento divergiriam na
+primeira mudança.
+
+- ⚠️ **Toda marca com valor > 0 tem largura mínima de 3 px** (`MIN_PX`). Era o
+  defeito central das roscas: 3 em 313 virava fio invisível e o card afirmava
+  que só existia uma coisa ali. Zero é a única grandeza que pode desaparecer.
+- ⚠️ **A escala das barras é o MAIOR item, não o total** (valor por status,
+  distribuição de fases). Contra o total, oito barras de 1–6% ficam
+  indistinguíveis entre si — e comparar entre si é a pergunta do card.
+- ⚠️ **O valor é rótulo DIRETO, não conteúdo de tooltip.** Além de tirar a
+  obrigação de passar o mouse, é o que sustenta a paleta: medido com o
+  validador, verde `#22c55e` × vermelho `#ef4444` dá ΔE 7,4 em deuteranopia —
+  dentro do piso, legal **somente** com codificação secundária. O texto ao lado
+  da marca é essa codificação. (Escurecer os dois para green-600/red-600
+  PIORA: ΔE cai para 5,0 e reprova. Foi medido, não estimado.)
+- Separação entre fatias da barra de composição é **vão de 2 px da superfície**,
+  não contorno desenhado em volta de cada uma.
+- ⚠️ **`<1%` na lista, `0,9%` na manchete.** Com 3 de 313 (0,96%),
+  `Math.round` dava "1%" — indistinguível de 3,1 de 313, e ao lado de um "98%"
+  a soma não fecha. `toFixed(1)` é pior: "1,0%" sugere precisão e cruza
+  justamente o limiar que a lista chama de "<1%". A manchete TRUNCA, e abaixo de
+  0,1% escreve "<0,1%" — truncar daria "0%" com oportunidade ganha embaixo.
+- **`% da fase anterior` acima de 100% fica âmbar.** Não é erro de conta: num
+  RETRATO do funil os leads não avançam em bloco, então a fase pode ter mais
+  gente que a anterior. Mas ler "250%" como conversão engana, e a cor é o que
+  faz parar e ler o `title` da coluna. ⏳ **A métrica em si continua discutível**
+  — quem está em "Em contato" não veio dos 2 que estão em "Qualificado" agora;
+  medir avanço de verdade pediria histórico de mudança de fase, que o schema
+  não guarda. Não foi mudado porque o pedido era visual.
+- Dark mode: `text-slate-300` foi acrescentado ao remapeamento. ⚠️ Aqui o erro é
+  o INVERSO do bloco da Lita: slate-300 é tom CLARO, então sem override ele não
+  desaparece no fundo escuro — ele **grita**, com mais contraste que o texto
+  principal, e o rótulo secundário puxa o olho antes do número.
+
+Recharts saiu de `opportunity-widgets.tsx` (as três marcas agora são CSS), mas
+`TOOLTIP_STYLE` **continua exportado de lá** — é a casa dele e
+`funnel-widgets`/`payment-widgets` importam deste módulo.
 
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
