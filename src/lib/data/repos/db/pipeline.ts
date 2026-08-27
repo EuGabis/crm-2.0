@@ -25,6 +25,7 @@ const mapOpportunity = (r: any): Opportunity => ({
   source: r.source,
   value: Number(r.value),
   ownerId: r.owner_id ?? undefined,
+  course: r.course ?? undefined,
   status: r.status,
   createdAt: r.created_at,
 });
@@ -175,6 +176,23 @@ export const oppActions = {
     s.patch({
       opportunities: s.opportunities.map((o) =>
         o.id === id ? { ...o, ownerId: ownerId ?? undefined } : o
+      ),
+    });
+    return true;
+  },
+
+  /** Define/limpa o curso da oportunidade (seletor no card). "" = sem curso. */
+  async setCourse(id: string, course: string | null): Promise<boolean> {
+    const s = state();
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("opportunities")
+      .update({ course: course || null })
+      .eq("id", id);
+    if (error) return false;
+    s.patch({
+      opportunities: s.opportunities.map((o) =>
+        o.id === id ? { ...o, course: course || undefined } : o
       ),
     });
     return true;

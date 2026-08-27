@@ -38,6 +38,7 @@ import { oppActions } from "@/lib/data/repos/db/pipeline";
 import { taskActions } from "@/lib/data/repos/db/contacts-module";
 import { appointmentActions } from "@/lib/data/repos/db/appointments";
 import { formatBRL } from "@/lib/data/repos/opportunities";
+import { CURSOS } from "@/lib/data/cursos";
 import type { Opportunity, User } from "@/lib/data/types";
 import { cn } from "@/lib/utils";
 import { telHref } from "@/lib/phone";
@@ -190,6 +191,15 @@ export function OpportunityCard({
     }
     const t = userId ? team.find((u) => u.id === userId)?.name ?? "usuário" : null;
     toast.success(t ? `Responsável: ${t}` : "Responsável removido");
+  };
+
+  const setCourse = async (course: string) => {
+    const ok = await oppActions.setCourse(opportunity.id, course || null);
+    if (!ok) {
+      toast.error("Não foi possível salvar o curso");
+      return;
+    }
+    toast.success(course ? `Curso: ${course}` : "Curso removido");
   };
 
   const addTag = async () => {
@@ -399,7 +409,32 @@ export function OpportunityCard({
           Valor:{" "}
           <span className="font-semibold text-slate-700">{formatBRL(opportunity.value)}</span>
         </p>
+        <p className="truncate text-[10px] text-slate-500">
+          Responsável:{" "}
+          <span className="font-medium text-slate-700">{owner?.name ?? "—"}</span>
+        </p>
       </div>
+
+      {/* Seletor de curso — fora do gesto de arrastar/abrir detalhe. */}
+      <span
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+        className="mt-1.5 block"
+      >
+        <select
+          value={opportunity.course ?? ""}
+          onChange={(e) => void setCourse(e.target.value)}
+          title={opportunity.course ?? "Selecionar curso"}
+          className="h-6 w-full truncate rounded border bg-white px-1 text-[10px] text-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+        >
+          <option value="">Curso: selecionar…</option>
+          {CURSOS.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+      </span>
 
       <div className="mt-2 flex items-center gap-1 border-t pt-1.5">
         <ActionButton icon={Phone} label="Ligar" onClick={call} />

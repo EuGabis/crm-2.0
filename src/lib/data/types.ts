@@ -56,6 +56,8 @@ export interface Opportunity {
   source: string;
   value: number;
   ownerId?: string;
+  /** Curso/formação escolhido para este lead (seletor no card do funil). */
+  course?: string;
   status: "open" | "won" | "lost";
   createdAt: string;
 }
