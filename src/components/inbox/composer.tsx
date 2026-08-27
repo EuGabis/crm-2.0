@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { inspecionarAudio, resumoDaInspecao } from "@/lib/whatsapp/audio";
+import { audioParaMp3 } from "@/lib/whatsapp/to-mp3";
 import OpusMediaRecorder from "opus-media-recorder";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -385,20 +386,36 @@ export function Composer({ conversationId }: { conversationId: string }) {
         setRecording(false);
         if (cancelRef.current) return;
         const secs = Math.max(1, Math.round((Date.now() - startedRef.current) / 1000));
-        const blob = new Blob(chunksRef.current, { type: mimeArquivo });
-        const file = new File([blob], `audio-${secs}s.${fmt.ext}`, { type: mimeArquivo });
+        const bruto = new Blob(chunksRef.current, { type: mimeArquivo });
+
+        /*
+         * ⚠️ **Chrome grava Ogg/Opus e ESTA conta da Meta recusa todo Ogg/Opus**
+         * (#131053), mesmo arquivo impecável e recebido IDÊNTICO — imagem/vídeo
+         * passam pelo mesmo caminho, então é o formato do áudio. O Chrome não
+         * grava mp4/aac, então transcodificamos Ogg → **MP3** aqui (audio/mpeg,
+         * aceito universalmente). Só o ramo Ogg transcodifica; mp4/aac (Safari)
+         * já é aceito e vai direto. Se a transcodificação falhar, manda o Ogg
+         * mesmo — melhor tentar do que travar.
+         */
+        let file: File;
+        if (fmt.tipo === "ogg") {
+          try {
+            file = await audioParaMp3(bruto, secs);
+          } catch (e) {
+            console.warn("[audio] falha ao transcodificar para MP3, enviando Ogg:", e);
+            file = new File([bruto], `audio-${secs}s.ogg`, { type: "audio/ogg" });
+          }
+        } else {
+          file = new File([bruto], `audio-${secs}s.${fmt.ext}`, { type: mimeArquivo });
+        }
+
         /*
          * Mesma inspeção que a rota faz nos bytes (`lib/whatsapp/audio.ts`), aqui
          * só para avisar antes da viagem — a decisão de recusar é do servidor,
-         * que é quem grava o motivo no balão.
-         *
-         * ⚠️ A versão anterior desta checagem tinha um furo: era
-         * `if (canais !== null && canais > 1)`, então "não achei o cabeçalho
-         * OpusHead" (null) passava CALADO, indistinguível de mono — um arquivo
-         * WebM ou WAV não disparava aviso nenhum. `inspecionarAudio` nomeia esse
-         * caso em vez de devolver ausência de resultado.
+         * que é quem grava o motivo no balão. Roda no arquivo FINAL (já em MP3
+         * quando transcodificou).
          */
-        const insp = inspecionarAudio(await blob.arrayBuffer());
+        const insp = inspecionarAudio(await file.arrayBuffer());
         if (!insp.aceitavel) {
           console.warn(`[audio] ${insp.motivo} — ${resumoDaInspecao(insp)}`);
           toast.warning(insp.motivo);
