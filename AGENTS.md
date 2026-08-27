@@ -1583,6 +1583,66 @@ Das 3 conversas afetadas, 2 voltaram para a fila e 1 ficou onde estava.
 `bot_paused` continua `true` de propósito: liberar o bot agora faria ele disparar
 mensagem automática para clientes que escreveram horas antes.
 
+## Áudio "falhou" sem dizer por quê (2026-08-27)
+
+Relato: "alguns usuários do CRM estão tentando enviar áudio e está falhando" —
+o balão mostrava a palavra **falhou** e mais nada. O áudio aparecia gravado,
+com onda e transcrição, o que já dizia que gravação, upload e transcrição
+funcionaram: o que quebrou foi a **entrega**.
+
+⚠️ **O motivo nunca era gravado.** `/api/whatsapp/send-media` fazia
+`update({ status: "failed" })` e devolvia o texto do erro na resposta HTTP, que
+virava um toast e sumia. `messages.error_detail` **existe desde a 0031** e o
+webhook já o preenche para falha de ENTREGA — a falha de ENVIO simplesmente não
+escrevia nele. E `graphError` (em `lib/whatsapp/client.ts`) já monta a mensagem
+com código e subcódigo da Meta: a informação existia e era jogada fora. Sem ela
+não há como distinguir "janela de 24h fechada" de "formato recusado", e a
+conduta do atendente é oposta nos dois casos.
+
+⚠️ **`Message` nem tinha o campo.** `mapMessage` mapeava `delivered_at` e
+`read_at` e não `error_detail`, então a tela não conseguiria mostrar o motivo
+nem quando o webhook o gravava. (O `select` é `*`, a coluna sempre vinha.)
+
+⚠️ **A causa do "ALGUNS usuários": a escrita usava a SESSÃO e a RLS a recusava
+em silêncio.** A policy `membros editam` de `messages` (última versão na
+**0074**) exige `private.conv_assigned_to_me(conversation_id)` — ou ver tudo,
+sem bot e sem atribuição. Um atendente que manda áudio numa conversa atribuída a
+OUTRA pessoa (ou com bot) não gravava status nenhum, e **UPDATE recusado pela
+RLS não vem com erro**: afeta 0 linhas, calado. Mesma armadilha já documentada
+em `conversationActions.removeMessage`. Hoje a rota segue o padrão do projeto —
+**a sessão AUTORIZA, a service role ESCREVE** (igual `resolveGuruUserToken` e a
+rota de transcrição); quem não pode ver a conversa levou 404 muito antes.
+
+⚠️ **Por que o texto não sofria do mesmo problema:** `/api/whatsapp/send`
+**INSERE** a mensagem depois de a Cloud API aceitar, e INSERT recusado pela RLS
+**devolve erro**. A rota de mídia **ATUALIZA** uma mensagem que o cliente já
+inseriu de forma otimista — e é o UPDATE que falha calado. Era a assimetria que
+fazia parecer "problema de áudio".
+
+**Também corrigido:** o composer dava `toast.success("Áudio enviado")` **antes**
+de tentar a entrega. O atendente lia "enviado" e só depois via o erro — ou nem
+via, se o toast já tinha sumido. Gravar no inbox não é entregar ao cliente.
+
+**Onde o motivo aparece agora:** numa faixa DENTRO do balão (`AlertTriangle` +
+texto), não só no `title` do "falhou". Tooltip que exige descobrir que há algo
+para passar o mouse em cima não comunica uma falha de entrega.
+
+Todo caminho de recusa da rota agora grava o motivo — inclusive os antecipados
+(janela de 24h, limite diário, mídia ausente, canal inativo, contato sem
+telefone), via o helper `recusar()`. A janela de 24h em particular **passou a
+marcar falha de propósito**: antes o balão nascia sem indicador nenhum e o
+atendente não tinha como saber que o áudio não saiu.
+
+⏳ **Falta:** botão de reenviar no balão que falhou (hoje é preciso gravar de
+novo), e as falhas ANTERIORES a esta correção seguem sem motivo gravado — não dá
+para reconstruir. Para ver o que as que passaram pelo webhook registraram:
+```sql
+select m.created_at, m.type, m.status, m.error_detail
+  from public.messages m
+ where m.direction = 'out' and m.status = 'failed'
+ order by m.created_at desc limit 30;
+```
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em

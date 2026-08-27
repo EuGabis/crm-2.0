@@ -285,7 +285,10 @@ export function Composer({ conversationId }: { conversationId: string }) {
         });
         setUploading(false);
         if (res.ok) {
-          toast.success("Áudio enviado");
+          // ⚠️ O "Áudio enviado" ficava AQUI, antes de tentar a entrega — o
+          // atendente lia "enviado" e só depois via o erro, ou nem via se o
+          // toast já tinha sumido. Gravar no inbox não é entregar ao cliente:
+          // o sucesso só é anunciado depois que a Cloud API aceitou.
           if (isWhatsapp && res.messageId && res.mediaPath) {
             const wa = await whatsappActions.sendMedia({
               conversationId,
@@ -295,13 +298,19 @@ export function Composer({ conversationId }: { conversationId: string }) {
               mime: res.mime,
               kind: "audio",
             });
-            if (!wa.ok) {
+            if (wa.ok) toast.success("Áudio enviado");
+            else {
               toast.error(
                 wa.needsTemplate
                   ? "Janela de 24h fechada — envie um template antes."
-                  : wa.error ?? "A mídia ficou no inbox, mas falhou ao enviar no WhatsApp."
+                  : wa.error ?? "O áudio ficou no inbox, mas falhou ao enviar no WhatsApp.",
+                // O motivo agora fica gravado e aparece no próprio balão, então
+                // o toast pode sumir sem levar a informação embora.
+                { description: "O motivo ficou registrado na mensagem, no fio da conversa." }
               );
             }
+          } else {
+            toast.success("Áudio enviado");
           }
         } else {
           toast.error(res.error ?? "Não foi possível enviar o áudio");

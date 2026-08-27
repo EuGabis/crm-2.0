@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
+  AlertTriangle,
   Archive,
   CalendarDays,
   Check,
@@ -727,7 +728,9 @@ function MessageBubble({
       : message.status === "delivered"
         ? `Entregue${at(message.deliveredAt)}`
         : message.status === "failed"
-          ? "Falhou ao enviar"
+          ? message.errorDetail
+            ? `Falhou: ${message.errorDetail}`
+            : "Falhou ao enviar"
           : "Enviado";
   return (
     <div className={cn("group flex items-center gap-1", isOut ? "justify-end" : "justify-start")}>
@@ -773,6 +776,21 @@ function MessageBubble({
           </>
         ) : (
           <span className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</span>
+        )}
+        {/*
+          ⚠️ O motivo da falha vai DENTRO do balão, não só no title do "falhou".
+          A conduta muda por completo com o motivo — "janela de 24h fechada" pede
+          um template, "formato recusado" pede outro arquivo — e um tooltip que
+          exige descobrir que há algo para passar o mouse em cima não comunica
+          isso. Antes o balão dizia apenas "falhou", e nem o motivo era gravado.
+        */}
+        {isOut && message.status === "failed" && message.errorDetail && (
+          <p className="mt-1 flex gap-1 rounded-md bg-rose-500/25 px-2 py-1 text-[10px] leading-snug text-rose-50">
+            <AlertTriangle className="mt-px size-3 shrink-0" aria-hidden />
+            <span className="[overflow-wrap:anywhere]">
+              Não foi entregue: {message.errorDetail}
+            </span>
+          </p>
         )}
         <p
           className={cn(

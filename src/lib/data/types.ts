@@ -88,6 +88,8 @@ export interface Message {
   /** Carimbos de entrega/leitura do WhatsApp (migração 0031) — para o rastreio. */
   deliveredAt?: string;
   readAt?: string;
+  /** Motivo da falha de envio/entrega (messages.error_detail, 0031). */
+  errorDetail?: string;
   /** Escrita por automação/IA, não por uma pessoa (migração 0027). */
   automated?: boolean;
   /** Transcrição do áudio (migração 0085). */
