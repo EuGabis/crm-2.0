@@ -2054,6 +2054,57 @@ caminho foi usado deixa de ser suposição.
 ⏳ **Se falhar por link também**, o CRM está fora de suspeita e o próximo passo é
 o painel da Meta (número, WABA, permissão de mensagem de voz) — não código.
 
+## Áudio: MP4/AAC no lugar do Ogg/Opus (2026-08-27) — o fim da novela
+
+⚠️ **A bisseção por `link` deu a resposta, e ela invalidou nove rodadas de
+leitura da mensagem de erro.** Enviando por `link` (a Meta baixando o arquivo do
+nosso Storage), o multipart sai do caminho e **nós não declaramos mimetype
+nenhum**. A recusa voltou IDÊNTICA, palavra por palavra, inclusive a parte
+"uploaded with mimetype as audio/ogg; codecs=opus".
+
+Conclusão: **aquele texto é modelo fixo da Meta, não medição.** Usá-lo como pista
+foi o que produziu as rodadas de mime, estéreo, contêiner, fluxo e `pre-skip`. Em
+mensagem de erro de API, "a frase menciona X" não é evidência de que X seja o
+problema — e essa é a lição transferível daqui.
+
+O que ficou provado, somando tudo:
+- o arquivo é um Ogg/Opus impecável (mono, `pre-skip` 312, OpusTags, EOS,
+  `crc=8/8`, sem truncamento, granule coerente);
+- a nossa transmissão não é o problema (falha igual por upload e por link);
+- **a Cloud API simplesmente não processa o Ogg/Opus do `opus-media-recorder`.**
+
+**A saída é trocar o formato**, não continuar agradando o decodificador dela.
+`formatoDeGravacao()` no composer prefere **`audio/mp4` (AAC)** pelo
+`MediaRecorder` NATIVO — Chrome 111+ e Safari suportam, e o usuário que relatou
+está em Chrome 151. MP4/AAC é formato de primeira classe na lista da Cloud API, e
+isso tira da jogada o encoder WebAssembly de terceiro, que era o único componente
+ainda não eliminado.
+
+O Ogg/Opus fica como **reserva** para navegador sem MP4: continua tocando no
+inbox e sendo transcrito, mesmo que a Meta o recuse. Não foi removido porque
+remover deixaria esses navegadores sem gravação nenhuma.
+
+⚠️ **`inspecionarAudio` passou a aceitar `mp4` e `mp3`.** Ela exigia OGG, e
+manter essa exigência bloquearia justamente a saída encontrada. As checagens de
+`OpusHead`/páginas/EOS continuam valendo **só para OGG** — sobre MP4 não há o que
+conferir por bytes sem escrever um parser de caixas MP4, e não vale escrever um
+para checar o que a Meta aceita sem reclamar.
+
+⚠️ **O mime gravado no arquivo é sempre a forma SEM parâmetro** (`audio/mp4`),
+mesmo quando o `isTypeSupported` só aceitou `audio/mp4;codecs=mp4a.40.2`. O
+servidor limpa de novo, mas sujar na origem seria reintroduzir de propósito a
+confusão que custou rodadas.
+
+**Áudio voltou ao caminho de UPLOAD**: o `link` era o experimento, e concluído o
+experimento vale o caminho documentado, que tem menos dependências (sem URL
+assinada, sem a Meta precisar alcançar o nosso Storage). `{ link }` continua
+suportado e testado em `sendMediaMessage` — custa nada manter e evita reescrever
+se a bisseção precisar ser repetida.
+
+⏳ Se o MP4 também for recusado, o CRM está fora de suspeita: arquivo válido, dois
+caminhos de transmissão, dois formatos. O próximo passo passa a ser o painel da
+Meta (número, WABA, permissão de mensagem de voz), não código.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em

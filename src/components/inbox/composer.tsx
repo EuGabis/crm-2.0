@@ -114,6 +114,43 @@ function msgSnippet(m: Message): string {
  * Mono também é o certo para recado de voz por si só: metade dos bytes, e voz
  * captada por um microfone não tem informação estéreo nenhuma para preservar.
  */
+/**
+ * Formato em que o áudio será gravado.
+ *
+ * ⚠️ **MP4/AAC vem primeiro, e a razão é dura de engolir: a Cloud API do
+ * WhatsApp não processa o Ogg/Opus que o `opus-media-recorder` produz.** Foram
+ * NOVE rodadas provando que o arquivo está bom: mono, `pre-skip` conforme a RFC
+ * 7845, OpusTags, EOS, CRC de todas as páginas conferindo, sem truncamento,
+ * granule coerente. A Meta recusa com #131053 de todo jeito.
+ *
+ * A prova de que o problema não é nosso veio ao enviar por `link`, com a Meta
+ * baixando o arquivo direto do Storage: o multipart saiu do caminho, nós não
+ * declaramos mimetype nenhum, **e a mensagem de erro voltou idêntica** — palavra
+ * por palavra, inclusive a parte sobre mimetype. Ou seja, aquele texto é modelo
+ * fixo da Meta, não medição, e usá-lo como pista foi o que custou as rodadas.
+ *
+ * `audio/mp4` (AAC) é formato de primeira classe na lista da Cloud API, o
+ * `MediaRecorder` NATIVO do Chrome 111+ e do Safari grava nele, e isso tira da
+ * jogada o encoder WebAssembly de terceiro — que é o único componente que
+ * sobrou como suspeito.
+ *
+ * O Ogg/Opus fica como reserva para navegador sem suporte a MP4: é o que existia
+ * e continua tocando no inbox, mesmo que a Meta o recuse.
+ */
+function formatoDeGravacao():
+  | { tipo: "mp4"; mime: string; ext: string }
+  | { tipo: "ogg"; mime: string; ext: string } {
+  const nativo = typeof MediaRecorder !== "undefined";
+  // A ordem importa: a primeira que o navegador suportar ganha.
+  const candidatos = ["audio/mp4", "audio/mp4;codecs=mp4a.40.2", "audio/aac"];
+  if (nativo) {
+    for (const c of candidatos) {
+      if (MediaRecorder.isTypeSupported(c)) return { tipo: "mp4", mime: c, ext: "m4a" };
+    }
+  }
+  return { tipo: "ogg", mime: "audio/ogg", ext: "ogg" };
+}
+
 async function microfoneMono(): Promise<{ stream: MediaStream; encerrar: () => void }> {
   const bruto = await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: { ideal: 1 }, sampleRate: { ideal: 48000 } },
@@ -315,17 +352,28 @@ export function Composer({ conversationId }: { conversationId: string }) {
       const mic = await microfoneMono();
       const stream = mic.stream;
       encerrar = mic.encerrar;
-      // Grava direto em ogg/opus no navegador (polyfill via WebAssembly) — é o
-      // único formato de áudio que a Cloud API do WhatsApp aceita, e o
-      // MediaRecorder nativo do Chrome/Edge só produz webm. Isso elimina a
-      // conversão server-side com ffmpeg, que não funciona no serverless da
-      // Vercel (binário fora do bundle).
-      const mimeType = "audio/ogg";
-      const workerOptions = {
-        encoderWorkerFactory: () => new Worker("/opus-media-recorder/encoderWorker.umd.js"),
-        OggOpusEncoderWasmPath: "/opus-media-recorder/OggOpusEncoder.wasm",
-      };
-      const mr = new OpusMediaRecorder(stream, { mimeType }, workerOptions);
+      const fmt = formatoDeGravacao();
+      /*
+       * ⚠️ O mime GRAVADO no arquivo é sempre a forma sem parâmetro
+       * (`audio/mp4`), mesmo quando o `isTypeSupported` só aceitou a forma com
+       * codec (`audio/mp4;codecs=mp4a.40.2`). A lista de tipos aceitos da Cloud
+       * API não tem parâmetro, e essa distinção já custou rodadas de
+       * investigação — o servidor limpa de novo, mas não é motivo para sujar
+       * aqui.
+       */
+      const mimeArquivo = fmt.tipo === "mp4" ? "audio/mp4" : "audio/ogg";
+      const mr =
+        fmt.tipo === "mp4"
+          ? new MediaRecorder(stream, { mimeType: fmt.mime })
+          : new OpusMediaRecorder(
+              stream,
+              { mimeType: fmt.mime },
+              {
+                encoderWorkerFactory: () =>
+                  new Worker("/opus-media-recorder/encoderWorker.umd.js"),
+                OggOpusEncoderWasmPath: "/opus-media-recorder/OggOpusEncoder.wasm",
+              }
+            );
       chunksRef.current = [];
       cancelRef.current = false;
       mr.ondataavailable = (e: BlobEvent) => {
@@ -337,8 +385,8 @@ export function Composer({ conversationId }: { conversationId: string }) {
         setRecording(false);
         if (cancelRef.current) return;
         const secs = Math.max(1, Math.round((Date.now() - startedRef.current) / 1000));
-        const blob = new Blob(chunksRef.current, { type: "audio/ogg" });
-        const file = new File([blob], `audio-${secs}s.ogg`, { type: "audio/ogg" });
+        const blob = new Blob(chunksRef.current, { type: mimeArquivo });
+        const file = new File([blob], `audio-${secs}s.${fmt.ext}`, { type: mimeArquivo });
         /*
          * Mesma inspeção que a rota faz nos bytes (`lib/whatsapp/audio.ts`), aqui
          * só para avisar antes da viagem — a decisão de recusar é do servidor,
