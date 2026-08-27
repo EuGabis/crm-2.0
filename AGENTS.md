@@ -1878,6 +1878,58 @@ feita pelo código antigo.
 Exige sessão (está dentro do matcher do `proxy.ts`): commit e branch não são
 segredo, mas também não precisam ficar abertos na internet.
 
+## Áudio: cabeçalho válido NÃO é fluxo válido (2026-08-27)
+
+Sexta rodada no mesmo erro. O que finalmente destravou foi **medir em vez de
+deduzir**: `GET /api/whatsapp/send-media` respondeu, de produção,
+`{"commit":"6435788","correcoes":{"audioMimeSemParametro":true,...}}` — o código
+novo ESTAVA no ar. Ou seja, as três rodadas gastas com o mime perseguiram a
+coisa errada.
+
+⚠️ **A frase da Meta tem duas metades e eu li a errada.**
+"Audio file uploaded with mimetype as **audio/ogg; codecs=opus**, however on
+processing it is of type **application/octet-stream**". A primeira metade é
+provavelmente a Meta se CITANDO — `audio/ogg; codecs=opus` é a forma canônica
+dela para nota de voz —, não citando o que mandamos. A queixa real é a segunda:
+**o farejador dela não conseguiu reconhecer o arquivo**. Com o commit confirmado
+no ar e o mime saindo sem parâmetro (provado no multipart), só sobra o CONTEÚDO.
+
+⚠️ **`inspecionarAudio` lia só os primeiros 400 bytes.** Confirmava `OggS` no
+início e `OpusHead` dizendo 1 canal — e passava. Cabeçalho válido não garante
+fluxo válido, e era exatamente esse o furo: o arquivo que a Meta recusa **passa**
+por essa checagem.
+
+**`analisarOgg`** percorre as páginas e verifica o que a RFC 7845 exige e o
+cabeçalho não prova:
+- página 1 com marca BOS e carga `OpusHead`;
+- **página 2 com `OpusTags`** — obrigatória, e é o que alguns codificadores de
+  navegador omitem;
+- ao menos uma página de áudio;
+- última página com marca **EOS** (fluxo fechado);
+- nenhum byte fora de página (truncamento).
+
+⚠️ **Navegador e Whisper toleram a falta de qualquer um desses** — foi por isso
+que "o áudio toca e é transcrito" pareceu prova de arquivo bom durante cinco
+rodadas. Parser estrito não tolera.
+
+Testado com 5 fluxos sintéticos montados página por página (completo, sem
+OpusTags, sem EOS, só cabeçalhos, truncado). O granule é lido como dois inteiros
+de 32 bits em vez de BigInt: em 48 kHz nem áudio de horas passa de 2^53.
+
+⏳ **Ainda é instrumento, não cura.** Se o áudio real tiver problema de fluxo, a
+rota agora recusa dizendo QUAL e o balão mostra; se o fluxo estiver íntegro, a
+causa é outra e o log `[send-media] fluxo ogg: ...` dá o retrato completo. O que
+NÃO existe mais é a possibilidade de investigar isso às cegas.
+
+### Lição de método (a parte que mais custou)
+
+Seis rodadas, e o gargalo nunca foi a correção — foi **não saber qual código
+estava rodando**. Enquanto isso era dedução, cada retorno do mesmo texto de erro
+tinha três explicações incompatíveis (não funcionou / não subiu / a falha era
+antiga) e eu escolhia uma por palpite. Ao consertar algo cujo sintoma chega de
+forma assíncrona (webhook, cron, fila), **construa o marcador de versão junto com
+a primeira correção**, não na sexta.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em

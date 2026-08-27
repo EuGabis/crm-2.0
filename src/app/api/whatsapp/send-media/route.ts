@@ -1,7 +1,13 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { uploadMedia, sendMediaMessage } from "@/lib/whatsapp/client";
-import { inspecionarAudio, mimeParaUpload, resumoDaInspecao } from "@/lib/whatsapp/audio";
+import {
+  analisarOgg,
+  inspecionarAudio,
+  mimeParaUpload,
+  resumoDaInspecao,
+  resumoDoOgg,
+} from "@/lib/whatsapp/audio";
 import { toWhatsAppNumber } from "@/lib/whatsapp/phone";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -82,6 +88,8 @@ export async function GET() {
       inspecaoDeAudio: true,
       /** `media_mime` guarda o mime REALMENTE enviado. */
       mimeGravadoComoEnviado: true,
+      /** Fluxo Ogg percorrido página por página, não só o cabeçalho. */
+      analiseDeFluxoOgg: true
     },
   });
 }
@@ -232,7 +240,9 @@ export async function POST(request: Request) {
     console.log(
       `[send-media] áudio ${messageId}: ${resumoDaInspecao(insp)} ` +
         `declarado=${JSON.stringify(mime ?? blob.type)} enviado=${sendMime} ` +
-        `commit=${(process.env.VERCEL_GIT_COMMIT_SHA ?? "local").slice(0, 7)}`
+        `commit=${(process.env.VERCEL_GIT_COMMIT_SHA ?? "local").slice(0, 7)}
+` +
+        `[send-media] fluxo ogg: ${resumoDoOgg(analisarOgg(bytes))}`
     );
     if (!insp.aceitavel) {
       return recusar(`${insp.motivo} (${resumoDaInspecao(insp)})`, 422);

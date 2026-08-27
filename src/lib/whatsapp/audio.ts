@@ -115,6 +115,25 @@ export function inspecionarAudio(bytes: ArrayBuffer): InspecaoDeAudio {
       motivo: `O áudio saiu com ${canais} canais e o WhatsApp aceita só mono (1 canal).`,
     };
   }
+
+  /*
+   * ⚠️ **Cabeçalho válido NÃO é fluxo válido**, e foi essa suposição que fez a
+   * investigação persuadir o mime por três rodadas. As checagens acima leem os
+   * primeiros 400 bytes; a Meta recusa por não conseguir DECODIFICAR o arquivo
+   * ("on processing it is of type application/octet-stream"). Só percorrendo as
+   * páginas dá para saber se falta OpusTags, se não há página de áudio ou se o
+   * fluxo ficou sem fechar.
+   */
+  const ogg = analisarOgg(bytes);
+  if (ogg.problemas.length) {
+    return {
+      ...base,
+      aceitavel: false,
+      motivo:
+        `O arquivo tem cabeçalho de OGG/Opus válido mas o fluxo está incompleto ` +
+        `(${ogg.problemas.join("; ")}), e a Meta recusa o que não consegue decodificar.`,
+    };
+  }
   return { ...base, aceitavel: true, motivo: "" };
 }
 
@@ -193,4 +212,122 @@ export function mimeParaUpload(
     if (porBytes) return porBytes;
   }
   return limpo;
+}
+
+/* ------------------------------------------------------------------ *
+ * Análise do FLUXO Ogg, não só do cabeçalho
+ *
+ * ⚠️ `inspecionarAudio` lê os primeiros 400 bytes: confirma que começa com
+ * `OggS` e que o `OpusHead` diz 1 canal. Isso passou, e a Meta recusou de todo
+ * jeito — com o commit da correção confirmado no ar (`GET` desta rota devolvia
+ * `audioMimeSemParametro: true`). Ou seja, o problema não é o rótulo: é o
+ * CONTEÚDO, e um cabeçalho válido não garante fluxo válido.
+ *
+ * A frase da Meta lida de novo diz exatamente isso: "however on processing it is
+ * of type application/octet-stream" — o farejador dela não reconheceu o arquivo.
+ * E `audio/ogg; codecs=opus` é a forma canônica que ela própria usa para nota de
+ * voz, então a primeira metade da frase provavelmente é a Meta se citando, não
+ * citando o que mandamos. Foi isso que fez a investigação perseguir o mime por
+ * três rodadas.
+ *
+ * O que um Ogg/Opus VÁLIDO precisa ter, pela RFC 7845, e que o cabeçalho sozinho
+ * não prova:
+ *   - página 1 com a marca BOS e carga `OpusHead`;
+ *   - página 2 com carga `OpusTags` (cabeçalho de comentários) — **obrigatória**,
+ *     e é justamente o que alguns codificadores de navegador omitem;
+ *   - ao menos uma página de áudio depois dela;
+ *   - a última página com a marca EOS (fim de fluxo).
+ * Navegador e Whisper toleram a falta de qualquer um desses; parser estrito, não.
+ * ------------------------------------------------------------------ */
+
+export interface AnaliseOgg {
+  paginas: number;
+  temOpusHead: boolean;
+  /** Segunda página com `OpusTags` — obrigatória pela RFC 7845. */
+  temOpusTags: boolean;
+  paginasDeAudio: number;
+  /** Marca EOS na última página: o fluxo declara que terminou. */
+  temEos: boolean;
+  /** Amostras totais em 48 kHz, do granule da última página. */
+  granuleFinal: number;
+  /** Bytes que sobraram sem formar página — sinal de arquivo truncado. */
+  sobra: number;
+  problemas: string[];
+}
+
+/** Percorre as páginas Ogg e diz o que o fluxo tem e o que falta. */
+export function analisarOgg(bytes: ArrayBuffer): AnaliseOgg {
+  const b = new Uint8Array(bytes);
+  const r: AnaliseOgg = {
+    paginas: 0,
+    temOpusHead: false,
+    temOpusTags: false,
+    paginasDeAudio: 0,
+    temEos: false,
+    granuleFinal: 0,
+    sobra: 0,
+    problemas: [],
+  };
+
+  const marca = (i: number, t: string) =>
+    [...t].every((c, k) => b[i + k] === c.charCodeAt(0));
+
+  let i = 0;
+  let ultimoTipo = 0;
+  while (i + 27 <= b.length) {
+    if (!marca(i, "OggS")) {
+      // Lixo entre páginas é corrupção: um Ogg é uma sequência contígua delas.
+      r.sobra = b.length - i;
+      r.problemas.push(`bytes fora de página na posição ${i}`);
+      break;
+    }
+    const nSeg = b[i + 26]!;
+    const tabela = i + 27;
+    if (tabela + nSeg > b.length) {
+      r.sobra = b.length - i;
+      r.problemas.push("tabela de segmentos cortada (arquivo truncado)");
+      break;
+    }
+    let carga = 0;
+    for (let k = 0; k < nSeg; k++) carga += b[tabela + k]!;
+    const inicioCarga = tabela + nSeg;
+    if (inicioCarga + carga > b.length) {
+      r.sobra = b.length - i;
+      r.problemas.push("carga da última página cortada (arquivo truncado)");
+      break;
+    }
+
+    ultimoTipo = b[i + 5]!;
+    // Granule é int64 LE; em 48 kHz um áudio de horas não passa de 2^53, então
+    // ler como dois inteiros de 32 bits é seguro e evita BigInt.
+    const gLo =
+      b[i + 6]! | (b[i + 7]! << 8) | (b[i + 8]! << 16) | (b[i + 9]! * 0x1000000);
+    const gHi =
+      b[i + 10]! | (b[i + 11]! << 8) | (b[i + 12]! << 16) | (b[i + 13]! * 0x1000000);
+    r.granuleFinal = gHi * 0x100000000 + gLo;
+
+    if (r.paginas === 0 && marca(inicioCarga, "OpusHead")) r.temOpusHead = true;
+    else if (r.paginas === 1 && marca(inicioCarga, "OpusTags")) r.temOpusTags = true;
+    else if (r.paginas >= 1) r.paginasDeAudio++;
+
+    r.paginas++;
+    i = inicioCarga + carga;
+  }
+  if (i === b.length) r.sobra = 0;
+  r.temEos = (ultimoTipo & 0x04) !== 0;
+
+  if (!r.temOpusHead) r.problemas.push("primeira página não é OpusHead");
+  if (!r.temOpusTags) r.problemas.push("falta a página OpusTags (obrigatória na RFC 7845)");
+  if (r.paginasDeAudio === 0) r.problemas.push("nenhuma página de áudio");
+  if (!r.temEos) r.problemas.push("última página sem a marca EOS (fluxo não fechado)");
+  return r;
+}
+
+/** Linha curta para log. */
+export function resumoDoOgg(a: AnaliseOgg): string {
+  return (
+    `paginas=${a.paginas} head=${a.temOpusHead} tags=${a.temOpusTags} ` +
+    `audio=${a.paginasDeAudio} eos=${a.temEos} granule=${a.granuleFinal} sobra=${a.sobra}` +
+    (a.problemas.length ? ` PROBLEMAS[${a.problemas.join("; ")}]` : "")
+  );
 }
