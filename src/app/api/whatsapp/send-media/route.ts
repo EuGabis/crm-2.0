@@ -8,6 +8,7 @@ import {
   resumoDaInspecao,
   resumoDoOgg,
   retratoDoAudio,
+  corrigirPreSkip,
 } from "@/lib/whatsapp/audio";
 import { toWhatsAppNumber } from "@/lib/whatsapp/phone";
 
@@ -92,7 +93,9 @@ export async function GET() {
       /** Fluxo Ogg percorrido página por página, não só o cabeçalho. */
       analiseDeFluxoOgg: true,
       /** Retrato do arquivo gravado na mensagem, preservado pelo webhook. */
-      retratoNoBalao: true
+      retratoNoBalao: true,
+      /** `pre-skip=0` do opus-media-recorder corrigido, com CRC refeito. */
+      preSkipCorrigido: true
     },
   });
 }
@@ -197,7 +200,8 @@ export async function POST(request: Request) {
     return recusar("Mídia não encontrada: " + (dlErr?.message ?? "arquivo ausente"), 400);
   }
   const bytes = await blob.arrayBuffer();
-  const sendBytes = bytes;
+  let sendBytes = bytes;
+  let notaPreSkip = "";
   /*
    * ⚠️ **O mime declarado à Meta vem dos BYTES, não da alegação do cliente.**
    * A recusa que travou este bug por três rodadas foi, nas palavras dela:
@@ -245,11 +249,34 @@ export async function POST(request: Request) {
         `declarado=${JSON.stringify(mime ?? blob.type)} enviado=${sendMime} ` +
         `commit=${(process.env.VERCEL_GIT_COMMIT_SHA ?? "local").slice(0, 7)}
 ` +
-        `[send-media] fluxo ogg: ${resumoDoOgg(analisarOgg(bytes))}`
+        `[send-media] fluxo ogg: ${resumoDoOgg(analisarOgg(bytes))} ${notaPreSkip}`
     );
     if (!insp.aceitavel) {
       return recusar(`${insp.motivo} (${resumoDaInspecao(insp)})`, 422);
     }
+
+    /*
+     * ⚠️ **`pre-skip = 0` é a causa da recusa da Meta**, e o diagnóstico do
+     * arquivo real foi o que apontou: tudo saudável menos esse campo
+     * (`head[v=1 ch=1 preskip=0 ...]`).
+     *
+     * O Opus tem atraso algorítmico inerente — 312 amostras a 48 kHz no libopus
+     * — e a RFC 7845 manda o muxer gravar isso no `pre-skip`, porque é com ele
+     * que o decodificador converte granule em posição PCM. O
+     * `opus-media-recorder` grava zero. Navegador e Whisper ignoram e tocam o
+     * áudio (foi o que fez o arquivo parecer bom por seis rodadas); demuxer
+     * estrito falha, e demuxer que falha é exatamente a frase da Meta ("on
+     * processing it is of type application/octet-stream").
+     *
+     * Corrigir aqui, e não no navegador: o encoder é WebAssembly de terceiro e o
+     * arquivo já está em mãos neste ponto. A função **recusa agir** se o CRC das
+     * páginas não conferir com o dela — se a implementação de CRC estivesse
+     * errada, reescrever produziria um arquivo pior do que o atual, que ao menos
+     * toca no navegador.
+     */
+    const ps = corrigirPreSkip(bytes);
+    sendBytes = ps.bytes;
+    notaPreSkip = ps.nota;
   }
 
   let waResp: any;
@@ -293,7 +320,7 @@ export async function POST(request: Request) {
        * só no `console.log`, num painel do Vercel que ninguém acha na hora do
        * problema — e a investigação passou seis rodadas sem esse dado.
        */
-      error_detail: `[diag] ${retratoDoAudio(bytes)}`,
+      error_detail: `[diag] ${retratoDoAudio(sendBytes)}${notaPreSkip ? ` ${notaPreSkip}` : ""}`,
       failed_at: null,
       /*
        * ⚠️ Grava o mime que REALMENTE foi enviado, não o que o cliente alegou.
