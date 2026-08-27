@@ -1,6 +1,12 @@
+import { createHash } from "node:crypto";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { uploadMedia, sendMediaMessage } from "@/lib/whatsapp/client";
+import {
+  uploadMedia,
+  sendMediaMessage,
+  getMediaInfo,
+  downloadMedia,
+} from "@/lib/whatsapp/client";
 import {
   analisarOgg,
   inspecionarAudio,
@@ -97,7 +103,9 @@ export async function GET() {
       /** `pre-skip=0` do opus-media-recorder corrigido, com CRC refeito. */
       preSkipCorrigido: true,
       /** Composer grava MP4/AAC quando o navegador suporta; inspeção aceita mp4/mp3. */
-      audioMp4: true
+      audioMp4: true,
+      /** Áudio é relido da Meta e comparado com o que enviamos (round-trip). */
+      roundTripDaMeta: true
     },
   });
 }
@@ -204,6 +212,8 @@ export async function POST(request: Request) {
   const bytes = await blob.arrayBuffer();
   let sendBytes = bytes;
   let notaPreSkip = "";
+  /** Comparação do que a Meta guardou com o que enviamos — ver abaixo. */
+  let notaRoundTrip = "";
   /*
    * ⚠️ **O mime declarado à Meta vem dos BYTES, não da alegação do cliente.**
    * A recusa que travou este bug por três rodadas foi, nas palavras dela:
@@ -321,6 +331,44 @@ export async function POST(request: Request) {
      * manter e evita reescrever isso se a bisseção precisar ser repetida.
      */
     const mediaId = await uploadMedia(channel.phone_number_id, sendBytes, sendMime, uploadName);
+
+    /*
+     * ⚠️ **Confere o que a META GUARDOU, baixando de volta.** É o único teste que
+     * nunca foi feito nesta investigação, e é o que separa as duas explicações
+     * que sobraram depois de dez rodadas.
+     *
+     * O fato que forçou isto: a Meta diz que "ao processar" o arquivo é
+     * `application/octet-stream` tanto para um OGG com `OggS` no byte 0 quanto
+     * para um MP4 com `ftyp` no byte 4. **Nenhum farejador erra os dois** — as
+     * duas assinaturas são triviais. Isso empurra a suspeita para os BYTES que
+     * ela recebe não serem os nossos.
+     *
+     * Comparar tamanho e hash responde de vez:
+     *   - **diferente** → o nosso upload corrompe (multipart, Blob, undici), e o
+     *     conserto é aqui;
+     *   - **igual** → a Meta recebeu exatamente o nosso arquivo e recusa por
+     *     conteúdo. Aí o CRM está fora de suspeita e o caminho é o painel dela.
+     *
+     * Best-effort de propósito: é DIAGNÓSTICO. Falhar aqui não pode impedir o
+     * envio — a mensagem já foi aceita pela Meta neste ponto.
+     */
+    if (kind === "audio") {
+      try {
+        const info = await getMediaInfo(mediaId);
+        const volta = await downloadMedia(info.url);
+        const h = (b: ArrayBuffer) =>
+          createHash("sha256").update(Buffer.from(b)).digest("hex").slice(0, 12);
+        const iguais = volta.bytes.byteLength === sendBytes.byteLength;
+        notaRoundTrip =
+          ` meta[bytes=${info.size}/${volta.bytes.byteLength} mime=${info.mime} ` +
+          `enviei=${sendBytes.byteLength} hash=${h(sendBytes)}/${h(volta.bytes)} ` +
+          `${iguais && h(sendBytes) === h(volta.bytes) ? "IDENTICO" : "DIVERGENTE"}]`;
+        console.log(`[send-media] round-trip ${messageId}:${notaRoundTrip}`);
+      } catch (e) {
+        notaRoundTrip = ` meta[falha ao reler: ${e instanceof Error ? e.message : "?"}]`;
+      }
+    }
+
     waResp = await sendMediaMessage(
       channel.phone_number_id,
       to,
@@ -366,7 +414,7 @@ export async function POST(request: Request) {
        */
       error_detail:
         `[diag] ${retratoDoAudio(sendBytes)}${notaPreSkip ? ` ${notaPreSkip}` : ""}` +
-        ` via=upload fmt=${sendMime}`,
+        ` via=upload fmt=${sendMime}${notaRoundTrip}`,
       failed_at: null,
       /*
        * ⚠️ Grava o mime que REALMENTE foi enviado, não o que o cliente alegou.

@@ -2105,6 +2105,53 @@ se a bisseção precisar ser repetida.
 caminhos de transmissão, dois formatos. O próximo passo passa a ser o painel da
 Meta (número, WABA, permissão de mensagem de voz), não código.
 
+## Áudio, rodada 10: o que a Meta RECEBEU (2026-08-27)
+
+⚠️ **Correção da conclusão anterior.** A seção acima afirma que o texto do erro é
+"modelo fixo, não medição". **Está errado.** Ao enviar MP4, a mensagem mudou para
+"uploaded with mimetype as **audio/mp4**" — ou seja, ela ESPELHA o que
+declaramos. A base daquela conclusão era o envio por `link`, em que não
+declaramos mimetype e a Meta citou `audio/ogg; codecs=opus`; a explicação
+provável é que ela leu o `Content-Type` do nosso Storage (o `upsert` do
+Supabase talvez não atualize o content-type de objeto existente — não confirmado).
+
+Com o texto sendo medição de verdade, a segunda metade também é: **o farejador da
+Meta genuinamente não identifica o nosso arquivo.**
+
+⚠️ **E aqui está o fato que reorienta tudo:** ela responde
+`application/octet-stream` tanto para um OGG com `OggS` no byte 0 quanto para um
+MP4 com `ftyp` no byte 4. **Nenhum farejador erra as duas** — são as duas
+assinaturas mais triviais que existem. Isso empurra a suspeita para fora do
+arquivo e para cima dos BYTES QUE ELA RECEBE.
+
+**Teste que nunca havia sido feito:** subir, **baixar de volta da Meta**
+(`getMediaInfo` + `downloadMedia`, ambos já existiam) e comparar tamanho e hash
+com o que enviamos. Responde de vez:
+- **DIVERGENTE** → o nosso upload corrompe (multipart / Blob / undici) e o
+  conserto é no CRM;
+- **IDENTICO** → a Meta recebeu exatamente o nosso arquivo e recusa por conteúdo;
+  o CRM sai de suspeita e o caminho passa a ser o painel dela.
+
+O resultado entra no diagnóstico do balão como
+`meta[bytes=.../... mime=... enviei=... hash=.../... IDENTICO|DIVERGENTE]`.
+
+⚠️ **Best-effort de propósito:** é diagnóstico, e falhar aqui não pode impedir o
+envio — a mensagem já foi aceita pela Meta nesse ponto do fluxo.
+
+### Lição de método, agora com dez rodadas de evidência
+
+1. **Mensagem de erro de API não é diagnóstico.** "A frase menciona X" não é
+   evidência de que X seja a causa. Nove rodadas (mime, estéreo, contêiner,
+   fluxo, pre-skip) saíram de ler a frase como se fosse medição — e a décima
+   mostrou que ela é medição de uma coisa DIFERENTE do que eu supunha.
+2. **Diagnóstico de falha assíncrona tem que aparecer onde a falha aparece.** O
+   dado que resolveu ficou três rodadas num `console.log` que eu mandei procurar.
+3. **Marcador de versão junto com a primeira correção**, não na sexta.
+4. **Quando duas hipóteses independentes sobre o mesmo componente falham, o
+   componente provavelmente está certo.** Dois formatos e dois caminhos de
+   transmissão recusados é sinal de olhar para fora, não de tentar o terceiro
+   formato.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
