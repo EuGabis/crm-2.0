@@ -206,7 +206,10 @@ export async function POST(request: Request) {
     // `graphError` já monta a mensagem com o código e o subcódigo da Meta — é
     // essa string que o atendente precisa ver, e era ela que se perdia.
     const motivo = e instanceof Error ? e.message : "Falha na Cloud API";
-    await marcarFalha(admin, messageId, motivo);
+    // O mime enviado entra no motivo: é a informação que separa "o CRM declarou
+    // errado" de "a Meta recusou o arquivo certo", e sem ela a investigação
+    // desta falha voltou três vezes ao mesmo ponto.
+    await marcarFalha(admin, messageId, `${motivo} [enviado como ${sendMime}]`);
     return Response.json({ error: motivo }, { status: 502 });
   }
 
@@ -217,7 +220,27 @@ export async function POST(request: Request) {
   // marca de enviado mesmo tendo chegado no cliente.
   await admin
     .from("messages")
-    .update({ wa_message_id: waMessageId, status: "sent", error_detail: null, failed_at: null })
+    .update({
+      wa_message_id: waMessageId,
+      status: "sent",
+      error_detail: null,
+      failed_at: null,
+      /*
+       * ⚠️ Grava o mime que REALMENTE foi enviado, não o que o cliente alegou.
+       *
+       * Duas razões. A primeira é veracidade: `media_mime` guardava `file.type`
+       * do navegador, e foi justamente essa alegação que se provou errada
+       * (`audio/ogg; codecs=opus` de um bundle antigo em cache) — a coluna
+       * descrevia o palpite do cliente, não o arquivo.
+       *
+       * A segunda é diagnóstico, e é a que importa agora: a recusa da Meta chega
+       * pelo WEBHOOK, de forma assíncrona, e o texto dela fica em `error_detail`
+       * até alguém apagar. Sem um marcador, uma falha ANTIGA lida hoje é
+       * indistinguível de uma nova — foi o que aconteceu depois desta correção.
+       * Com isto, `media_mime` sem parâmetro significa "passou pelo código novo".
+       */
+      media_mime: sendMime,
+    })
     .eq("id", messageId);
 
   return Response.json({ ok: true, waMessageId });

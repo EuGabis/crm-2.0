@@ -1789,6 +1789,35 @@ outra recusa da Meta.
 Só reescreve quando a assinatura é CONCLUSIVA — palpite nosso por cima de um mime
 declarado correto trocaria um erro por outro.
 
+### ⚠️ Falha antiga é indistinguível de falha nova (e isso custou uma rodada)
+
+Depois da correção do mime, o mesmo texto de erro voltou. Conferindo o código no
+ar: `mimeParaUpload` tem só dois retornos — um mime do mapa (sem parâmetro) ou o
+valor já passado por `mimeSemParametros` —, então **não existe caminho no `main`
+que entregue `audio/ogg; codecs=opus` à Meta**. O texto era de antes do deploy.
+
+A causa da confusão é estrutural e vale lembrar em qualquer investigação de envio:
+**a recusa da Meta chega pelo WEBHOOK, de forma assíncrona, e fica em
+`error_detail` até alguém sobrescrever.** Um balão aberto hoje mostra o motivo da
+tentativa que falhou semana passada, com a mesma cara de uma falha de agora.
+
+Por isso `media_mime` passou a guardar **o mime REALMENTE enviado**, não o que o
+cliente alegou. Serve de marcador de versão: sem parâmetro = passou pelo código
+novo. E o motivo da falha da Cloud API passa a carregar `[enviado como <mime>]`,
+que é o que separa "o CRM declarou errado" de "a Meta recusou o arquivo certo".
+
+De quebra a coluna ficou verdadeira: ela guardava `file.type` do navegador, e foi
+exatamente essa alegação que se provou errada.
+
+**Para saber se uma falha é velha ou nova:**
+```sql
+select m.created_at, m.media_mime, m.status, left(m.error_detail, 80) as motivo
+  from public.messages m
+ where m.type = 'audio' and m.direction = 'out'
+ order by m.created_at desc limit 20;
+-- media_mime com "; codecs=" = tentativa ANTIGA, de antes da correção.
+```
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
