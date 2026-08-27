@@ -2522,6 +2522,43 @@ não é descuido: eles chamam `openConversation()`, que descobre o id via RPC
 Sem id não existe `href` estático. Para virarem link, `/conversas` precisaria
 aceitar algo como `?contato=<id>&canal=whatsapp` e resolver do outro lado.
 
+## Conversa em branco ao abrir em nova guia
+
+Sintoma: `/conversas?c=<id>` numa aba nova mostrava cabeçalho, barra lateral e
+composer corretos, e o fio de mensagens VAZIO. Em aba já aberta funcionava.
+
+⚠️ **Era o mesmo padrão da aba Canais, já documentado aqui: "cacheava lista vazia
+como carregada".** Três coisas somadas em `loadMessagesFor`:
+
+1. ela **não** chamava `ensureSession()` — diferente de outras funções do mesmo
+   arquivo (linhas 141 e 570), que já chamavam. Numa aba recém-aberta o `Thread`
+   monta na hora e a busca saía antes de a sessão estar pronta;
+2. **sem sessão a RLS devolve ZERO LINHAS e NENHUM erro** — a armadilha nº 1
+   deste projeto, que já apareceu em `removeMessage` e no `update` da rota de
+   mídia;
+3. a conversa era marcada em `loadedMsgConvs` **antes** do fetch e só desmarcada
+   em `error`. Vazio sem erro ficava gravado como "carregado" e o fio não tentava
+   de novo — branco até um F5.
+
+Cabeçalho e barra lateral apareciam porque vêm de outra consulta, e é isso que
+fazia parecer defeito de tela em vez de defeito de dados.
+
+**Correção:** `await ensureSession()` antes da consulta e **resultado vazio SEM
+sessão confirmada não vira cache** (`comSessao` guarda o `loc()`). Depois do
+`ensureSession` um vazio é confiável — a conversa realmente não tem mensagem; sem
+`locationId` ele significa "não deu para perguntar". O custo de não cachear é uma
+consulta a mais na próxima abertura, barato ao lado de um fio que só volta com F5.
+
+⚠️ **O `Thread` ganhou ESTADO VAZIO.** Antes, 0 mensagens era branco puro — e
+branco é indistinguível de "não carregou", que é exatamente o que fez este bug
+passar por problema de interface. Existem conversas legitimamente vazias no banco
+(criadas em "Nova conversa" ou pelo rodízio antes da primeira mensagem), e agora
+elas dizem isso.
+
+⚠️ **Ao escrever busca sob demanda com cache de "já carregou", marque DEPOIS de
+saber que a resposta é confiável.** Marcar antes economiza uma linha e transforma
+qualquer falha silenciosa em estado permanente.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
