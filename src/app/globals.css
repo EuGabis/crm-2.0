@@ -288,3 +288,12 @@ body { transition: background-color 0.2s ease, color 0.2s ease; }
 .dark .text-emerald-500, .dark .text-emerald-800, .dark .text-emerald-900 { color: #6ee7b7; }
 .dark .text-sky-500, .dark .text-sky-800, .dark .text-sky-900,
 .dark .text-blue-500 { color: #7dd3fc; }
+
+/* `text-slate-300` — o degrau mais fraco do texto, usado no painel para
+   "sem movimento no período" e para o valor de uma fase vazia.
+   ⚠️ Aqui o erro é o INVERSO do bloco acima: slate-300 é um tom CLARO, então
+   sem override ele não desaparece no fundo escuro — ele grita, com mais
+   contraste que o texto principal, e o rótulo secundário passa a puxar o olho
+   antes do número. O valor continua a escada de `.text-slate-400` (#7c8290),
+   um degrau abaixo. */
+.dark .text-slate-300, .dark .text-gray-300 { color: #656b78; }

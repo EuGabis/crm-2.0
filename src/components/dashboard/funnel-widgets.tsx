@@ -1,7 +1,7 @@
 "use client";
 
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import {
+  MarkedBarRow,
   usePipelineSelection,
   WidgetCard,
   WidgetEmpty,
@@ -11,8 +11,21 @@ import { formatBRL } from "@/lib/data/repos/opportunities";
 import { useDbPipeline } from "@/lib/data/repos/db/pipeline";
 import { useDashboardOps } from "./date-range";
 import { DrilldownDialog, useDrilldown } from "./drilldown";
-import { TOOLTIP_STYLE } from "./opportunity-widgets";
 
+/**
+ * Funil do pipeline.
+ *
+ * ⚠️ **A barra mentia sobre a grandeza.** A largura tinha piso de 18%
+ * (`Math.max(18, ...)`), imposto para o rótulo caber DENTRO dela — então uma
+ * fase com 2 oportunidades de 73 desenhava quase um quinto da barra da
+ * primeira fase. O piso existia por causa do rótulo, e a correção foi tirar o
+ * rótulo de dentro: com nome à esquerda e valor à direita, a barra fica livre
+ * para ser proporcional de verdade e nenhum texto pode ser cortado por ela.
+ *
+ * De quebra a linha caiu de 40 px para 20 px de altura, e um pipeline de 9
+ * fases passou a caber na mesma altura do card ao lado em vez de esticar o
+ * painel.
+ */
 export function FunnelWidget(props: WidgetPipelineProps = {}) {
   const [pipeId, setPipeId] = usePipelineSelection(props, "");
   const pipeline = useDbPipeline(pipeId);
@@ -31,7 +44,6 @@ export function FunnelWidget(props: WidgetPipelineProps = {}) {
   });
   const max = Math.max(1, ...rows.map((r) => r.count));
   const first = rows[0]?.count || 1;
-
   const totalOps = rows.reduce((sum, r) => sum + r.count, 0);
 
   return (
@@ -43,55 +55,83 @@ export function FunnelWidget(props: WidgetPipelineProps = {}) {
       // Fase pertence a um pipeline: somar as de vários não significa nada.
       allowAll={false}
     >
-      <div className="space-y-1">
-        <div className="flex justify-end gap-6 pr-1 text-[10px] font-semibold text-slate-400">
-          {/* Os dois títulos eram siglas sem explicação; o title diz a conta. */}
-          <span className="w-16 text-right" title="Quantos, dos que entraram na primeira fase, chegaram até aqui">
-            % da 1ª fase
+      <div className="space-y-1.5">
+        <div className="flex items-end gap-2 pb-0.5 text-[9px] font-semibold uppercase tracking-wide text-slate-400">
+          <span className="w-[72px] shrink-0">Fase</span>
+          <span className="min-w-0 flex-1" />
+          <span
+            className="w-10 shrink-0 text-right"
+            title="Quantos, dos que estão na primeira fase, chegaram até aqui"
+          >
+            da 1ª
           </span>
-          <span className="w-20 text-right" title="Quantos passaram da fase imediatamente anterior para esta">
-            % da fase anterior
+          <span
+            className="w-10 shrink-0 text-right"
+            title="Quantos há nesta fase em relação à fase imediatamente anterior. Acima de 100% significa que esta fase tem MAIS oportunidades que a anterior — normal num retrato do funil, onde os leads não avançam em bloco."
+          >
+            da ant.
           </span>
         </div>
         {rows.map((r, i) => {
           const cumulative = first ? (r.count / first) * 100 : 0;
           const prev = i === 0 ? r.count : rows[i - 1].count;
-          const nextConv = prev ? (r.count / prev) * 100 : 0;
+          const nextConv = i === 0 ? 100 : prev ? (r.count / prev) * 100 : 0;
+          // Proporcional, com piso de 3 px só para o não-zero: sem o piso, uma
+          // fase com 1 oportunidade some e o funil parece ter uma fase menos.
+          const largura = r.count > 0 ? `max(3px, ${((r.count / max) * 100).toFixed(2)}%)` : "0px";
           return (
-            <div key={r.stage.id} className="flex items-center gap-2">
-              <div className="min-w-0 flex-1">
-                <button
-                  onClick={() =>
-                    open({
-                      title: `${pipeline.name} · ${r.stage.name}`,
-                      ops: r.ops,
-                      pipelineId: pipeline.id,
-                    })
-                  }
-                  title={`Ver as ${r.count} oportunidade${r.count === 1 ? "" : "s"} desta fase`}
-                  className="flex h-10 min-w-[128px] cursor-pointer flex-col justify-center rounded-lg px-2.5 text-left shadow-sm transition-transform hover:scale-[1.01]"
+            <button
+              key={r.stage.id}
+              type="button"
+              onClick={() =>
+                open({
+                  title: `${pipeline.name} · ${r.stage.name}`,
+                  ops: r.ops,
+                  pipelineId: pipeline.id,
+                })
+              }
+              disabled={r.count === 0}
+              title={`Ver as ${r.count} oportunidade${r.count === 1 ? "" : "s"} desta fase`}
+              className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left transition-colors hover:bg-slate-50 disabled:cursor-default disabled:hover:bg-transparent"
+            >
+              <span
+                className="w-[72px] shrink-0 truncate text-[11px] font-medium text-slate-700"
+                title={r.stage.name}
+              >
+                {r.stage.name}
+              </span>
+              <span className="h-2.5 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-100">
+                <span
+                  className="block h-full rounded-full"
                   style={{
-                    width: `${Math.max(18, (r.count / max) * 100)}%`,
-                    // Degradê leve no sentido da barra: dá profundidade sem
-                    // inventar cor nova (a cor da fase continua sendo a base).
-                    backgroundImage: `linear-gradient(90deg, ${r.stage.color}, ${r.stage.color}cc)`,
+                    width: largura,
+                    // Degradê leve no sentido da barra: profundidade sem
+                    // inventar cor nova (a cor da fase segue sendo a base).
+                    backgroundImage: `linear-gradient(90deg, ${r.stage.color}, ${r.stage.color}bb)`,
                   }}
-                >
-                  <span className="truncate text-[10px] font-bold leading-tight text-white">
-                    {r.stage.name}
-                  </span>
-                  <span className="text-[9px] leading-tight text-white/90">
-                    {r.count} · {formatBRL(r.value)}
-                  </span>
-                </button>
-              </div>
-              <span className="w-16 text-right text-[11px] font-medium text-slate-600">
-                {cumulative.toFixed(1)}%
+                />
               </span>
-              <span className="w-20 text-right text-[11px] font-medium text-slate-600">
-                {(i === 0 ? 100 : nextConv).toFixed(1)}%
+              {/* Contagem e dinheiro como rótulo DIRETO, fora da barra: era o
+                  texto dentro dela que obrigava o piso de largura. */}
+              <span className="w-[86px] shrink-0 text-right text-[10px] leading-tight">
+                <span className="font-semibold tabular-nums text-slate-800">{r.count}</span>
+                <span className="text-slate-400"> · {formatBRL(r.value)}</span>
               </span>
-            </div>
+              <span className="w-10 shrink-0 text-right text-[10px] font-medium tabular-nums text-slate-600">
+                {cumulative.toFixed(0)}%
+              </span>
+              {/* Acima de 100% a fase tem MAIS leads que a anterior. Não é erro
+                  de conta — é retrato de funil, onde ninguém avança em bloco —
+                  mas ler "250%" como conversão engana, e o âmbar é o que faz
+                  parar e passar o mouse no cabeçalho da coluna. */}
+              <span
+                className={`w-10 shrink-0 text-right text-[10px] font-medium tabular-nums ${
+                  nextConv > 100 ? "text-amber-600" : "text-slate-600"
+                }`}
+              >
+                {nextConv.toFixed(0)}%
+              </span>
+            </button>
           );
         })}
       </div>
@@ -100,6 +140,22 @@ export function FunnelWidget(props: WidgetPipelineProps = {}) {
   );
 }
 
+/**
+ * Distribuição das oportunidades pelas fases do pipeline.
+ *
+ * ⚠️ **Era uma rosca de 9 fatias com uma delas em 82%.** Duas coisas erradas
+ * de uma vez: passando de ~6 fatias as vizinhas ficam indistinguíveis, e com
+ * uma fatia dominante as outras oito viram fios. Além disso a rosca precisava
+ * de uma legenda de 9 linhas ao lado só para dizer o que era cada cor — ou
+ * seja, a informação já estava em texto, e o anel era o que sobrava.
+ *
+ * Barras rotuladas mostram cada fase com nome, valor e proporção legíveis, e a
+ * cor da fase continua sendo a identidade.
+ *
+ * A ordem é a **do pipeline**, não a do tamanho: fase é categoria ORDENADA
+ * (Entrada vem antes de Ganho), e é a sequência que responde "onde o funil
+ * está entupido". Ranquear por volume jogaria essa leitura fora.
+ */
 export function StageDistribution(props: WidgetPipelineProps = {}) {
   const [pipeId, setPipeId] = usePipelineSelection(props, "");
   const pipeline = useDbPipeline(pipeId);
@@ -107,11 +163,12 @@ export function StageDistribution(props: WidgetPipelineProps = {}) {
   const { drilldown, open, close } = useDrilldown();
   if (!pipeline) return null;
 
-  // TODAS as fases entram na lista (a legenda mostra as vazias em cinza): antes
-  // as zeradas sumiam, e a legenda do donut não batia com o funil ao lado.
+  // TODAS as fases entram (as vazias em cinza): antes as zeradas sumiam e a
+  // lista não batia com o funil ao lado.
   const all = pipeline.stages.map((st) => {
     const stageOps = ops.filter((o) => o.pipelineId === pipeline.id && o.stageId === st.id);
     return {
+      id: st.id,
       name: st.name,
       ops: stageOps,
       value: stageOps.length,
@@ -119,30 +176,10 @@ export function StageDistribution(props: WidgetPipelineProps = {}) {
       color: st.color,
     };
   });
-  const data = all.filter((d) => d.value > 0); // só o que tem fatia desenhável
-  const total = data.reduce((s, d) => s + d.value, 0);
+  const total = all.reduce((s, d) => s + d.value, 0);
+  const maior = Math.max(1, ...all.map((d) => d.value));
 
-  const openStage = (i: number) => {
-    const d = data[i];
-    if (!d) return;
-    open({ title: `${pipeline.name} · ${d.name}`, ops: d.ops, pipelineId: pipeline.id });
-  };
-
-  if (total === 0) {
-    return (
-      <WidgetCard
-        title="Distribuição de fases"
-        subtitle="Como as oportunidades do período se espalham pelas fases"
-        pipelineId={pipeId}
-        onPipelineChange={setPipeId}
-        allowAll={false}
-      >
-        <WidgetEmpty text="Nenhuma oportunidade neste pipeline no período escolhido." />
-      </WidgetCard>
-    );
-  }
-
-  return (
+  const card = (children: React.ReactNode) => (
     <WidgetCard
       title="Distribuição de fases"
       subtitle="Como as oportunidades do período se espalham pelas fases"
@@ -150,76 +187,47 @@ export function StageDistribution(props: WidgetPipelineProps = {}) {
       onPipelineChange={setPipeId}
       allowAll={false}
     >
-      <div className="flex items-center gap-4">
-        <div className="relative h-[190px] w-[190px] shrink-0">
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              {/* rootTabIndex -1: o <Pie> nasce focável e o anel de foco do SVG vira um quadrado. */}
-              <Pie
-                data={data}
-                dataKey="value"
-                innerRadius={58}
-                outerRadius={85}
-                strokeWidth={0}
-                rootTabIndex={-1}
-                className="cursor-pointer"
-                onClick={(_, i) => openStage(i)}
-              >
-                {data.map((d) => (
-                  <Cell key={d.name} fill={d.color} />
-                ))}
-              </Pie>
-              {/* Sem `formatter` o balão saía como "value: 12" — nome de coluna
-                  do banco na cara do usuário. Mesmo tratamento da rosca de
-                  status, que já tinha sido corrigida por isso. */}
-              <Tooltip
-                contentStyle={TOOLTIP_STYLE}
-                formatter={(v, name) => [
-                  `${v} oportunidade${Number(v) === 1 ? "" : "s"}`,
-                  name,
-                ]}
-              />
-            </PieChart>
-          </ResponsiveContainer>
-          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-xl font-bold leading-none text-slate-900">
-              {total.toLocaleString("pt-BR")}
-            </span>
-            <span className="text-[9px] uppercase tracking-wide text-slate-400">no pipeline</span>
-          </div>
-        </div>
-        <ul className="min-w-0 flex-1 space-y-1 text-[11px]">
-          {all.map((d) => {
-            const i = data.findIndex((x) => x.name === d.name);
-            const empty = d.value === 0;
-            return (
-              <li key={d.name}>
-                <button
-                  onClick={() => !empty && openStage(i)}
-                  disabled={empty}
-                  className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left hover:bg-slate-50 disabled:cursor-default disabled:hover:bg-transparent"
-                >
-                  <span
-                    className="size-2 shrink-0 rounded-sm"
-                    style={{ background: empty ? "#e2e8f0" : d.color }}
-                  />
-                  <span className={`truncate ${empty ? "text-slate-400" : "text-slate-600"}`}>
-                    <span className="font-medium">{d.name}</span> ·{" "}
-                    {d.value === 0 ? (
-                      "vazia"
-                    ) : (
-                      <>
-                        {d.value} ({Math.round((d.value / total) * 100)}%) · {formatBRL(d.money)}
-                      </>
-                    )}
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      </div>
+      {children}
       <DrilldownDialog state={drilldown} onClose={close} />
     </WidgetCard>
+  );
+
+  if (total === 0) {
+    return card(<WidgetEmpty text="Nenhuma oportunidade neste pipeline no período escolhido." />);
+  }
+
+  const cheia = all.reduce((a, b) => (b.value > a.value ? b : a), all[0]);
+
+  return card(
+    <div>
+      {/* Uma frase dizendo qual fase concentra o funil: era a conclusão que o
+          leitor tinha que montar sozinho comparando fatias. */}
+      <p className="mb-2.5 text-[11px] leading-relaxed text-slate-500">
+        <span className="font-semibold text-slate-800">{cheia.name}</span> concentra{" "}
+        <span className="font-semibold text-slate-800">
+          {Math.round((cheia.value / total) * 100)}%
+        </span>{" "}
+        das {total.toLocaleString("pt-BR")} oportunidades.
+      </p>
+      <div className="space-y-1">
+        {all.map((d) => (
+          <MarkedBarRow
+            key={d.id}
+            label={d.name}
+            labelHint={d.value > 0 ? formatBRL(d.money) : "vazia"}
+            color={d.color}
+            share={d.value}
+            // Escala pela fase MAIS CHEIA, não pelo total: contra o total, oito
+            // barras de 1–6% ficariam indistinguíveis entre si.
+            total={maior}
+            value={d.value.toLocaleString("pt-BR")}
+            hint={`${Math.round((d.value / total) * 100)}%`}
+            onClick={() =>
+              open({ title: `${pipeline.name} · ${d.name}`, ops: d.ops, pipelineId: pipeline.id })
+            }
+          />
+        ))}
+      </div>
+    </div>
   );
 }

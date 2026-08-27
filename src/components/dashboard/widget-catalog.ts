@@ -36,21 +36,21 @@ export const WIDGETS: WidgetMeta[] = [
   {
     key: "status-oportunidade",
     title: "Status da oportunidade",
-    description: "Rosca de abertas, ganhas e perdidas.",
+    description: "Composição de abertas, ganhas e perdidas, com os números.",
     span: 1,
     pipeline: true,
   },
   {
     key: "valor-oportunidade",
     title: "Valor de oportunidade",
-    description: "Barras de valor por status, com receita total.",
+    description: "Valor em reais por status, com o total do período.",
     span: 1,
     pipeline: true,
   },
   {
     key: "taxa-conversao",
     title: "Taxa de conversão",
-    description: "Percentual de ganhas e receita ganha no período.",
+    description: "Percentual de ganhas, receita e o que segue em aberto.",
     span: 1,
     pipeline: true,
   },
@@ -64,7 +64,7 @@ export const WIDGETS: WidgetMeta[] = [
   {
     key: "distribuicao-fases",
     title: "Distribuição de fases",
-    description: "Quanto do funil está parado em cada fase.",
+    description: "Barras por fase: quanto do funil está parado em cada uma.",
     span: 2,
     pipeline: true,
   },
