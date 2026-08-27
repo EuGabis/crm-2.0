@@ -716,6 +716,46 @@ function ScheduleTag({ message }: { message: Message }) {
   );
 }
 
+/**
+ * Selo de reação, colado no pé do balão — como no WhatsApp.
+ *
+ * ⚠️ **Meia altura para FORA do balão** (`-mb-*` + `translate-y`), e é isso que
+ * faz a reação pertencer visualmente àquela mensagem. Uma bolha separada no fio
+ * (o que o CRM mostrava, com o texto `[reaction]`) não diz a QUAL mensagem se
+ * refere — e era exatamente a queixa.
+ *
+ * Fundo branco com anel: o balão de saída é indigo escuro e o de entrada é cinza
+ * claro, então nenhum tom único serviria para os dois. Branco funciona sobre
+ * ambos, e o anel dá o corte contra o balão em modo escuro.
+ */
+function Reacoes({ message, out }: { message: Message; out: boolean }) {
+  const reacoes = message.reactions ?? [];
+  if (reacoes.length === 0) return null;
+  return (
+    <div
+      className={cn(
+        "pointer-events-none relative z-10 -mt-1 flex translate-y-1 gap-0.5",
+        out ? "justify-end pr-2" : "justify-start pl-2"
+      )}
+    >
+      {reacoes.map((r) => (
+        <span
+          key={`${r.by}-${r.emoji}`}
+          title={`${r.by === "contact" ? "O contato reagiu" : "Você reagiu"} com ${r.emoji}`}
+          /* `border-slate-200` e não `ring-slate-200`: o ring NÃO está no
+             remapeamento de dark do globals.css e ficaria um anel claro
+             brilhante no fundo escuro — a armadilha documentada no AGENTS.md
+             ("o que não está na lista fica com o valor claro"). A borda está
+             coberta e ganha o dark de graça. */
+          className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] leading-none shadow-sm"
+        >
+          {r.emoji}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function MessageBubble({
   message,
   conversationId,
@@ -755,9 +795,17 @@ function MessageBubble({
   return (
     <div className={cn("group flex items-center gap-1", isOut ? "justify-end" : "justify-start")}>
       {isOut && replyBtn}
+      {/*
+        ⚠️ Coluna envolvendo balão + reação. O balão tem `overflow-hidden` (a
+        mídia e a faixa de falha dependem disso para arredondar nas pontas),
+        então um selo DENTRO dele sairia cortado. A largura máxima migrou para
+        cá: o balão continua encolhendo até o conteúdo, e `items-end/start`
+        mantém o alinhamento por lado.
+      */}
+      <div className={cn("flex max-w-[70%] flex-col", isOut ? "items-end" : "items-start")}>
       <div
         className={cn(
-          "max-w-[70%] overflow-hidden break-words rounded-2xl px-3.5 py-2 text-[13px]",
+          "max-w-full overflow-hidden break-words rounded-2xl px-3.5 py-2 text-[13px]",
           message.internal
             ? "border border-amber-200 bg-amber-50 text-amber-900"
             : isOut
@@ -834,6 +882,8 @@ function MessageBubble({
             </span>
           )}
         </p>
+      </div>
+        <Reacoes message={message} out={isOut && !message.internal} />
       </div>
       {!isOut && replyBtn}
     </div>

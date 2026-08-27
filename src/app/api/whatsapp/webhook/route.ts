@@ -163,6 +163,45 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
   }
   if (!contact) return;
 
+  /*
+   * ⚠️ **REAÇÃO NÃO É MENSAGEM — sai daqui antes de virar linha em `messages`.**
+   *
+   * Sem este desvio a reação caía no `else` genérico do resolvedor de conteúdo e
+   * virava uma bolha com o texto `[reaction]`, solta no fio: sem o emoji, sem
+   * dizer a qual mensagem se referia, e sem sumir quando o contato desreagia.
+   *
+   * O payload da Meta é `{ type: "reaction", reaction: { message_id, emoji } }`,
+   * onde `message_id` é o wamid da mensagem REAGIDA e `emoji` VAZIO significa
+   * "desreagiu" — a remoção chega como o mesmo evento.
+   *
+   * `set_message_reaction` faz o ler-modificar-escrever do jsonb de forma
+   * atômica: reagir e desreagir em sequência são dois webhooks concorrentes, e no
+   * código a segunda escrita apagaria a primeira.
+   */
+  if (m.type === "reaction") {
+    const alvo = m.reaction?.message_id as string | undefined;
+    if (!alvo) return;
+    const { data: alvoId, error: erroReacao } = await db.rpc("set_message_reaction", {
+      p_location: channel.location_id,
+      p_target_wa_id: alvo,
+      p_emoji: m.reaction?.emoji ?? "",
+      // "contact": quem reagiu foi o cliente. Reação NOSSA (se um dia o CRM
+      // enviar) usaria outra origem, e a função troca só a da mesma origem.
+      p_by: "contact",
+      p_at: nowIso,
+    });
+    if (erroReacao) {
+      console.warn("[webhook] reação não gravada:", erroReacao.message);
+    } else if (!alvoId) {
+      // Alvo fora da nossa base (mensagem anterior à integração, por exemplo).
+      // Ignorar é o comportamento do WhatsApp: reação sem alvo não aparece.
+      console.log(`[webhook] reação a mensagem desconhecida (${alvo}) — ignorada`);
+    }
+    // Não mexe em conversa: reação não é atividade que reabre, não conta como
+    // não lida e não muda a prévia da lista. É assim no WhatsApp.
+    return;
+  }
+
   // Resolve o conteúdo: texto, ou mídia (imagem/áudio/vídeo) baixada da Meta.
   let msgType = "text";
   let body = "";
