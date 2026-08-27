@@ -275,28 +275,36 @@ export function useDbContacts() {
 }
 
 export function useDbContact(id: string | null) {
-  const { contacts, loading } = useDbContacts();
+  // ⚠️ Lê a store por SELECTOR e NÃO chama `load()`: quem precisa de UM contato
+  // busca por id (barato), em vez de baixar os 40 mil da empresa. Antes usava
+  // `useDbContacts()`, que forçava a carga inteira — o maior gerador de carga do
+  // banco (CPU/memória/IO), já que este hook é usado no card, painel, lembretes…
+  // Se OUTRA tela já carregou a store, aproveitamos; senão, cai no fetch por id.
+  const contacts = useDbStore((s) => s.contacts);
   const fromStore = id ? contacts.find((c) => c.id === id) ?? null : null;
-  // O store carrega no máx. 1000 contatos (limite do PostgREST). Se o contato não
-  // está lá (ex.: empresa com 50 mil), busca ELE sob demanda pelo id — assim a
-  // conversa/painel abrem com os dados certos independente do tamanho da base.
   const [fetched, setFetched] = useState<Contact | null>(null);
+  const [fetching, setFetching] = useState(false);
   useEffect(() => {
     if (!id || fromStore) {
       setFetched(null);
+      setFetching(false);
       return;
     }
     let active = true;
+    setFetching(true);
     void (async () => {
       const supabase = createClient();
       const { data } = await supabase.from("contacts").select("*").eq("id", id).maybeSingle();
-      if (active && data) setFetched(mapContact(data));
+      if (active) {
+        setFetched(data ? mapContact(data) : null);
+        setFetching(false);
+      }
     })();
     return () => {
       active = false;
     };
   }, [id, fromStore]);
-  return { contact: fromStore ?? fetched, loading };
+  return { contact: fromStore ?? fetched, loading: fetching };
 }
 
 export function useDbTeam() {

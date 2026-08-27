@@ -6,8 +6,6 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Download, LayoutTemplate, Loader2, MessageSquare, Send, User, UserCheck } from "lucide-react";
 import { toast } from "sonner";
-import { contactName } from "@/lib/data/repos/contacts";
-import { useDbContacts } from "@/lib/data/repos/db/contacts";
 import {
   conversationActions,
   useConversations,
@@ -95,7 +93,6 @@ function cliqueSimples(e: MouseEvent): boolean {
 
 export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: string) => void }) {
   const conversations = useConversations("all");
-  const { contacts } = useDbContacts();
   const { channels } = useWhatsappChannels();
   const { members } = useTeam();
   const { isAdmin, me } = useMyMembership();
@@ -161,7 +158,6 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
 
-  const contactMap = useMemo(() => new Map(contacts.map((c) => [c.id, c])), [contacts]);
   const memberMap = useMemo(() => new Map(members.map((m) => [m.userId, m.name])), [members]);
   const channelMap = useMemo(() => new Map(channels.map((c) => [c.id, c])), [channels]);
   // Conversas que têm ao menos uma mensagem de entrada = "Receptivo".
@@ -212,18 +208,16 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
       });
     }
     return conversations.map((c) => {
-      // O store de contatos é paginado (não tem todos) — então usamos o nome/
-      // telefone/e-mail que a conversa já traz embutido do banco, com o store só
-      // como reforço. Antes caía tudo em "—".
-      const contact = contactMap.get(c.contactId);
+      // Nome/telefone/e-mail vêm DENORMALIZADOS na conversa (join no load), sem
+      // depender da lista cheia de contatos na store.
       const ch = c.channelId ? channelMap.get(c.channelId) : undefined;
       const embName = `${c.contactFirstName ?? ""} ${c.contactLastName ?? ""}`.trim();
       return {
         id: c.id,
         contactId: c.contactId,
-        nome: (contact ? contactName(contact) : embName) || "—",
-        numero: contact?.phone || c.contactPhone || "—",
-        email: contact?.email || c.contactEmail || "—",
+        nome: embName || c.contactPhone || "—",
+        numero: c.contactPhone || "—",
+        email: c.contactEmail || "—",
         status: statusOf(c),
         canal: channelLabel(c.channel),
         tipo: inboundSet.has(c.id) ? "Receptivo" : "Ativo",
@@ -236,7 +230,7 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSupervisor, sectorConvs, conversations, contactMap, channelMap, memberMap, inboundSet, lastInAt]);
+  }, [isSupervisor, sectorConvs, conversations, channelMap, memberMap, inboundSet, lastInAt]);
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();

@@ -13,8 +13,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { contactName } from "@/lib/data/repos/contacts";
-import { useDbContacts } from "@/lib/data/repos/db/contacts";
 import {
   conversationActions,
   inboxViewActions,
@@ -96,16 +94,18 @@ function GlobalSearch({ onSelect }: { onSelect: (conversationId: string) => void
   const [term, setTerm] = useState("");
   const conversations = useConversations();
   const messages = useConvStore((s) => s.messages);
-  const { contacts } = useDbContacts();
 
   const hits = useMemo<SearchHit[]>(() => {
     const q = term.trim().toLowerCase();
     if (q.length < 2) return [];
 
     const convById = new Map(conversations.map((c) => [c.id, c]));
+    // Nome vem DENORMALIZADO na conversa (join no load) — sem baixar a lista cheia.
     const nameOf = (contactId: string) => {
-      const c = contacts.find((x) => x.id === contactId);
-      return c ? contactName(c) : "Contato";
+      const conv = conversations.find((x) => x.contactId === contactId);
+      return conv
+        ? `${conv.contactFirstName ?? ""} ${conv.contactLastName ?? ""}`.trim() || "Contato"
+        : "Contato";
     };
 
     const out: SearchHit[] = [];
@@ -143,7 +143,7 @@ function GlobalSearch({ onSelect }: { onSelect: (conversationId: string) => void
     }
 
     return out.sort((a, b) => (b.at ?? "").localeCompare(a.at ?? "")).slice(0, 25);
-  }, [term, messages, conversations, contacts]);
+  }, [term, messages, conversations]);
 
   const q = term.trim();
 

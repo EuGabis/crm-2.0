@@ -52,7 +52,6 @@ function quando(iso: string): string {
 import { ChannelIcon } from "@/components/shared/channel-icon";
 import { SlaBadge } from "@/components/shared/sla-badge";
 import { contactName } from "@/lib/data/repos/contacts";
-import { useDbContacts } from "@/lib/data/repos/db/contacts";
 import {
   conversationActions,
   useAutomatedConversationIds,
@@ -65,7 +64,7 @@ import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
 import { cn } from "@/lib/utils";
 import { SORT_OPTIONS, scopeLabel, statusLabel, useInboxUi } from "./inbox-filters";
 import { BulkTemplateDialog, type BulkTarget } from "./bulk-template-dialog";
-import type { ConversationFilter, InboxStatusView } from "@/lib/data/types";
+import type { Contact, ConversationFilter, InboxStatusView } from "@/lib/data/types";
 
 const FILTER_TABS: { key: ConversationFilter; label: string }[] = [
   { key: "unread", label: "Não lidos" },
@@ -110,7 +109,6 @@ export function ConversationList({
   const [userFilter, setUserFilter] = useState<string | null>(null);
   const { channels } = useWhatsappChannels();
   const all = useConversations(filter);
-  const { contacts } = useDbContacts();
   const realtime = useRealtimeStatus();
   const { me, isAdmin } = useMyMembership();
   const { members } = useTeam();
@@ -201,26 +199,21 @@ export function ConversationList({
         .map((id) => {
           const conv = todas.find((c) => c.id === id);
           if (!conv) return null;
-          const contact = contacts.find((x) => x.id === conv.contactId);
           return {
             conversationId: conv.id,
-            contactName: contact
-              ? contactName(contact)
-              : `${conv.contactFirstName ?? "Contato"} ${conv.contactLastName ?? ""}`.trim(),
+            contactName:
+              `${conv.contactFirstName ?? "Contato"} ${conv.contactLastName ?? ""}`.trim(),
             channelId: conv.channel === "whatsapp" ? conv.channelId ?? null : null,
           };
         })
         .filter((t): t is BulkTarget => !!t),
-    [selected, todas, contacts]
+    [selected, todas]
   );
 
   const q = query.trim().toLowerCase();
   const visible = q
     ? sorted.filter((conv) => {
-        const c = contacts.find((x) => x.id === conv.contactId);
-        const name = (
-          c ? `${c.firstName} ${c.lastName}` : `${conv.contactFirstName ?? ""} ${conv.contactLastName ?? ""}`
-        ).toLowerCase();
+        const name = `${conv.contactFirstName ?? ""} ${conv.contactLastName ?? ""}`.toLowerCase();
         return (
           name.includes(q) ||
           (conv.contactPhone ?? "").includes(q) ||
@@ -492,13 +485,15 @@ export function ConversationList({
         {visible.map((conv) => {
           // Fallback: se o contato ainda não carregou/não é visível, a linha NÃO
           // pode sumir (senão a conversa não aparece). Mostra "Contato" até vir.
-          const contact =
-            contacts.find((c) => c.id === conv.contactId) ??
-            ({
-              id: conv.contactId,
-              firstName: conv.contactFirstName || "Contato",
-              lastName: conv.contactLastName || "",
-            } as unknown as (typeof contacts)[number]);
+          // Nome/telefone vêm DENORMALIZADOS na conversa (join no load) — sem
+          // depender da lista cheia de contatos na store.
+          const contact = {
+            id: conv.contactId,
+            firstName: conv.contactFirstName || "Contato",
+            lastName: conv.contactLastName || "",
+            phone: conv.contactPhone || "",
+            email: conv.contactEmail || "",
+          } as unknown as Contact;
           return (
             <div
               key={conv.id}

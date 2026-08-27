@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { contactName } from "@/lib/data/repos/contacts";
-import { useDbContacts } from "@/lib/data/repos/db/contacts";
+import { useContactsSearch } from "@/lib/data/repos/db/contacts-search";
 import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
 import {
   conversationActions,
@@ -56,7 +56,7 @@ import {
 } from "@/lib/data/repos/db/conversations";
 import { useMyMembership, useTeam } from "@/lib/data/repos/db/team";
 import { brand } from "@/lib/config/brand";
-import type { Channel, ScheduleStatus } from "@/lib/data/types";
+import type { Channel, Contact, ScheduleStatus } from "@/lib/data/types";
 
 import { useConfirm } from "@/components/shared/confirm";
 const TABS = [
@@ -233,7 +233,6 @@ function NewConversationDialog({
   onOpenChange: (o: boolean) => void;
   onCreated: (id: string) => void;
 }) {
-  const { contacts } = useDbContacts();
   const { channels } = useWhatsappChannels();
   const { isAdmin, department } = useMyMembership();
   // Só os números do departamento do usuário aparecem — abrir conversa por um
@@ -246,21 +245,22 @@ function NewConversationDialog({
       (isAdmin || deptChannelIds.length === 0 || deptChannelIds.includes(c.id)),
   );
   const [contactId, setContactId] = useState("");
+  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [contactQuery, setContactQuery] = useState("");
   const [contactOpen, setContactOpen] = useState(false);
   const [channel, setChannel] = useState<Channel>("whatsapp");
   const [channelId, setChannelId] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const selectedContact = contacts.find((c) => c.id === contactId);
-  const cq = contactQuery.trim().toLowerCase();
-  const filteredContacts = (
-    cq
-      ? contacts.filter((c) =>
-          `${c.firstName} ${c.lastName} ${c.phone}`.toLowerCase().includes(cq),
-        )
-      : contacts
-  ).slice(0, 50);
+  // Busca no SERVIDOR (com debounce), em vez de baixar os 40 mil contatos na
+  // store só para preencher este seletor.
+  const { rows: filteredContacts } = useContactsSearch({
+    query: contactQuery,
+    conditions: [],
+    sort: null,
+    page: 0,
+    pageSize: 50,
+  });
 
   // Número padrão = o primeiro ativo; o usuário troca se quiser.
   useEffect(() => {
@@ -309,7 +309,10 @@ function NewConversationDialog({
                 onChange={(e) => {
                   setContactQuery(e.target.value);
                   setContactOpen(true);
-                  if (contactId) setContactId("");
+                  if (contactId) {
+                    setContactId("");
+                    setSelectedContact(null);
+                  }
                 }}
                 onFocus={() => setContactOpen(true)}
                 onBlur={() => setTimeout(() => setContactOpen(false), 150)}
@@ -328,6 +331,7 @@ function NewConversationDialog({
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={() => {
                           setContactId(c.id);
+                          setSelectedContact(c);
                           setContactQuery("");
                           setContactOpen(false);
                         }}
@@ -341,11 +345,6 @@ function NewConversationDialog({
                 </div>
               )}
             </div>
-            {contacts.length === 0 && (
-              <p className="text-[11px] text-amber-600">
-                Você ainda não tem contatos — crie um no módulo Contatos primeiro.
-              </p>
-            )}
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Canal</Label>
@@ -414,7 +413,6 @@ function AgendadasTab() {
   const confirm = useConfirm();
   const scheduled = useScheduledMessages();
   const conversations = useConversations();
-  const { contacts } = useDbContacts();
   const { members } = useTeam();
   const loaded = useConvStore((s) => s.loaded);
 
@@ -422,14 +420,16 @@ function AgendadasTab() {
     () =>
       scheduled.map((m) => {
         const conv = conversations.find((c) => c.id === m.conversationId);
-        const contact = conv ? contacts.find((x) => x.id === conv.contactId) : null;
         return {
           ...m,
-          contato: contact ? contactName(contact) : "—",
+          // Nome DENORMALIZADO na conversa — sem baixar a lista cheia de contatos.
+          contato: conv
+            ? `${conv.contactFirstName ?? ""} ${conv.contactLastName ?? ""}`.trim() || "—"
+            : "—",
           quem: members.find((x) => x.userId === m.scheduledBy)?.name ?? "—",
         };
       }),
-    [scheduled, conversations, contacts, members]
+    [scheduled, conversations, members]
   );
 
   const pendentes = rows.filter((r) => r.scheduleStatus === "pendente").length;

@@ -8,7 +8,7 @@ import { CalendarClock, CheckSquare, Clock, Target, User, X } from "lucide-react
 import { Button } from "@/components/ui/button";
 import { contactName } from "@/lib/data/repos/contacts";
 import { useApptStore, useDbAppointments } from "@/lib/data/repos/db/appointments";
-import { useDbContacts } from "@/lib/data/repos/db/contacts";
+import { useDbContact } from "@/lib/data/repos/db/contacts";
 import {
   taskActions,
   useContactsModule,
@@ -78,7 +78,6 @@ type Due =
 
 export function Reminders() {
   const { appointments } = useDbAppointments();
-  const { contacts } = useDbContacts();
   const { tasks } = useContactsModule();
   const opportunities = useDbOpportunities();
   // Guarda também os minutos que faltavam QUANDO o aviso apareceu: calcular
@@ -86,6 +85,16 @@ export function Reminders() {
   // sozinho a cada re-render, sem o popup ter mudado).
   const [due, setDue] = useState<Due | null>(null);
   const [snoozed, setSnoozed] = useState<Record<string, number>>({});
+
+  // Só o contato do item VENCIDO (o popup) importa — busca ELE por id, sem
+  // baixar a base inteira. `useDbContact` não força o load dos 40 mil.
+  const dueContactId =
+    due?.kind === "task"
+      ? due.task.contactId ?? null
+      : due?.kind === "appointment"
+        ? due.appointment.contactId ?? null
+        : null;
+  const { contact: dueContact } = useDbContact(dueContactId);
 
   // Varredura + recarga periódica. Um efeito só: os dois timers vivem e morrem
   // juntos com o componente.
@@ -161,7 +170,7 @@ export function Reminders() {
 
   if (due.kind === "task") {
     const { task, minutesLeft } = due;
-    const taskContact = task.contactId ? contacts.find((c) => c.id === task.contactId) : null;
+    const taskContact = dueContact;
     return (
       <div
         role="alert"
@@ -228,9 +237,7 @@ export function Reminders() {
   const { appointment, minutesLeft } = due;
   const start = new Date(appointment.start);
   const end = new Date(appointment.end);
-  const contact = appointment.contactId
-    ? contacts.find((c) => c.id === appointment.contactId)
-    : null;
+  const contact = dueContact;
   const opportunity = appointment.opportunityId
     ? opportunities.find((o) => o.id === appointment.opportunityId)
     : null;
