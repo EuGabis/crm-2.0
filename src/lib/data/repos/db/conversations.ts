@@ -424,6 +424,20 @@ const loadedMsgConvs = new Set<string>();
 
 export async function loadMessagesFor(conversationId: string): Promise<void> {
   if (!conversationId || loadedMsgConvs.has(conversationId)) return;
+  /*
+   * ⚠️ **`ensureSession()` ANTES da consulta, e é o conserto da "conversa vazia
+   * em nova guia".** Numa aba recém-aberta (`/conversas?c=<id>`) o `Thread` monta
+   * imediatamente e disparava esta busca antes de a sessão estar pronta. Sem
+   * sessão a RLS devolve ZERO LINHAS **e nenhum erro** — e como a conversa já
+   * tinha sido marcada como carregada, o thread ficava branco para sempre até um
+   * F5. Cabeçalho, barra lateral e composer apareciam normalmente, o que fazia
+   * parecer defeito só das mensagens.
+   *
+   * É o mesmo padrão que a aba Canais já teve e que está documentado no
+   * AGENTS.md: "cacheava lista vazia como carregada".
+   */
+  await useDbStore.getState().ensureSession();
+  const comSessao = !!loc();
   loadedMsgConvs.add(conversationId);
   useConvStore.setState({ loadingMessagesFor: conversationId });
   const supabase = createClient();
@@ -440,6 +454,16 @@ export async function loadMessagesFor(conversationId: string): Promise<void> {
     }));
     return;
   }
+  /*
+   * ⚠️ **Resultado vazio SEM sessão confirmada não vira cache.** Depois do
+   * `ensureSession` acima um vazio é confiável (a conversa realmente não tem
+   * mensagem); sem `locationId` ele significa "não deu para perguntar", e gravar
+   * isso como carregado é exatamente o que prendia o thread em branco. O custo de
+   * não cachear é uma consulta a mais na próxima abertura — barato ao lado de uma
+   * conversa que só volta com F5.
+   */
+  if (!comSessao && (data ?? []).length === 0) loadedMsgConvs.delete(conversationId);
+
   const s = useConvStore.getState();
   const known = new Set(s.messages.map((m) => m.id));
   const fresh = (data ?? []).map(mapMessage).filter((m) => !known.has(m.id));

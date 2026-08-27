@@ -15,6 +15,7 @@ import {
   FileText,
   Loader2,
   Mail,
+  MessageSquare,
   Pause,
   Play,
   Star,
@@ -1219,6 +1220,24 @@ export function Thread({
         {loadingMessages && messages.length === 0 && (
           <div className="flex items-center justify-center gap-2 py-10 text-xs text-slate-400">
             <Loader2 className="size-4 animate-spin" /> Carregando conversa...
+          </div>
+        )}
+        {/*
+          ⚠️ Conversa SEM mensagem precisa dizer isso. Antes o thread ficava
+          branco, e branco é indistinguível de "não carregou" — foi assim que o
+          bug da nova guia (mensagens bloqueadas pela RLS antes de a sessão ficar
+          pronta) passou por defeito de tela em vez de defeito de dados. Existem
+          conversas legitimamente vazias no banco: criadas à mão em "Nova
+          conversa" ou pelo rodízio antes da primeira mensagem.
+        */}
+        {!loadingMessages && messages.length === 0 && (
+          <div className="flex flex-col items-center justify-center gap-1 py-12 text-center">
+            <MessageSquare className="size-5 text-slate-300" aria-hidden />
+            <p className="text-xs font-medium text-slate-500">Nenhuma mensagem nesta conversa</p>
+            <p className="max-w-[280px] text-[11px] text-slate-400">
+              Ela foi aberta mas ninguém enviou nada ainda. O que você escrever aqui será a
+              primeira mensagem.
+            </p>
           </div>
         )}
         {messages.map((m) => {
