@@ -1165,11 +1165,35 @@ export const conversationActions = {
     }
     let channelId: string | null = null;
     if (channel === "whatsapp") {
-      const { data: ch } = await supabase
+      // Escolhe um canal que o usuário PODE usar. A RLS de INSERT exige
+      // `channel_allowed`: se o departamento da pessoa tem canais próprios, só
+      // esses valem. Pegar o canal ativo mais antigo cegamente barrava quem é de
+      // um setor cujo canal não é o mais antigo (erro "não foi possível abrir").
+      const { data: me } = await supabase
+        .from("location_members")
+        .select("department_id")
+        .eq("location_id", location)
+        .maybeSingle();
+      const deptId = (me as { department_id: string | null } | null)?.department_id ?? null;
+
+      let allowedIds: string[] | null = null;
+      if (deptId) {
+        const { data: dc } = await supabase
+          .from("department_channels")
+          .select("channel_id")
+          .eq("department_id", deptId);
+        // Departamento COM canais vinculados → restringe a eles. SEM vínculo →
+        // sem restrição (igual ao channel_allowed), então deixa null.
+        if (dc && dc.length) allowedIds = dc.map((r) => (r as { channel_id: string }).channel_id);
+      }
+
+      let q = supabase
         .from("whatsapp_channels")
         .select("id")
         .eq("location_id", location)
-        .eq("active", true)
+        .eq("active", true);
+      if (allowedIds) q = q.in("id", allowedIds);
+      const { data: ch } = await q
         .order("created_at", { ascending: true })
         .limit(1)
         .maybeSingle();
