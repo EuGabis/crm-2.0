@@ -197,6 +197,25 @@ function quoteSnippet(m: Message): string {
   return t.length > 90 ? `${t.slice(0, 90)}…` : t || "Mensagem";
 }
 
+/**
+ * Texto amigável para uma mensagem que falhou no envio.
+ *
+ * O `error_detail` do servidor pode trazer um dump longo de diagnóstico
+ * (`... · Media upload error · #131053 · [diag] ...`) — útil pra investigar,
+ * ruim pro atendente. Aqui vira uma frase clara; o dump completo continua no
+ * `title` do balão (aparece ao passar o mouse). O caso de áudio (#131053, que a
+ * Meta recusa nesta conta) ganha uma mensagem específica com o que fazer.
+ */
+function textoDeFalha(m: Message): string {
+  const d = m.errorDetail ?? "";
+  if (m.type === "audio" && (/131053/.test(d) || /media upload error/i.test(d))) {
+    return "Não foi possível enviar o áudio por este número (limitação da conta na Meta). Envie por texto ou use outro canal.";
+  }
+  // Demais erros: só a 1ª frase, sem a cauda de diagnóstico.
+  const limpo = d.split("·")[0].split("[diag]")[0].trim();
+  return limpo ? `Não foi entregue: ${limpo}` : "Não foi entregue.";
+}
+
 function fmtBytes(n?: number) {
   if (!n) return "";
   if (n < 1024) return `${n} B`;
@@ -784,12 +803,13 @@ function MessageBubble({
           exige descobrir que há algo para passar o mouse em cima não comunica
           isso. Antes o balão dizia apenas "falhou", e nem o motivo era gravado.
         */}
-        {isOut && message.status === "failed" && message.errorDetail && (
-          <p className="mt-1 flex gap-1 rounded-md bg-rose-500/25 px-2 py-1 text-[10px] leading-snug text-rose-50">
+        {isOut && message.status === "failed" && (
+          <p
+            title={message.errorDetail ?? undefined}
+            className="mt-1 flex gap-1 rounded-md bg-rose-500/25 px-2 py-1 text-[10px] leading-snug text-rose-50"
+          >
             <AlertTriangle className="mt-px size-3 shrink-0" aria-hidden />
-            <span className="[overflow-wrap:anywhere]">
-              Não foi entregue: {message.errorDetail}
-            </span>
+            <span className="[overflow-wrap:anywhere]">{textoDeFalha(message)}</span>
           </p>
         )}
         <p

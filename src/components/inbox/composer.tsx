@@ -67,6 +67,17 @@ import { cn } from "@/lib/utils";
 
 const CHANNELS: Channel[] = ["whatsapp", "sms", "email"];
 
+/**
+ * Envio de áudio ligado/desligado.
+ *
+ * ⚠️ A Cloud API da Meta recusa TODO áudio desta conta (WABA) com #131053 —
+ * confirmado nos três números, em Ogg e MP4, com o arquivo chegando íntegro à
+ * Meta (round-trip idêntico). Texto/templates funcionam; áudio não. Enquanto a
+ * Meta não resolver, o microfone fica desligado para ninguém gravar em vão.
+ * Religar = mudar para `true` (uma linha) quando a Meta consertar.
+ */
+const ENVIO_DE_AUDIO_LIBERADO = false;
+
 const EMOJIS = "😀 😁 😂 🤣 😊 😍 😘 😎 🤩 🥳 👍 👏 🙏 💪 🔥 🎉 ✅ ❤️ 💜 💙 ⭐ ✨ 📌 📎 📅 ⏰ 💰 📞 💬 👋".split(" ");
 
 const QUICK_REPLIES = [
@@ -845,10 +856,25 @@ export function Composer({ conversationId }: { conversationId: string }) {
 
           {/* Áudio (gravação pelo microfone) */}
           <button
-            onClick={startRec}
+            onClick={() =>
+              ENVIO_DE_AUDIO_LIBERADO
+                ? startRec()
+                : toast.info(
+                    "Envio de áudio está temporariamente indisponível (limitação da conta na Meta). Use texto ou outro canal."
+                  )
+            }
             disabled={uploading}
-            title="Gravar áudio"
-            className="flex size-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50"
+            title={
+              ENVIO_DE_AUDIO_LIBERADO
+                ? "Gravar áudio"
+                : "Áudio temporariamente indisponível (limitação da Meta)"
+            }
+            className={cn(
+              "flex size-7 items-center justify-center rounded-md disabled:opacity-50",
+              ENVIO_DE_AUDIO_LIBERADO
+                ? "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                : "cursor-not-allowed text-slate-300"
+            )}
           >
             <Mic className="size-4" />
           </button>
