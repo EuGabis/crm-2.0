@@ -105,7 +105,9 @@ export async function GET() {
       /** Composer grava MP4/AAC quando o navegador suporta; inspeção aceita mp4/mp3. */
       audioMp4: true,
       /** Áudio é relido da Meta e comparado com o que enviamos (round-trip). */
-      roundTripDaMeta: true
+      roundTripDaMeta: true,
+      /** Diagnóstico mostra qual canal/número foi usado no envio. */
+      canalNoDiagnostico: true
     },
   });
 }
@@ -414,7 +416,24 @@ export async function POST(request: Request) {
        */
       error_detail:
         `[diag] ${retratoDoAudio(sendBytes)}${notaPreSkip ? ` ${notaPreSkip}` : ""}` +
-        ` via=upload fmt=${sendMime}${notaRoundTrip}`,
+        /*
+         * ⚠️ **O CANAL entra no diagnóstico, e é o suspeito nº 1 da regressão.**
+         * O áudio funcionava ontem e parou hoje; o commit b36f0fe, publicado
+         * hoje às 10:08 ("abrir conversa escolhe canal do departamento do
+         * usuário"), mudou QUAL número a conversa usa — antes era o canal ativo
+         * mais antigo, agora é um do departamento. O primeiro relato de falha foi
+         * às 10:46.
+         *
+         * Mídia é enviada em duas etapas contra o MESMO `phone_number_id`
+         * (`POST /{pnid}/media` e depois `POST /{pnid}/messages`), e a mídia fica
+         * escopada nesse número. Se o número mudou, mudou o par inteiro — e
+         * #131053 é justamente o erro dessa família. Sem o número no
+         * diagnóstico, "é o canal?" continuaria sendo suposição.
+         */
+        ` via=upload fmt=${sendMime}${notaRoundTrip}` +
+        ` canal[id=${channel.id.slice(0, 8)} pnid=${channel.phone_number_id}` +
+        ` waba=${channel.waba_id ?? "?"} nome=${channel.name ?? "?"}` +
+        ` pedido=${channelId ? "cliente" : "conversa"}]`,
       failed_at: null,
       /*
        * ⚠️ Grava o mime que REALMENTE foi enviado, não o que o cliente alegou.
