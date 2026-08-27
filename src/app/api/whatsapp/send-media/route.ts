@@ -7,6 +7,49 @@ import { toWhatsAppNumber } from "@/lib/whatsapp/phone";
 export const dynamic = "force-dynamic";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * Marca a mensagem como falha e GRAVA O MOTIVO.
+ *
+ * ⚠️ **Duas coisas estavam erradas aqui, e juntas tornavam o problema
+ * indiagnosticável** — foi o que apareceu como "usuários tentando enviar áudio
+ * e falhando", com o balão dizendo só "falhou".
+ *
+ * 1. **O motivo não era gravado.** A rota fazia `update({ status: "failed" })` e
+ *    devolvia o texto do erro na resposta HTTP, que virava um toast e sumia.
+ *    `messages.error_detail` existe desde a 0031 e o webhook já o usa para falha
+ *    de ENTREGA; a falha de ENVIO simplesmente não escrevia nele. Sem isso não
+ *    há como distinguir "janela de 24h fechada" de "formato recusado pela Meta"
+ *    — e a conduta do atendente é oposta nos dois casos.
+ *
+ * 2. **A escrita usava a sessão do usuário, e a RLS a recusava em silêncio.** A
+ *    policy `membros editam` de `messages` (0074) exige
+ *    `private.conv_assigned_to_me(conversation_id)` — ou ver tudo, sem bot e sem
+ *    atribuição. Então um atendente que manda áudio numa conversa atribuída a
+ *    OUTRA pessoa (ou com bot) não conseguia gravar status nenhum, e **UPDATE
+ *    recusado pela RLS não vem com erro**: afeta 0 linhas, calado. É a mesma
+ *    armadilha já documentada em `conversationActions.removeMessage`.
+ *    Isso explica o "alguns usuários": dependia de a conversa ser sua.
+ *
+ * O padrão certo é o do projeto: **a sessão AUTORIZA, a service role ESCREVE**
+ * (igual `resolveGuruUserToken` e a rota de transcrição). Quem não pode ver a
+ * conversa já levou 404 muito antes daqui.
+ */
+async function marcarFalha(
+  admin: ReturnType<typeof createAdminClient>,
+  messageId: string,
+  motivo: string,
+) {
+  await admin
+    .from("messages")
+    .update({
+      status: "failed",
+      failed_at: new Date().toISOString(),
+      // Coluna de texto livre; corto para não guardar um stack inteiro.
+      error_detail: motivo.slice(0, 500),
+    })
+    .eq("id", messageId);
+}
+
 export async function POST(request: Request) {
   const supabase = await createClient();
   const {
@@ -38,13 +81,23 @@ export async function POST(request: Request) {
     .maybeSingle();
   if (!conv) return Response.json({ error: "Conversa não encontrada" }, { status: 404 });
 
+  // A partir daqui a sessão JÁ autorizou (o select acima passou pela RLS), então
+  // toda escrita usa a service role — inclusive as de falha abaixo. Ver
+  // `marcarFalha`.
+  const admin = createAdminClient();
+  /** Recusa que o atendente precisa ver NO BALÃO, não num toast que sumiu. */
+  const recusar = async (motivo: string, status: number, extra?: Record<string, unknown>) => {
+    await marcarFalha(admin, messageId, motivo);
+    return Response.json({ error: motivo, ...extra }, { status });
+  };
+
   const { data: channel } = await supabase
     .from("whatsapp_channels")
     .select("*")
     .eq("id", channelId ?? conv.channel_id)
     .maybeSingle();
   if (!channel || !channel.active) {
-    return Response.json({ error: "Canal inválido ou inativo" }, { status: 400 });
+    return recusar("Canal de WhatsApp inválido ou inativo", 400);
   }
 
   const { data: contact } = await supabase
@@ -53,7 +106,7 @@ export async function POST(request: Request) {
     .eq("id", conv.contact_id)
     .maybeSingle();
   const to = toWhatsAppNumber(contact?.phone);
-  if (!to) return Response.json({ error: "Contato sem telefone" }, { status: 400 });
+  if (!to) return recusar("Contato sem telefone válido", 400);
 
   // limite diário
   const startOfDay = new Date();
@@ -65,7 +118,7 @@ export async function POST(request: Request) {
     .eq("direction", "out")
     .gte("created_at", startOfDay.toISOString());
   if ((count ?? 0) >= channel.daily_limit) {
-    return Response.json({ error: "Limite diário do canal atingido" }, { status: 429 });
+    return recusar(`Limite diário do canal atingido (${channel.daily_limit})`, 429);
   }
 
   // janela de 24h (mídia é texto livre — precisa da janela aberta)
@@ -79,24 +132,22 @@ export async function POST(request: Request) {
     .maybeSingle();
   const within24h = !!lastIn && Date.now() - new Date(lastIn.created_at).getTime() < DAY_MS;
   if (!within24h) {
-    return Response.json(
-      { error: "Janela de 24h fechada — só dá para enviar template", needsTemplate: true },
-      { status: 409 },
-    );
+    // Marca como falha de propósito: a mídia ficou no inbox e o cliente NÃO
+    // recebeu. Sem a marca o balão nascia sem indicador nenhum, e o atendente
+    // não tinha como saber que o áudio não saiu.
+    return recusar("Janela de 24h fechada — envie um template antes", 409, {
+      needsTemplate: true,
+    });
   }
 
   // lê o arquivo do nosso Storage com a chave de serviço: já autorizamos o usuário
   // e a conversa acima, então não faz sentido a leitura depender do token da sessão
   // (era o suspeito nº 1 do "Authentication Error" na hora de baixar a mídia).
-  const admin = createAdminClient();
   const { data: blob, error: dlErr } = await admin.storage
     .from("conversation-media")
     .download(mediaPath);
   if (dlErr || !blob) {
-    return Response.json(
-      { error: "Mídia não encontrada: " + (dlErr?.message ?? "arquivo ausente") },
-      { status: 400 },
-    );
+    return recusar("Mídia não encontrada: " + (dlErr?.message ?? "arquivo ausente"), 400);
   }
   const bytes = await blob.arrayBuffer();
   const sendBytes = bytes;
@@ -109,17 +160,21 @@ export async function POST(request: Request) {
     const mediaId = await uploadMedia(channel.phone_number_id, sendBytes, sendMime, uploadName);
     waResp = await sendMediaMessage(channel.phone_number_id, to, kind, mediaId, caption, filename);
   } catch (e) {
-    await supabase.from("messages").update({ status: "failed" }).eq("id", messageId);
-    return Response.json(
-      { error: e instanceof Error ? e.message : "Falha na Cloud API" },
-      { status: 502 },
-    );
+    // `graphError` já monta a mensagem com o código e o subcódigo da Meta — é
+    // essa string que o atendente precisa ver, e era ela que se perdia.
+    const motivo = e instanceof Error ? e.message : "Falha na Cloud API";
+    await marcarFalha(admin, messageId, motivo);
+    return Response.json({ error: motivo }, { status: 502 });
   }
 
   const waMessageId = waResp?.messages?.[0]?.id ?? null;
-  await supabase
+  // ⚠️ **Escrita pela SERVICE ROLE, não pela sessão** — a sessão já autorizou lá
+  // em cima. Ver o comentário de `marcarFalha`: com a sessão, esta gravação
+  // falhava EM SILÊNCIO para quem não é dono da conversa, e o áudio ficava sem
+  // marca de enviado mesmo tendo chegado no cliente.
+  await admin
     .from("messages")
-    .update({ wa_message_id: waMessageId, status: "sent" })
+    .update({ wa_message_id: waMessageId, status: "sent", error_detail: null, failed_at: null })
     .eq("id", messageId);
 
   return Response.json({ ok: true, waMessageId });
