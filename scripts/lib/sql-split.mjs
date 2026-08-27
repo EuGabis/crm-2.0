@@ -38,8 +38,14 @@ export function dividirSql(sql) {
   let i = 0;
 
   const empurrar = (fim) => {
-    const texto = sql.slice(inicio, fim);
-    if (texto.trim()) comandos.push({ sql: texto.trim(), linha: linhaInicio });
+    const texto = sql.slice(inicio, fim).trim();
+    if (!texto) return;
+    // ⚠️ Bloco que é SÓ comentário não é comando. Sem isto, o comentário no pé
+    // do arquivo (padrão neste repositório: a consulta de conferência depois da
+    // migração) entrava na lista, inflava a contagem de comandos e o ensaio
+    // mandava um comentário para o Postgres executar.
+    if (!esqueleto(texto)) return;
+    comandos.push({ sql: texto, linha: linhaInicio });
   };
 
   while (i < sql.length) {
