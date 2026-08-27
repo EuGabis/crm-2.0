@@ -92,6 +92,8 @@ export interface Message {
   readAt?: string;
   /** Motivo da falha de envio/entrega (messages.error_detail, 0031). */
   errorDetail?: string;
+  /** Reações (emoji) na mensagem — uma por pessoa, como no WhatsApp. */
+  reactions?: { emoji: string; by: string; at: string }[];
   /** Escrita por automação/IA, não por uma pessoa (migração 0027). */
   automated?: boolean;
   /** Transcrição do áudio (migração 0085). */

@@ -70,6 +70,7 @@ const mapMessage = (r: any): Message => ({
   deliveredAt: r.delivered_at ?? undefined,
   readAt: r.read_at ?? undefined,
   errorDetail: r.error_detail ?? undefined,
+  reactions: r.reactions ?? undefined,
   automated: r.automated || undefined,
   transcription: r.transcription ?? undefined,
   transcriptionStatus: r.transcription_status ?? undefined,

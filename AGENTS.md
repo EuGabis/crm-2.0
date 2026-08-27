@@ -2597,6 +2597,65 @@ que a busca fina trouxe.** `syncInboxDelta` já seguia isso (só acrescenta); o
 `load()` era a exceção que ninguém tinha notado, porque em aba já aberta ele roda
 antes de qualquer conversa ser aberta.
 
+## Reação de mensagem (emoji), como no WhatsApp
+
+Sintoma: quando o contato reagia, o fio mostrava uma bolha com o texto
+`[reaction]` — sem o emoji, sem dizer a QUAL mensagem se referia, e sem sumir
+quando o contato desreagia. Causa: o webhook não conhecia o tipo `reaction` e
+caía no `else` genérico do resolvedor de conteúdo (`body = '[' || tipo || ']'`).
+
+⚠️ **Reação NÃO é mensagem: é atributo da mensagem reagida.** Guardar como linha
+em `messages` é o que produzia a bolha órfã — e produziria outra a cada
+des-reação, porque a remoção chega como o MESMO evento com `emoji` vazio. Então:
+coluna **`messages.reactions` (jsonb)** na mensagem de DESTINO, não tabela nova.
+Reação é conjunto pequeno e limitado (uma por pessoa, e conversa de WhatsApp é
+1:1); tabela própria só acrescentaria join, RLS e migração.
+
+Migração **`202608271735_reacoes_de_mensagem.sql`**.
+
+⚠️ **`public.set_message_reaction(...)` faz o ler-modificar-escrever do jsonb em
+FUNÇÃO, não em TypeScript.** Reagir e desreagir em sequência são dois webhooks
+concorrentes, e no código a segunda escrita apagaria a primeira. Mesmo motivo de
+`log_conversation_event` e `save_handoff_summary` existirem como função.
+Devolve NULL quando o alvo não existe aqui (reação a mensagem anterior à
+integração) — o chamador loga em vez de falhar, que é o comportamento do próprio
+WhatsApp: reação sem alvo não aparece.
+
+⚠️ **Par `revoke` + `grant to service_role`**, e `authenticated` NÃO recebe: quem
+chama é o webhook. No dia em que uma tela enviar reação, a função vai precisar de
+checagem de empresa antes do grant (ver a 0080 e a 202608271044).
+
+**Reação não mexe na conversa**: não reabre, não conta como não lida e não muda a
+prévia da lista. É assim no WhatsApp — e contar reação como atividade encheria a
+caixa de "não lidas" que não pedem resposta.
+
+### Detalhes de tela que custaram atenção
+
+- ⚠️ **O selo fica meia altura FORA do balão** (coluna envolvendo balão +
+  reação). O balão tem `overflow-hidden` — a mídia e a faixa de falha dependem
+  disso para arredondar nas pontas —, então um selo dentro dele sairia cortado. A
+  largura máxima migrou para a coluna; `items-end/start` mantém o alinhamento por
+  lado.
+- **Fundo branco com borda**: o balão de saída é indigo escuro e o de entrada é
+  cinza claro, então nenhum tom único serve para os dois.
+- ⚠️ **`border-slate-200` e NÃO `ring-slate-200`**: o `ring` não está no
+  remapeamento de dark do `globals.css` e ficaria um anel claro brilhante no
+  fundo escuro — a armadilha já documentada ("o que não está na lista fica com o
+  valor claro"). A borda está coberta e ganha o dark de graça.
+- Chega **ao vivo**: o inbox já assina `UPDATE` em `messages` e substitui a
+  mensagem pelo id, e a tabela é `replica identity full`. Nada a fazer.
+
+⚠️ **A migração APAGA as bolhas `[reaction]` já gravadas**, com critério estreito
+(entrada + tipo texto + corpo exatamente `[reaction]`, string que só o nosso
+`else` genérico produz). Não há o que converter: a linha nunca guardou o emoji
+nem o `message_id` de destino. Apagar remove ruído sem perder informação — mas é
+irreversível, e está dito no arquivo para quem revisar poder discordar antes de
+aplicar.
+
+⏳ **Enviar reação PELO CRM não existe.** A função já aceita a origem (`p_by`),
+então falta só interface e a chamada da Cloud API (`type: "reaction"`). Não foi
+feito porque o pedido era sobre a reação do contato não aparecer.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
