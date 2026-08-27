@@ -1853,6 +1853,14 @@ dois segundos: abra `https://lito-crm.vercel.app/api/version` logado.
 
 ⚠️ **404 ali JÁ É a resposta**: o código no ar é anterior a esta rota.
 
+⚠️ **`GET /api/whatsapp/send-media` responde o mesmo SEM LOGIN**, e é o que serve
+para depurar de fora. Motivo: `api/whatsapp` está fora do matcher do `proxy.ts`
+(é onde a Meta bate), então sob o proxy TODO caminho responde 307 para /login —
+inclusive um inexistente —, e o 307 não distingue "rota existe" de "rota não
+existe". Fora do proxy, a diferença aparece: **404 = não existe, 405 = existe mas
+o método está errado, JSON = a rota respondeu**. Foi essa sondagem que deu a
+saída depois de seis rodadas deduzindo a versão.
+
 O objeto traz `commit`, `branch`, `mensagem`, `ambiente` e um bloco `correcoes`
 com marcadores LITERAIS (`true` fixo no arquivo) das correções cuja ausência é
 difícil de perceber pela tela. Ao consertar algo que gere a dúvida "isso subiu?",

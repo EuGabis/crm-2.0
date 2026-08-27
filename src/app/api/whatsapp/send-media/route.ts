@@ -51,6 +51,41 @@ async function marcarFalha(
     .eq("id", messageId);
 }
 
+/**
+ * GET responde QUAL versão desta rota está no ar.
+ *
+ * ⚠️ **Existe porque a investigação do áudio recusado pela Meta voltou SEIS
+ * vezes ao mesmo ponto**, e todas as vezes a pergunta que faltava era a mesma:
+ * "o código no ar já tem a correção?". Sem resposta, três situações ficavam
+ * indistinguíveis — a correção não funcionou, a correção não subiu, ou a falha
+ * na tela era antiga (a recusa da Meta chega pelo webhook, assíncrona, e fica
+ * gravada até ser sobrescrita).
+ *
+ * ⚠️ **Por que AQUI e não só em `/api/version`:** `api/whatsapp` está FORA do
+ * matcher do `proxy.ts` (é onde a Meta bate, sem sessão). Então esta resposta é
+ * alcançável sem login — e portanto conferível por quem está depurando, de
+ * fora, sem precisar achar log nem rodar consulta. `/api/version` continua
+ * existindo para a visão completa de quem está logado.
+ *
+ * Não devolve segredo: marcadores booleanos e o commit curto. Nenhum dos dois é
+ * explorável, e a alternativa (deduzir a versão por dedução, seis vezes) já se
+ * mostrou pior.
+ */
+export async function GET() {
+  return Response.json({
+    rota: "whatsapp/send-media",
+    commit: (process.env.VERCEL_GIT_COMMIT_SHA ?? "local").slice(0, 7),
+    correcoes: {
+      /** Mime enviado à Meta sem `; codecs=...` (limpo na rota E em uploadMedia). */
+      audioMimeSemParametro: true,
+      /** Bytes do áudio conferidos antes do envio; recusa com motivo específico. */
+      inspecaoDeAudio: true,
+      /** `media_mime` guarda o mime REALMENTE enviado. */
+      mimeGravadoComoEnviado: true,
+    },
+  });
+}
+
 export async function POST(request: Request) {
   const supabase = await createClient();
   const {
