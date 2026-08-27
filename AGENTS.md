@@ -1747,10 +1747,47 @@ afirmar pelos bytes.
 O módulo é UM e serve os dois lados (rota e composer): duas cópias da tabela de
 assinaturas divergiriam na primeira mudança.
 
-⏳ **Ainda não sabemos a causa raiz.** O que existe agora é o instrumento: na
-próxima tentativa, ou a rota recusa dizendo exatamente o que o arquivo é, ou a
-Meta responde com `error_data.details`. Os dois logam (`[send-media] áudio ...` e
-`[webhook] falha em ...`) para leitura nos logs da Vercel.
+### A causa, dita pela própria Meta
+
+Com `error_data.details` sendo gravado, a recusa veio inteira:
+
+> Audio file uploaded with mimetype as **audio/ogg; codecs=opus**, however on
+> processing it is of type **application/octet-stream**. Please choose a
+> different file. · Media upload error · #131053
+
+⚠️ **O parâmetro `; codecs=opus` no mime era o problema.** A lista de tipos
+aceitos da Cloud API tem `audio/ogg`, **sem parâmetro**; com ele a Meta não
+reconhece o arquivo, cai em `application/octet-stream` e acusa divergência entre
+o declarado e o conteúdo. E como o rótulo do erro é sempre o mesmo
+("Media upload error"), isso sobreviveu a três rodadas de correção.
+
+De onde vinha: `audio/ogg;codecs=opus` **era o código antigo**, do
+`MediaRecorder` nativo, removido em 4cc5bab quando entrou o
+`opus-media-recorder`. A Meta reportou a forma COM espaço
+(`audio/ogg; codecs=opus`), que é como o Firefox normaliza `Blob.type` — ou seja,
+bundle antigo em cache no navegador de quem reclamou. O valor não existe mais em
+lugar nenhum do nosso código (conferido com `git log -S` em todo o histórico).
+
+⚠️ **A correção não é tirar o parâmetro: é parar de confiar no mime do cliente.**
+Enquanto o tipo declarado à Meta vier de `file.type` do navegador — guardado no
+Storage e devolvido no corpo da requisição —, a divergência declarado × conteúdo
+é sempre possível: bundle em cache, navegador que anota diferente, arquivo
+renomeado à mão. `mimeParaUpload` tira os parâmetros SEMPRE e, quando a
+assinatura de bytes é conclusiva, declara o tipo do conteúdo REAL. A divergência
+deixa de ser um caso a consertar e passa a ser impossível por construção.
+
+⚠️ **Furo que o teste pegou na primeira versão de `mimeParaUpload`:** a condição
+para farejar era só `limpo.startsWith("audio/")`. Um OGG legítimo cujo mime
+tivesse se perdido no caminho (corpo sem `mime`, Storage devolvendo genérico) era
+enviado COMO `application/octet-stream` — a divergência exata que a Meta recusa.
+Hoje também fareja quando o declarado é octet-stream/vazio e quando o `kind` da
+mensagem é `audio`, que é a intenção do usuário e não depende de nenhum mime ter
+sobrevivido à viagem. `webm` e `wav` ficam FORA do mapa de propósito: a Cloud API
+não aceita nenhum dos dois em áudio, e mapeá-los trocaria a recusa da Meta por
+outra recusa da Meta.
+
+Só reescreve quando a assinatura é CONCLUSIVA — palpite nosso por cima de um mime
+declarado correto trocaria um erro por outro.
 
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 

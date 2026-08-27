@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { uploadMedia, sendMediaMessage } from "@/lib/whatsapp/client";
-import { inspecionarAudio, resumoDaInspecao } from "@/lib/whatsapp/audio";
+import { inspecionarAudio, mimeParaUpload, resumoDaInspecao } from "@/lib/whatsapp/audio";
 import { toWhatsAppNumber } from "@/lib/whatsapp/phone";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -152,7 +152,24 @@ export async function POST(request: Request) {
   }
   const bytes = await blob.arrayBuffer();
   const sendBytes = bytes;
-  const sendMime = mime || blob.type || "application/octet-stream";
+  /*
+   * ⚠️ **O mime declarado à Meta vem dos BYTES, não da alegação do cliente.**
+   * A recusa que travou este bug por três rodadas foi, nas palavras dela:
+   * "uploaded with mimetype as audio/ogg; codecs=opus, however on processing it
+   * is of type application/octet-stream". Dois problemas num só:
+   *
+   *   1. o parâmetro `; codecs=opus` — a lista de tipos aceitos da Cloud API tem
+   *      `audio/ogg`, sem parâmetro, e com ele a Meta não reconhece o arquivo;
+   *   2. enquanto o valor vier do cliente (`file.type` do navegador, guardado no
+   *      Storage e devolvido no corpo), a divergência declarado × conteúdo é
+   *      sempre possível — bundle antigo em cache, navegador que anota diferente,
+   *      arquivo renomeado à mão.
+   *
+   * `mimeParaUpload` tira os parâmetros sempre e, quando a assinatura de bytes é
+   * conclusiva, declara o tipo do conteúdo REAL. A divergência deixa de ser um
+   * caso a consertar e passa a ser impossível por construção.
+   */
+  const sendMime = mimeParaUpload(bytes, mime || blob.type || "", kind === "audio");
 
   /*
    * ⚠️ **Conferir o áudio ANTES de mandar, porque a Meta mente sobre o momento
@@ -170,7 +187,10 @@ export async function POST(request: Request) {
    */
   if (kind === "audio") {
     const insp = inspecionarAudio(bytes);
-    console.log(`[send-media] áudio ${messageId}: ${resumoDaInspecao(insp)}`);
+    console.log(
+      `[send-media] áudio ${messageId}: ${resumoDaInspecao(insp)} ` +
+        `declarado=${JSON.stringify(mime ?? blob.type)} enviado=${sendMime}`
+    );
     if (!insp.aceitavel) {
       return recusar(`${insp.motivo} (${resumoDaInspecao(insp)})`, 422);
     }
