@@ -1958,6 +1958,58 @@ antiga) e eu escolhia uma por palpite. Ao consertar algo cujo sintoma chega de
 forma assíncrona (webhook, cron, fila), **construa o marcador de versão junto com
 a primeira correção**, não na sexta.
 
+## A causa do áudio recusado: `pre-skip = 0` (2026-08-27)
+
+Sétima rodada, e o retrato do arquivo REAL — que só apareceu quando o diagnóstico
+passou a ir para o balão em vez do `console.log` — deu a resposta em uma linha:
+
+```
+[diag] bytes=19915 head[v=1 ch=1 preskip=0 taxa=48000 ganho=0 map=0]
+       ogg[pag=7 tags=true audio=5 eos=true granule=146880 sobra=0]
+```
+
+Tudo saudável: mono, OpusTags presente, EOS presente, sem truncamento, granule
+coerente (146880/48000 = 3,06 s). **Uma única anomalia: `preskip=0`.**
+
+⚠️ **`pre-skip = 0` é inválido para Ogg/Opus.** O Opus tem atraso algorítmico
+inerente — o libopus a 48 kHz reporta 312 amostras (6,5 ms) de lookahead — e a
+RFC 7845 exige que o muxer grave esse número no `pre-skip`, porque é com ele que
+o decodificador converte granule em posição PCM (`granule - pre_skip`). O
+`opus-media-recorder` grava zero: nunca consulta o encoder.
+
+⚠️ **É por isso que "o áudio toca e o Whisper transcreve" enganou por seis
+rodadas.** Navegador e Whisper ignoram o campo. Demuxer estrito (ffmpeg, que a
+Meta usa) falha — e demuxer que falha é EXATAMENTE a frase dela: "on processing
+it is of type application/octet-stream". Não era o mime, não era o estéreo, não
+era a estrutura do fluxo.
+
+**Corrigido no servidor** (`corrigirPreSkip`), não no navegador: o encoder é
+WebAssembly de terceiro, e neste ponto o arquivo já está em mãos.
+
+⚠️ **Mudar a carga da página obriga a REFAZER o CRC-32 dela.** Cada página Ogg
+carrega um CRC sobre ela inteira (com o próprio campo zerado no cálculo).
+Reescrever o `pre-skip` sem refazer o CRC trocaria um arquivo que o navegador
+aceita por um que NADA aceita.
+
+⚠️ **A correção se AUTOVALIDA e é a parte mais importante do desenho:** ela só
+age se o CRC calculado por `crcOgg` conferir com o gravado em TODAS as páginas.
+Se a minha implementação de CRC estivesse errada, ela não bateria com a do
+codificador — e reescrever produziria arquivo pior do que o atual. Não
+conferindo, devolve os bytes originais e diz por quê no diagnóstico.
+
+O CRC é escrito **bit a bit, direto da especificação** (polinômio 0x04C11DB7,
+início 0, sem reflexão, sem xor final): é lento — irrelevante para páginas de
+dezenas de bytes — e obviamente correto, enquanto uma tabela esconderia um erro
+de reflexão que só apareceria em produção. Conferido contra uma segunda
+implementação, escrita com tabela: `crc("123456789") = 0x89a1897f` nas duas.
+
+Testado: preskip=0 com CRC válido → corrige e o CRC segue conferindo 4/4;
+preskip=312 → não mexe; CRC corrompido → **recusa** mexer; sem OpusHead → não
+mexe.
+
+⏳ Se um dia o `opus-media-recorder` for trocado ou corrigido, `corrigirPreSkip`
+vira no-op sozinha (só age quando o campo é 0) — não precisa ser removida.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em

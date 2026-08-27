@@ -382,7 +382,7 @@ export function retratoDoAudio(bytes: ArrayBuffer): string {
     `head[v=${h.versao} ch=${h.canais} preskip=${h.preSkip} taxa=${h.taxaEntrada} ` +
     `ganho=${h.ganho} map=${h.channelMappingFamily}] ` +
     `ogg[pag=${o.paginas} tags=${o.temOpusTags} audio=${o.paginasDeAudio} ` +
-    `eos=${o.temEos} granule=${o.granuleFinal} sobra=${o.sobra}]` +
+    `eos=${o.temEos} granule=${o.granuleFinal} sobra=${o.sobra} ${resumoCrc(bytes)}]` +
     (o.problemas.length ? ` problemas[${o.problemas.join("; ")}]` : "")
   );
 }
@@ -394,4 +394,149 @@ export function resumoDoOgg(a: AnaliseOgg): string {
     `audio=${a.paginasDeAudio} eos=${a.temEos} granule=${a.granuleFinal} sobra=${a.sobra}` +
     (a.problemas.length ? ` PROBLEMAS[${a.problemas.join("; ")}]` : "")
   );
+}
+
+/* ------------------------------------------------------------------ *
+ * `pre-skip = 0`: a anomalia que a Meta recusa
+ *
+ * O retrato do arquivo real veio assim:
+ *   head[v=1 ch=1 preskip=0 taxa=48000 ganho=0 map=0]
+ *   ogg[pag=7 tags=true audio=5 eos=true granule=146880 sobra=0]
+ *
+ * Tudo em ordem MENOS o `pre-skip`. O Opus tem atraso algorítmico inerente — o
+ * libopus a 48 kHz reporta 312 amostras de lookahead (6,5 ms) — e a RFC 7845
+ * exige que o muxer grave esse número no `pre-skip`, porque é com ele que o
+ * decodificador converte granule em posição PCM (`granule - pre_skip`). Zero
+ * significa que o `opus-media-recorder` nunca consultou o encoder.
+ *
+ * Navegador e Whisper ignoram e tocam o áudio — foi o que fez isso parecer
+ * arquivo bom por seis rodadas. Demuxer estrito (ffmpeg, que a Meta usa) falha,
+ * e demuxer que falha explica exatamente a frase dela: "on processing it is of
+ * type application/octet-stream".
+ *
+ * ⚠️ **Corrigir exige recalcular o CRC da página.** Cada página Ogg carrega um
+ * CRC-32 sobre ela inteira (com o campo do CRC zerado durante o cálculo). Mudar
+ * a carga sem refazer o CRC trocaria um arquivo que o navegador aceita por um
+ * que NADA aceita.
+ * ------------------------------------------------------------------ */
+
+/** Lookahead do libopus a 48 kHz — o valor que `opusenc` grava. */
+const PRE_SKIP_PADRAO = 312;
+
+/**
+ * CRC-32 do Ogg: polinômio 0x04C11DB7, início 0, sem reflexão, sem xor final.
+ *
+ * Escrito bit a bit de propósito, direto da especificação: é lento (irrelevante
+ * para uma página de dezenas de bytes) e obviamente correto, enquanto uma tabela
+ * pré-calculada esconderia um erro de reflexão que só apareceria em produção.
+ */
+export function crcOgg(pagina: Uint8Array, inicio: number, fim: number): number {
+  let crc = 0;
+  for (let i = inicio; i < fim; i++) {
+    // Os 4 bytes do próprio CRC entram como ZERO no cálculo.
+    const byte = i >= inicio + 22 && i < inicio + 26 ? 0 : pagina[i]!;
+    crc ^= byte << 24;
+    for (let k = 0; k < 8; k++) {
+      crc = crc & 0x80000000 ? ((crc << 1) ^ 0x04c11db7) >>> 0 : (crc << 1) >>> 0;
+    }
+    crc = crc >>> 0;
+  }
+  return crc >>> 0;
+}
+
+interface Pagina {
+  inicio: number;
+  fim: number;
+  inicioCarga: number;
+  crcGravado: number;
+  crcCalculado: number;
+}
+
+/** Percorre as páginas devolvendo limites e CRC gravado x calculado. */
+function paginasComCrc(b: Uint8Array): Pagina[] {
+  const out: Pagina[] = [];
+  const marca = (i: number, t: string) => [...t].every((c, k) => b[i + k] === c.charCodeAt(0));
+  let i = 0;
+  while (i + 27 <= b.length && marca(i, "OggS")) {
+    const nSeg = b[i + 26]!;
+    const tabela = i + 27;
+    if (tabela + nSeg > b.length) break;
+    let carga = 0;
+    for (let k = 0; k < nSeg; k++) carga += b[tabela + k]!;
+    const inicioCarga = tabela + nSeg;
+    const fim = inicioCarga + carga;
+    if (fim > b.length) break;
+    out.push({
+      inicio: i,
+      fim,
+      inicioCarga,
+      crcGravado:
+        (b[i + 22]! | (b[i + 23]! << 8) | (b[i + 24]! << 16) | (b[i + 25]! * 0x1000000)) >>> 0,
+      crcCalculado: crcOgg(b, i, fim),
+    });
+    i = fim;
+  }
+  return out;
+}
+
+export interface ResultadoPreSkip {
+  /** Bytes a enviar — os originais quando nada foi (ou pôde ser) mudado. */
+  bytes: ArrayBuffer;
+  corrigido: boolean;
+  /** Texto curto para o diagnóstico do balão. */
+  nota: string;
+}
+
+/**
+ * Corrige `pre-skip = 0` no `OpusHead`, refazendo o CRC da página.
+ *
+ * ⚠️ **Só age se o CRC calculado por `crcOgg` bater com o gravado em TODAS as
+ * páginas.** Essa condição é a autovalidação da correção: se a minha
+ * implementação de CRC estivesse errada, ela não bateria com a do codificador, e
+ * aí reescrever a página produziria um arquivo pior do que o atual — que ao menos
+ * toca no navegador. Não conferindo, devolve o original e diz por quê.
+ */
+export function corrigirPreSkip(bytes: ArrayBuffer): ResultadoPreSkip {
+  const orig = new Uint8Array(bytes);
+  const h = cabecalhoOpus(bytes);
+  if (h.preSkip === null) return { bytes, corrigido: false, nota: "preskip: sem OpusHead" };
+  if (h.preSkip !== 0) return { bytes, corrigido: false, nota: `preskip=${h.preSkip} ok` };
+
+  const paginas = paginasComCrc(orig);
+  if (!paginas.length) return { bytes, corrigido: false, nota: "preskip: sem páginas" };
+  const ruins = paginas.filter((p) => p.crcGravado !== p.crcCalculado).length;
+  if (ruins) {
+    // Não mexe: ou o arquivo já vem com CRC inválido (e aí ESSE é o problema), ou
+    // a minha implementação divergiu — em nenhum dos casos reescrever ajuda.
+    return {
+      bytes,
+      corrigido: false,
+      nota: `preskip=0 NAO corrigido (crc divergente em ${ruins}/${paginas.length} paginas)`,
+    };
+  }
+
+  // A página do OpusHead é a primeira; o campo fica no byte 10 da carga.
+  const pag = paginas[0]!;
+  const novo = new Uint8Array(orig); // cópia: não mutar o buffer do chamador
+  const off = pag.inicioCarga + 10;
+  novo[off] = PRE_SKIP_PADRAO & 0xff;
+  novo[off + 1] = (PRE_SKIP_PADRAO >> 8) & 0xff;
+  const crc = crcOgg(novo, pag.inicio, pag.fim);
+  novo[pag.inicio + 22] = crc & 0xff;
+  novo[pag.inicio + 23] = (crc >>> 8) & 0xff;
+  novo[pag.inicio + 24] = (crc >>> 16) & 0xff;
+  novo[pag.inicio + 25] = (crc >>> 24) & 0xff;
+
+  return {
+    bytes: novo.buffer.slice(novo.byteOffset, novo.byteOffset + novo.byteLength) as ArrayBuffer,
+    corrigido: true,
+    nota: `preskip 0->${PRE_SKIP_PADRAO} (crc refeito, ${paginas.length} paginas conferidas)`,
+  };
+}
+
+/** Quantas páginas têm CRC íntegro — entra no retrato do balão. */
+export function resumoCrc(bytes: ArrayBuffer): string {
+  const p = paginasComCrc(new Uint8Array(bytes));
+  const ok = p.filter((x) => x.crcGravado === x.crcCalculado).length;
+  return `crc=${ok}/${p.length}`;
 }
