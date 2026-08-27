@@ -2422,6 +2422,66 @@ correção em vermelho na seção "Avisos do linter de segurança do Supabase". 
 frase que o `AGENTS.md` tinha ali (de que 0047/0048/0078/0079 já faziam o par)
 estava errada.
 
+## Relatório de Atendimento em XLSX (substitui o CSV)
+
+Pedido: "o relatório que baixamos dessa tela é muito genérico, vamos incluir
+gráficos e deixar como um relatório corporativo". Escolha do Gabriel: **XLSX com
+abas**, e **sem manter o CSV**.
+
+⚠️ **Limitação dita antes de construir: biblioteca de XLSX no navegador NÃO gera
+gráfico nativo do Excel.** O SheetJS não escreve nenhum e no ExcelJS isso está em
+aberto há anos. Então "planilha com gráficos" existe de duas formas, e o
+relatório usa as duas:
+1. **barra de dados nativa** (formatação condicional) nas colunas de volume e
+   cumprimento — vale mais que imagem porque acompanha a ordenação e o filtro
+   que o leitor aplicar;
+2. **imagem PNG embutida** dos dois gráficos, desenhada em canvas
+   (`sla-graficos.ts`).
+
+⚠️ **A aba "Atendimentos" é o CSV que saiu, e não é enfeite.** Uma linha por
+conversa com a `situacao` já resolvida em texto. Sem ela, tirar o CSV tiraria a
+única coisa que ele fazia bem — tabela dinâmica e cruzamento com a planilha da
+equipe. `csvDeAtendimentos` foi REMOVIDA de `sla.ts`: manter as duas saídas
+deixaria duas definições de "situação" para divergirem na primeira mudança.
+
+⚠️ **`exceljs` entra por import DINÂMICO** (~940 KB). Import estático colocaria
+isso no bundle de quem só abre o painel e nunca baixa relatório.
+
+**Canvas e não SVG→PNG** nos gráficos: o caminho por SVG exige serializar,
+carregar numa `Image` e esperar `onload` — assíncrono, sujeito a CSP em `data:` e
+com fonte que pode não resolver. Desenhado em 2× e exportado no tamanho lógico,
+porque no Excel a imagem é ampliada com o zoom e em 1× o eixo sai borrado.
+
+**Bloco de metodologia no Resumo** (expediente, meta, "primeira resposta
+HUMANA", não-respondidas no denominador, mediana ≠ média). Não é burocracia: este
+projeto já mediu que a média era 675 min contra mediana de 14, e que ignorar o
+expediente levava o p90 de 2h33 para 45h. Relatório que circula sem a régua
+produz discussão sobre o número em vez de sobre o atendimento.
+
+### ⚠️ Dois defeitos que só o teste pegou
+
+`montarWorkbook` foi separada do download exatamente para poder ser gerada e
+RELIDA em teste — e isso pagou na hora:
+
+1. **`dataBar` sem `cfvo` estoura no `writeBuffer`** ("Cannot read properties of
+   undefined (reading 'forEach')" em `databar-xform.js`): **TODO download
+   quebraria em produção**. A primeira versão escondeu isso com `as never`, que
+   calou justamente o erro de tipo que estava avisando. Lição: cast que silencia
+   o compilador numa chamada de biblioteca é dívida, não atalho.
+2. **`72.4 / 100` grava `0.7240000000000001`** na célula. Invisível no formato
+   `0.0%`, mas é ruído gravado — basta alguém aumentar as decimais para ele
+   aparecer num relatório que circula. `fracao()` arredonda em 4 casas.
+
+⚠️ **`color` na regra de `dataBar` existe no RUNTIME e falta no `.d.ts` do
+ExcelJS** (`databar-xform.js` faz `colorXform.render(xmlStream, model.color)`).
+O cast ali é sobre a declaração incompleta da biblioteca — diferente do caso
+acima —, e o teste que relê a planilha é o que sustenta a afirmação.
+
+Testado: 19 asserções sobre a planilha relida (abas e ordem, KPI vermelho abaixo
+de 50%, fração e formato de porcentagem, cabeçalho congelado, filtro automático,
+mediana nula ficando vazia em vez de zero, situação em texto E cor, aspas no nome
+do contato) + 3 casos de borda (com recorte, sem recorte, período sem dados).
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
