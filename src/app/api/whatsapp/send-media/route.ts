@@ -187,9 +187,17 @@ export async function POST(request: Request) {
    */
   if (kind === "audio") {
     const insp = inspecionarAudio(bytes);
+    /*
+     * ⚠️ O COMMIT entra no log de propósito. Esta investigação voltou duas vezes
+     * ao mesmo ponto por não haver como saber, olhando o log, se o código no ar
+     * já tinha a correção — e a recusa da Meta chega pelo webhook, assíncrona,
+     * então uma falha antiga lida hoje parece nova. Com o SHA na linha, "é velho
+     * ou é novo?" deixa de ser dedução.
+     */
     console.log(
       `[send-media] áudio ${messageId}: ${resumoDaInspecao(insp)} ` +
-        `declarado=${JSON.stringify(mime ?? blob.type)} enviado=${sendMime}`
+        `declarado=${JSON.stringify(mime ?? blob.type)} enviado=${sendMime} ` +
+        `commit=${(process.env.VERCEL_GIT_COMMIT_SHA ?? "local").slice(0, 7)}`
     );
     if (!insp.aceitavel) {
       return recusar(`${insp.motivo} (${resumoDaInspecao(insp)})`, 422);
