@@ -53,6 +53,7 @@ import {
 import { whatsappActions } from "@/lib/data/repos/db/whatsapp";
 import { TemplatePicker } from "@/components/whatsapp/template-picker";
 import { dbContactActions, useDbContact } from "@/lib/data/repos/db/contacts";
+import { useMyMembership } from "@/lib/data/repos/db/team";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -192,6 +193,10 @@ async function microfoneMono(): Promise<{ stream: MediaStream; encerrar: () => v
 }
 
 export function Composer({ conversationId }: { conversationId: string }) {
+  // Áudio: liberado globalmente OU para admin (que pode testar o envio enquanto
+  // o recurso está desligado para os atendentes).
+  const { isAdmin } = useMyMembership();
+  const audioLiberado = ENVIO_DE_AUDIO_LIBERADO || isAdmin;
   const [channel, setChannel] = useState<Channel>("whatsapp");
   const [internal, setInternal] = useState(false);
   const [body, setBody] = useState("");
@@ -857,7 +862,7 @@ export function Composer({ conversationId }: { conversationId: string }) {
           {/* Áudio (gravação pelo microfone) */}
           <button
             onClick={() =>
-              ENVIO_DE_AUDIO_LIBERADO
+              audioLiberado
                 ? startRec()
                 : toast.info(
                     "Envio de áudio está temporariamente indisponível (limitação da conta na Meta). Use texto ou outro canal."
@@ -865,13 +870,15 @@ export function Composer({ conversationId }: { conversationId: string }) {
             }
             disabled={uploading}
             title={
-              ENVIO_DE_AUDIO_LIBERADO
-                ? "Gravar áudio"
+              audioLiberado
+                ? isAdmin && !ENVIO_DE_AUDIO_LIBERADO
+                  ? "Gravar áudio (liberado só para admin — em teste)"
+                  : "Gravar áudio"
                 : "Áudio temporariamente indisponível (limitação da Meta)"
             }
             className={cn(
               "flex size-7 items-center justify-center rounded-md disabled:opacity-50",
-              ENVIO_DE_AUDIO_LIBERADO
+              audioLiberado
                 ? "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                 : "cursor-not-allowed text-slate-300"
             )}
