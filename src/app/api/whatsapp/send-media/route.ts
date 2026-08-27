@@ -7,6 +7,7 @@ import {
   mimeParaUpload,
   resumoDaInspecao,
   resumoDoOgg,
+  retratoDoAudio,
 } from "@/lib/whatsapp/audio";
 import { toWhatsAppNumber } from "@/lib/whatsapp/phone";
 
@@ -89,7 +90,9 @@ export async function GET() {
       /** `media_mime` guarda o mime REALMENTE enviado. */
       mimeGravadoComoEnviado: true,
       /** Fluxo Ogg percorrido página por página, não só o cabeçalho. */
-      analiseDeFluxoOgg: true
+      analiseDeFluxoOgg: true,
+      /** Retrato do arquivo gravado na mensagem, preservado pelo webhook. */
+      retratoNoBalao: true
     },
   });
 }
@@ -276,7 +279,21 @@ export async function POST(request: Request) {
     .update({
       wa_message_id: waMessageId,
       status: "sent",
-      error_detail: null,
+      /*
+       * ⚠️ **No sucesso, `error_detail` guarda o RETRATO do arquivo, não null.**
+       *
+       * A recusa da Meta chega depois, pelo webhook, e traz uma frase genérica
+       * ("on processing it is of type application/octet-stream") que não diz
+       * NADA sobre o arquivo. O retrato — canais, pre-skip, mapping family,
+       * páginas, granule — é o que responde por quê, e só quem tem os bytes em
+       * mãos pode montá-lo: aqui.
+       *
+       * Fica com o prefixo `[diag]` para o webhook reconhecer e PRESERVAR ao
+       * escrever a falha, em vez de sobrescrever. Sem isso o diagnóstico existia
+       * só no `console.log`, num painel do Vercel que ninguém acha na hora do
+       * problema — e a investigação passou seis rodadas sem esse dado.
+       */
+      error_detail: `[diag] ${retratoDoAudio(bytes)}`,
       failed_at: null,
       /*
        * ⚠️ Grava o mime que REALMENTE foi enviado, não o que o cliente alegou.

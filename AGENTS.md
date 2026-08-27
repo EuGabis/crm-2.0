@@ -1916,10 +1916,38 @@ Testado com 5 fluxos sintéticos montados página por página (completo, sem
 OpusTags, sem EOS, só cabeçalhos, truncado). O granule é lido como dois inteiros
 de 32 bits em vez de BigInt: em 48 kHz nem áudio de horas passa de 2^53.
 
-⏳ **Ainda é instrumento, não cura.** Se o áudio real tiver problema de fluxo, a
-rota agora recusa dizendo QUAL e o balão mostra; se o fluxo estiver íntegro, a
-causa é outra e o log `[send-media] fluxo ogg: ...` dá o retrato completo. O que
-NÃO existe mais é a possibilidade de investigar isso às cegas.
+### O fluxo está ÍNTEGRO — e a Meta recusa de todo jeito
+
+Conferido em produção: `GET /api/whatsapp/send-media` devolveu
+`analiseDeFluxoOgg: true` (commit 976e2e5) e a rota respondeu **200**. Como
+`analisarOgg` reprova qualquer fluxo com problema, isso é prova de que o arquivo
+é um Ogg/Opus **mono, com OpusTags, com EOS, sem truncamento**. E a Meta continua
+dizendo que ao processar virou `application/octet-stream`.
+
+⚠️ **O dado que falta mora em `console.log`, num painel do Vercel que ninguém
+acha na hora do problema.** Pedi o log três vezes e recebi o painel "Request"
+(que não mostra stdout) três vezes — a culpa é do lugar onde eu pus a informação,
+não de quem procurou.
+
+**Agora o retrato do arquivo vai para o BALÃO.** No sucesso, `error_detail`
+guarda `[diag] bytes=... head[v= ch= preskip= taxa= ganho= map=]
+ogg[pag= tags= audio= eos= granule= sobra=]`, e o webhook **preserva** esse
+prefixo ao escrever a falha em vez de sobrescrever. A frase da Meta descreve o
+SINTOMA; o retrato, que só quem tem os bytes pode montar, é o que explica a
+causa — juntar os dois numa linha só é o que torna a próxima tentativa
+conclusiva.
+
+⚠️ **Furo que quase anulou isso:** o webhook lia a mensagem com
+`select("id, status, delivered_at")`. Sem `error_detail` no select,
+`msg.error_detail` vinha `undefined` e o retrato seria descartado em silêncio —
+o preservador funcionaria e não preservaria nada.
+
+**Os campos novos são os candidatos que sobraram:** `map`
+(`channel_mapping_family` ≠ 0 exige tabela de mapeamento e faz decodificador
+estrito recusar) e `granule` (granule final ZERO num áudio de segundos é defeito
+conhecido de codificador JS — sem ele o decodificador não determina a duração e
+desiste, o que casa com "ao processar virou octet-stream"). 6/6 campos conferidos
+em teste.
 
 ### Lição de método (a parte que mais custou)
 

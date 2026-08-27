@@ -409,7 +409,7 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
 async function applyStatus(db: any, st: any) {
   const { data: msg } = await db
     .from("messages")
-    .select("id, status, delivered_at")
+    .select("id, status, delivered_at, error_detail")
     .eq("wa_message_id", st.id)
     .maybeSingle();
   if (!msg) return; // status de mensagem que não gravamos — ignora
@@ -447,7 +447,18 @@ async function applyStatus(db: any, st: any) {
       err?.message,
       err?.code != null ? `#${err.code}` : null,
     ].filter(Boolean);
-    patch.error_detail = partes.length ? partes.join(" · ").slice(0, 500) : "Falha na entrega";
+    /*
+     * ⚠️ **Preserva o `[diag]` que a rota de envio gravou.** A frase da Meta
+     * descreve o SINTOMA ("não consegui processar"); o retrato do arquivo, que
+     * só quem enviou pode montar, é o que explica a causa. Sobrescrevendo, o
+     * balão fica com a metade inútil da informação — foi o que aconteceu por
+     * seis rodadas de investigação deste mesmo erro.
+     */
+    const diagAnterior = String(msg.error_detail ?? "").startsWith("[diag]")
+      ? msg.error_detail
+      : null;
+    const texto = partes.length ? partes.join(" · ") : "Falha na entrega";
+    patch.error_detail = (diagAnterior ? `${texto} · ${diagAnterior}` : texto).slice(0, 900);
     if (err) console.log(`[webhook] falha em ${msg.id}: ${JSON.stringify(err)}`);
   }
   await db.from("messages").update(patch).eq("id", msg.id);

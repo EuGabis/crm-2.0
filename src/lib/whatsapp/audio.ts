@@ -323,6 +323,70 @@ export function analisarOgg(bytes: ArrayBuffer): AnaliseOgg {
   return r;
 }
 
+/**
+ * Campos do `OpusHead` que ainda não eram lidos — e que são os candidatos que
+ * sobraram depois de o fluxo se provar íntegro.
+ *
+ * ⚠️ `channelMappingFamily` diferente de 0 exige tabela de mapeamento e faz
+ * decodificador estrito recusar. E `granule` final ZERO num áudio de segundos é
+ * defeito conhecido de codificador JS: sem granule o decodificador não consegue
+ * determinar a duração e desiste — que é compatível com a Meta dizer que "ao
+ * processar" o arquivo virou `application/octet-stream`.
+ */
+export interface CabecalhoOpus {
+  versao: number | null;
+  canais: number | null;
+  preSkip: number | null;
+  taxaEntrada: number | null;
+  ganho: number | null;
+  channelMappingFamily: number | null;
+}
+
+export function cabecalhoOpus(bytes: ArrayBuffer): CabecalhoOpus {
+  const b = new Uint8Array(bytes.slice(0, 400));
+  const alvo = [..."OpusHead"].map((c) => c.charCodeAt(0));
+  let i = -1;
+  for (let k = 0; k + alvo.length < b.length; k++) {
+    if (alvo.every((x, j) => b[k + j] === x)) {
+      i = k;
+      break;
+    }
+  }
+  const vazio: CabecalhoOpus = {
+    versao: null,
+    canais: null,
+    preSkip: null,
+    taxaEntrada: null,
+    ganho: null,
+    channelMappingFamily: null,
+  };
+  if (i < 0 || i + 18 >= b.length) return vazio;
+  return {
+    versao: b[i + 8] ?? null,
+    canais: b[i + 9] ?? null,
+    preSkip: b[i + 10]! | (b[i + 11]! << 8),
+    taxaEntrada:
+      b[i + 12]! | (b[i + 13]! << 8) | (b[i + 14]! << 16) | (b[i + 15]! * 0x1000000),
+    // int16 com sinal, em Q7.8 dB
+    ganho: ((b[i + 16]! | (b[i + 17]! << 8)) << 16) >> 16,
+    channelMappingFamily: b[i + 18] ?? null,
+  };
+}
+
+/** Retrato completo para diagnóstico, curto o bastante para caber num balão. */
+export function retratoDoAudio(bytes: ArrayBuffer): string {
+  const h = cabecalhoOpus(bytes);
+  const o = analisarOgg(bytes);
+  return (
+    `bytes=${bytes.byteLength} ` +
+    `head[v=${h.versao} ch=${h.canais} preskip=${h.preSkip} taxa=${h.taxaEntrada} ` +
+    `ganho=${h.ganho} map=${h.channelMappingFamily}] ` +
+    `ogg[pag=${o.paginas} tags=${o.temOpusTags} audio=${o.paginasDeAudio} ` +
+    `eos=${o.temEos} granule=${o.granuleFinal} sobra=${o.sobra}]` +
+    (o.problemas.length ? ` problemas[${o.problemas.join("; ")}]` : "")
+  );
+}
+
 /** Linha curta para log. */
 export function resumoDoOgg(a: AnaliseOgg): string {
   return (
