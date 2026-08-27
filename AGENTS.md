@@ -2559,6 +2559,44 @@ elas dizem isso.
 saber que a resposta é confiável.** Marcar antes economiza uma linha e transforma
 qualquer falha silenciosa em estado permanente.
 
+### E depois: "carrega e logo depois SOME"
+
+Corrigido o vazio, apareceu o sintoma seguinte — as mensagens surgiam e
+desapareciam. Não era outro bug: era o MESMO problema, uma camada abaixo, que só
+ficou visível quando o passo anterior passou a funcionar.
+
+⚠️ **O `load()` da store SUBSTITUÍA o array de mensagens** (`messages: (msgs.data
+?? []).map(mapMessage)`) pelas mensagens globais mais RECENTES. Numa aba nova as
+duas buscas correm juntas:
+
+1. o `Thread` monta e `loadMessagesFor(<conversa>)` traz o histórico dela — o fio
+   aparece;
+2. o `load()` tem QUATRO consultas (uma delas `conversations` com join de
+   contato), termina depois, e trocava o array pelas recentes globais — que não
+   contêm o histórico antigo daquela conversa. O fio esvaziava.
+
+E como a conversa segue marcada em `loadedMsgConvs`, não havia nova tentativa.
+
+**`mesclarMensagens(recentes, existentes)`** junta as duas fontes: as recentes
+primeiro, o que já estava na store depois, filtrado por id. Id repetido fica com
+a versão recém-buscada, que é a mais nova (status de entrega, transcrição que
+chegou, carimbo de leitura).
+
+⚠️ **Consequência assumida:** mensagem excluída em OUTRA aba sobrevive até o
+próximo `load()` completo, porque mesclagem não sabe o que foi apagado. Nota
+apagada reaparecendo é muito menos grave do que a conversa inteira esvaziar, e a
+exclusão local já filtra a store na hora.
+
+A função foi **extraída e exportada só para poder ser testada** — a regra é curta
+e o defeito era invisível em revisão de código. 9 asserções, incluindo uma que
+escreve a regressão como teste ("antes o histórico sumia").
+
+⚠️ **Regra geral que sai daqui: em store que carrega em duas velocidades — um
+`load()` amplo e buscas sob demanda —, o `load()` amplo NUNCA pode substituir o
+que a busca fina trouxe.** `syncInboxDelta` já seguia isso (só acrescenta); o
+`load()` era a exceção que ninguém tinha notado, porque em aba já aberta ele roda
+antes de qualquer conversa ser aberta.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
