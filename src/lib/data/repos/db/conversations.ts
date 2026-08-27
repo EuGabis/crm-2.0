@@ -157,13 +157,35 @@ export const useConvStore = create<ConvState>((set, get) => ({
       supabase.from("snippets").select("*").order("created_at"),
       supabase.from("inbox_views").select("*").order("created_at"),
     ]);
+    /*
+     * ⚠️ **MESCLA as mensagens; não substitui.** Substituir era a causa do
+     * "abre a conversa, carrega e logo depois some tudo".
+     *
+     * Numa aba nova as duas buscas correm juntas: o `Thread` monta e chama
+     * `loadMessagesFor(<conversa>)`, que traz o histórico dela e o fio aparece;
+     * este `load()` tem QUATRO consultas (uma delas `conversations` com join de
+     * contato) e termina depois — e o `set` de antes trocava o array pelas
+     * mensagens globais mais RECENTES, que não contêm o histórico antigo daquela
+     * conversa. O fio esvaziava. E como a conversa segue marcada em
+     * `loadedMsgConvs`, não havia nova tentativa: sumia até um F5.
+     *
+     * As recentes vêm primeiro e o que já estava na store entra depois, filtrado
+     * por id — então uma mensagem que apareça nas duas fontes fica na versão
+     * recém-buscada, que é a mais nova.
+     *
+     * ⚠️ Consequência assumida: mensagem excluída em OUTRA aba sobrevive aqui até
+     * o próximo `load()` completo, porque a mesclagem não sabe o que foi apagado.
+     * Nota interna apagada reaparecendo é bem menos grave do que a conversa
+     * inteira esvaziar, e a exclusão local já filtra a store na hora.
+     */
+    const recentes = (msgs.data ?? []).map(mapMessage);
     set({
       loaded: true,
       loading: false,
       conversations: (convs.data ?? []).map(mapConversation),
       // Vieram em ordem decrescente (para o teto pegar as mais novas); a UI
       // reordena por conversa, então a ordem do array cru não importa.
-      messages: (msgs.data ?? []).map(mapMessage),
+      messages: mesclarMensagens(recentes, get().messages),
       snippets: (snips.data ?? []).map((r: any) => ({ id: r.id, name: r.name, content: r.content })),
       views: (views.data ?? []).map(mapView),
     });
@@ -571,6 +593,20 @@ export function useAutomatedConversationIds() {
     });
     return ids;
   }, [messages]);
+}
+
+/**
+ * Junta as mensagens recém-buscadas com as que já estavam na store.
+ *
+ * As RECENTES ganham em caso de id repetido: são a versão mais nova do mesmo
+ * registro (status de entrega, transcrição que chegou, carimbo de leitura).
+ *
+ * Exportada só para poder ser testada — a regra é curta e o defeito que ela
+ * conserta ("abre, carrega e some") era invisível em revisão de código.
+ */
+export function mesclarMensagens(recentes: Message[], existentes: Message[]): Message[] {
+  const ids = new Set(recentes.map((m) => m.id));
+  return [...recentes, ...existentes.filter((m) => !ids.has(m.id))];
 }
 
 const loc = () => useDbStore.getState().locationId;
