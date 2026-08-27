@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import Link from "next/link";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -73,6 +73,25 @@ function statusFrom(c: {
 }
 
 const PER_PAGE = 25;
+
+/**
+ * O clique é do NAVEGADOR ou nosso?
+ *
+ * ⚠️ É o que faz um `<Link>` funcionar como link E como ação de tela ao mesmo
+ * tempo. "Abrir conversa" e "Template" eram `<button onClick>`, e por isso não
+ * abriam em nova guia — ao contrário de "Abrir contato", que sempre foi um
+ * `<Link>`. Trocar por link puro resolveria a nova guia e traria um recarregamento
+ * de página no clique comum, o que é pior: a caixa de entrada é a tela mais usada
+ * do CRM e recarregá-la joga fora o Realtime e as stores já carregadas.
+ *
+ * Então: clique simples é interceptado (troca de aba na hora, sem navegar) e
+ * clique MODIFICADO passa para o navegador, que faz o que sempre fez — Ctrl/Cmd
+ * abre em nova guia, Shift em nova janela, botão do meio em nova guia, e o menu
+ * de contexto ganha "abrir em nova guia" de graça, porque agora é um `href` real.
+ */
+function cliqueSimples(e: MouseEvent): boolean {
+  return !(e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0);
+}
 
 export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: string) => void }) {
   const conversations = useConversations("all");
@@ -477,26 +496,32 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
                     >
                       <User className="size-3.5" />
                     </Link>
-                    <button
-                      type="button"
-                      onClick={() => onOpen?.(r.id)}
-                      title="Abrir conversa"
+                    <Link
+                      href={`/conversas?c=${r.id}`}
+                      onClick={(e) => {
+                        if (!cliqueSimples(e)) return; // deixa o navegador abrir em nova guia
+                        e.preventDefault();
+                        onOpen?.(r.id);
+                      }}
+                      title="Abrir conversa (Ctrl+clique abre em nova guia)"
                       className="flex size-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-indigo-600"
                     >
                       <MessageSquare className="size-3.5" />
-                    </button>
+                    </Link>
                     {!r.windowOpen && r.channelId && (
-                      <button
-                        type="button"
-                        onClick={() => {
+                      <Link
+                        href={`/conversas?c=${r.id}&template=1`}
+                        onClick={(e) => {
+                          if (!cliqueSimples(e)) return;
+                          e.preventDefault();
                           useTemplateIntentStore.getState().request(r.id);
                           onOpen?.(r.id);
                         }}
-                        title="Janela de 24h fechada — enviar template"
+                        title="Janela de 24h fechada — enviar template (Ctrl+clique abre em nova guia)"
                         className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium text-amber-600 hover:bg-amber-50 hover:text-amber-700"
                       >
                         <LayoutTemplate className="size-3.5" /> Template
-                      </button>
+                      </Link>
                     )}
                     {isSupervisor && r.assignedToId !== me?.userId && (
                       <button

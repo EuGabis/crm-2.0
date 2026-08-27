@@ -52,6 +52,7 @@ import {
   useInboxLiveSync,
   useScheduledMessages,
   useSnippets,
+  useTemplateIntentStore,
 } from "@/lib/data/repos/db/conversations";
 import { useMyMembership, useTeam } from "@/lib/data/repos/db/team";
 import { brand } from "@/lib/config/brand";
@@ -128,6 +129,29 @@ function ConversasPageInner() {
   );
   const [newOpen, setNewOpen] = useState(false);
   const selectedConversation = useConversation(selectedId);
+
+  /*
+   * `?template=1` acompanha o `?c=<id>` quando o link vem do botão "Template" do
+   * relatório (janela de 24h fechada).
+   *
+   * ⚠️ Sem isto, abrir esse botão em NOVA GUIA daria só a conversa: a intenção de
+   * template vive numa store Zustand, que é memória da ABA e nasce vazia na guia
+   * nova. A URL é o único jeito de a intenção atravessar essa fronteira.
+   *
+   * ⚠️ Em `useEffect` e NÃO no inicializador do `useState`: o inicializador roda
+   * durante a renderização, e chamar uma ação de store dali é efeito colateral em
+   * render — o lint acusa (`react-hooks/purity`) e o StrictMode chamaria duas
+   * vezes. Efeito de montagem é o lugar certo, e a lista de dependências vazia
+   * garante uma vez só: reagir a `searchParams` reabriria o seletor a cada
+   * navegação que preservasse a query.
+   */
+  useEffect(() => {
+    const c = searchParams.get("c");
+    if (c && searchParams.get("template") === "1") {
+      useTemplateIntentStore.getState().request(c);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // seleciona a primeira conversa quando os dados chegam
   useEffect(() => {
