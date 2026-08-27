@@ -2482,6 +2482,46 @@ de 50%, fração e formato de porcentagem, cabeçalho congelado, filtro automát
 mediana nula ficando vazia em vez de zero, situação em texto E cor, aspas no nome
 do contato) + 3 casos de borda (com recorte, sem recorte, período sem dados).
 
+## Ação de tela que também é LINK (Conversas → Relatório)
+
+Queixa: "na opção de abrir conversa nessa tela não dá pra abrir em uma nova guia
+igual os outros ícones". Estava certo — "Abrir contato" sempre foi um `<Link>`, e
+"Abrir conversa" e "Template" eram `<button onClick>`. Botão não tem `href`, então
+Ctrl+clique, botão do meio e "abrir em nova guia" do menu de contexto não têm o
+que fazer.
+
+⚠️ **Trocar por link puro resolveria a nova guia e traria um recarregamento de
+página no clique comum — pior do que o problema.** A caixa de entrada é a tela
+mais usada do CRM; recarregá-la joga fora o Realtime e as stores já carregadas
+(inclusive as que levam segundos para voltar).
+
+O padrão é `<Link href>` + `onClick` que intercepta **só o clique simples**
+(`cliqueSimples()` em `conversations-report.tsx`): clique comum troca a aba na
+hora, sem navegar; clique com Ctrl/Cmd/Shift/Alt ou botão do meio passa para o
+navegador, que faz o que sempre fez. O `href` real também devolve o menu de
+contexto de graça.
+
+A URL já existia: **`/conversas?c=<id>`**, usada desde o "Abrir conversa" do card
+do kanban.
+
+⚠️ **O botão "Template" precisou de `&template=1` na URL.** A intenção de abrir o
+seletor de template vive numa store Zustand, que é memória da ABA e nasce vazia
+na guia nova — sem o parâmetro, abrir em nova guia daria a conversa e nenhum
+seletor. A URL é o único jeito de a intenção atravessar essa fronteira.
+
+⚠️ **O consumo do parâmetro fica em `useEffect` de montagem, não no
+inicializador do `useState`.** O inicializador roda durante a renderização, e
+chamar ação de store dali é efeito colateral em render: o lint acusa
+(`react-hooks/purity`) e o StrictMode chamaria duas vezes. Dependências vazias de
+propósito — reagir a `searchParams` reabriria o seletor a cada navegação que
+preservasse a query.
+
+⏳ **"Abrir conversa" do CARD DO FUNIL e do detalhe do lead continuam botões**, e
+não é descuido: eles chamam `openConversation()`, que descobre o id via RPC
+`contact_conversation` (é o que acha a conversa mesmo sendo de outro atendente).
+Sem id não existe `href` estático. Para virarem link, `/conversas` precisaria
+aceitar algo como `?contato=<id>&canal=whatsapp` e resolver do outro lado.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
