@@ -86,7 +86,21 @@ export function inspecionarAudio(bytes: ArrayBuffer): InspecaoDeAudio {
   if (total === 0) {
     return { ...base, aceitavel: false, motivo: "O arquivo de áudio está vazio (0 bytes)." };
   }
-  if (container !== "ogg") {
+  /*
+   * ⚠️ **MP4/AAC e MP3 são aceitos, não só OGG.** A checagem original exigia OGG
+   * porque o CRM só sabia gravar nisso; depois de nove rodadas provando que a
+   * Meta não processa o Ogg/Opus do `opus-media-recorder` — mesmo impecável, e
+   * mesmo baixado por ela própria via link —, o composer passou a preferir
+   * `audio/mp4` no `MediaRecorder` nativo. Reprovar aqui bloquearia justamente a
+   * saída encontrada.
+   *
+   * A lista é a da Cloud API: `audio/aac`, `audio/mp4`, `audio/mpeg`,
+   * `audio/amr`, `audio/ogg`. Sobre MP4 não há o que conferir por bytes (canais
+   * e fluxo moram em caixas internas), e não vale escrever um parser de MP4 para
+   * checar o que a Meta aceita sem reclamar.
+   */
+  const ACEITOS: InspecaoDeAudio["container"][] = ["ogg", "mp4", "mp3"];
+  if (!ACEITOS.includes(container)) {
     const oQueE =
       container === "desconhecido"
         ? "O áudio não está num formato reconhecível"
@@ -95,10 +109,12 @@ export function inspecionarAudio(bytes: ArrayBuffer): InspecaoDeAudio {
       ...base,
       aceitavel: false,
       motivo:
-        `${oQueE}, e o WhatsApp aceita só OGG/Opus. Isso costuma ser o codificador Opus ` +
-        `não ter carregado no navegador — recarregue a página e tente de novo.`,
+        `${oQueE}, e o WhatsApp aceita OGG/Opus, MP4/AAC ou MP3. Isso costuma ser o ` +
+        `codificador de áudio não ter carregado no navegador — recarregue a página.`,
     };
   }
+  // As checagens abaixo são específicas do Ogg (OpusHead, páginas, EOS).
+  if (container !== "ogg") return { ...base, aceitavel: true, motivo: "" };
   if (canais === null) {
     return {
       ...base,
