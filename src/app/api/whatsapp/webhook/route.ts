@@ -4,6 +4,7 @@ import { isAdvance } from "@/lib/whatsapp/status-rank";
 import { maybeAutoReply } from "@/lib/whatsapp/auto-reply";
 import { getMediaInfo, downloadMedia } from "@/lib/whatsapp/client";
 import { maybeRunBot } from "@/lib/bot/engine";
+import { maybeAutoRespostaAgendada } from "@/lib/bot/enviar-auto-resposta";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -430,6 +431,22 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
     if ((insErr as any).code !== "23505") throw insErr;
     return;
   }
+
+  /*
+   * ⚠️ **Resposta automática agendada vem ANTES de tudo.** Se viesse depois, um
+   * número com fluxo configurado triaria o cliente às 3h da manhã — nome,
+   * e-mail, assunto — para no fim ninguém atender. A janela existe para dizer
+   * "não estamos agora": ela precisa calar o fluxo E o auto-responder de IA.
+   */
+  const respondeuAgendado = await maybeAutoRespostaAgendada(db, {
+    locationId: channel.location_id,
+    channelId: channel.id,
+    phoneNumberId: channel.phone_number_id,
+    conversationId: conv.id,
+    toPhone: phone,
+    dailyLimit: channel.daily_limit ?? 1000,
+  }).catch(() => false);
+  if (respondeuAgendado) return;
 
   // Bot conversacional primeiro (fluxo com passos/botões). Se ele não tratar a
   // mensagem, cai no auto-responder de IA single-turn. Best-effort.
