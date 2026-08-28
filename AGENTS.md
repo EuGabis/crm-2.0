@@ -2794,14 +2794,33 @@ select assigned_to, bot_paused, awaiting_distribution, assigned_offline, archive
   from public.conversations where id = '<id da conversa>';
 ```
 
-⚠️ **De passagem, um achado que pode ser a causa e vale registrar:**
-`maybeRunBot` (`lib/bot/engine.ts`) seleciona **só `bot_paused`** e não olha
-`assigned_to` — então conversa que JÁ tem humano continua recebendo o fluxo do bot
-se `bot_paused` for false. Os dois campos são independentes e o código trata "tem
-humano" e "bot pausado" como coisas sem relação. **Não foi mudado** de propósito:
-travar o bot em conversa atribuída poderia produzir o sintoma oposto (cliente sem
-triagem nenhuma), e sem saber qual caminho atribuiu o Cesar não há como escolher
-com segurança. É a decisão que o log vai embasar.
+### O bot falava por cima de conversa que já tinha dono — CORRIGIDO
+
+`maybeRunBot` (`lib/bot/engine.ts`) lia **só `bot_paused`** e não olhava
+`assigned_to`. Os dois campos são independentes, então conversa COM responsável e
+`bot_paused = false` continuava recebendo o fluxo: dois donos falando com o mesmo
+cliente, que é exatamente o que o print do Cesar mostrava (bot pedindo o nome numa
+conversa já atribuída).
+
+O próprio código já afirma em outro lugar que "o bot não pode roubar uma conversa
+ativa" (webhook, reabertura com humano) — a regra só não estava aplicada aqui.
+
+⚠️ **Eu tinha deixado isso de fora por medo de causar o sintoma OPOSTO** (cliente
+sem triagem nenhuma). O que destravou foi conferir `finish_conversation` (0092):
+**finalizar faz `assigned_to = null`**. Ou seja, conversa encerrada volta SEM
+responsável e é triada normalmente quando o cliente escreve de novo. E o rodízio
+só atribui junto com `bot_paused = true`. Conversa com responsável E bot solto é
+**estado inconsistente** — nenhuma triagem legítima depende dele. Conferido com 7
+casos, incluindo reabertura de finalizada, fila do setor e devolução por espera.
+
+⚠️ **Corrige a consequência, não a causa.** Continua sem resposta QUEM atribuiu a
+conversa durante a triagem — e é isso que o gatilho de log
+(`202608281530`) passa a dizer. Um `console.log` no portão registra cada vez que
+o estado inconsistente aparece, para cruzar com o evento de atribuição.
+
+⚠️ **E derruba uma suposição natural sobre este caso:** finalizar NÃO foi o que
+atribuiu a Beatriz, porque finalizar solta o responsável. Alguma coisa a atribuiu
+ANTES, durante a triagem.
 
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
