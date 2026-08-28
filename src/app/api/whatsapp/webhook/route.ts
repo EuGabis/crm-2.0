@@ -335,7 +335,12 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
         unread_count: 1,
         last_message_at: nowIso,
         last_message_preview: previaDeMidia(msgType, body, media.media_name),
-        ...(assignToOwner ? { assigned_to: ownerId, bot_paused: true } : {}),
+        // O evento no fio é escrito pelo gatilho `log_atribuicao`
+        // (202608281530); aqui só vai o MOTIVO, que é o que faltava para
+        // explicar "por que essa conversa foi para essa pessoa".
+        ...(assignToOwner
+          ? { assigned_to: ownerId, bot_paused: true, assign_reason: "dono do contato" }
+          : {}),
       })
       .select("id")
       .single();
@@ -365,12 +370,22 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
         // Arquivada por quem está atendendo: mantém com esse humano e o bot
         // PAUSADO (não rouba conversa ativa).
         ...(keepWithHuman
-          ? { bot_paused: true, ...(reopenHandler ? { assigned_to: reopenHandler } : {}) }
+          ? {
+              bot_paused: true,
+              ...(reopenHandler
+                ? {
+                    assigned_to: reopenHandler,
+                    assign_reason: "cliente voltou no meio do atendimento",
+                  }
+                : {}),
+            }
           : {}),
         // Finalizada, ou era 100% do bot: solta o bot para recomeçar e, se o
         // número tem fluxo, volta pra FILA (tira o dono pra triar/redistribuir).
         ...(wasClosed && !keepWithHuman ? { bot_paused: false } : {}),
-        ...(wasClosed && !keepWithHuman && channel.bot_flow ? { assigned_to: null } : {}),
+        ...(wasClosed && !keepWithHuman && channel.bot_flow
+          ? { assigned_to: null, assign_reason: "conversa finalizada — volta para o bot triar" }
+          : {}),
       })
       .eq("id", conv.id);
   }
