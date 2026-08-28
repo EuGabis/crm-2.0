@@ -164,6 +164,14 @@ export async function distributeOne(
     conversationId: string;
     contactId: string;
     pipelineName?: string;
+    /**
+     * Quem NÃO pode receber esta conversa.
+     *
+     * ⚠️ Usado pela devolução por inatividade: sem isso o rodízio pode escolher a
+     * MESMA pessoa que não respondeu — o cursor não sabe de onde a conversa veio
+     * — e o resultado seria um evento de transferência a cada tique, para sempre.
+     */
+    excluir?: string[];
   },
 ): Promise<string | null> {
   const { pool, cursor } = await departmentPool(db, args.locationId, args.deptId);
@@ -178,7 +186,26 @@ export async function distributeOne(
     .eq("id", args.deptId)
     .maybeSingle();
   const alwaysAll = dep?.rodizio_offline === true;
-  const list = alwaysAll || online.length === 0 ? pool : online;
+  /*
+   * ⚠️ **Ninguém online agora = SEGURA, não despeja no pool inteiro.**
+   *
+   * Era `online.length === 0 ? pool : online` — e essa segunda causa
+   * sobreviveria mesmo com o `rodizio_offline` desligado. Na madrugada ninguém
+   * está online, então caía no `pool` e a conversa era atribuída a quem estivesse
+   * na vez do cursor: foi assim que conversas de 05:55 amanheceram na caixa de
+   * uma atendente que começa 12h, invisíveis para o resto do setor.
+   *
+   * Devolvendo `null`, o chamador marca `awaiting_distribution` e o lead fica na
+   * FILA DO SETOR — visível para todos, e distribuído a quem entrar primeiro.
+   * Esperar na fila do grupo é melhor que ficar preso com quem não está lá.
+   */
+  const semExcluidos = (l: string[]) =>
+    args.excluir?.length ? l.filter((u) => !args.excluir!.includes(u)) : l;
+  // ⚠️ A exclusão é aplicada DEPOIS da regra de presença, não antes: tirar a
+  // pessoa do pool cedo mudaria o tamanho de `pool` e, com ele, o resultado do
+  // `cursor % list.length` — o rodízio pularia gente ao devolver uma conversa.
+  const list = semExcluidos(alwaysAll ? pool : online);
+  if (!list.length) return null;
   const user = list[cursor % list.length];
   const offline = !online.includes(user); // marca "offline" se o escolhido não está online
   await db.from("departments").update({ rr_cursor: cursor + 1 }).eq("id", args.deptId);
@@ -241,3 +268,166 @@ export async function distributeDepartment(
 }
 
 export { statusForStageName };
+
+/* ------------------------------------------------------------------ *
+ * Devolver conversa parada ao rodízio
+ * ------------------------------------------------------------------ */
+
+/**
+ * Devolve ao rodízio as conversas cujo aluno está esperando há tempo demais.
+ *
+ * ⚠️ **Existe porque respeitar presença não basta.** Relato de 2026-08-28: a
+ * atendente estava offline (começa 12h) e o bot moveu conversas para ela; ninguém
+ * mais do setor recebeu e a fila de espera dos alunos ficou alta. Desligar o
+ * `rodizio_offline` impede o caso dela, mas não estes:
+ *   - a pessoa está ONLINE e saiu para almoçar, entrou em reunião ou não viu;
+ *   - a conversa caiu de madrugada, ficou aguardando, e nada garante que alguém
+ *     vá olhar a fila do setor.
+ *
+ * ⚠️ **O relógio é a ESPERA DO ALUNO** — última mensagem de entrada sem resposta
+ * humana —, não "quanto tempo faz que foi atribuída". Não existe coluna
+ * `assigned_at`, mas o motivo principal é outro: a queixa foi a FILA DE ESPERA, e
+ * medir a espera do aluno é medir exatamente a queixa.
+ *
+ * ⚠️ **Espera ÚTIL, pela mesma `private.business_minutes` do SLA (0079).** Com
+ * tempo corrido, toda conversa que chegasse numa sexta à noite seria "devolvida"
+ * na madrugada do sábado, em rodízio, para gente que também não está lá — trocaria
+ * uma conversa parada por três eventos de transferência inúteis no fio.
+ */
+export async function devolverInativas(
+  db: any,
+  locationId: string,
+): Promise<{ devolvidas: number; redistribuidas: number }> {
+  let devolvidas = 0;
+  let redistribuidas = 0;
+
+  const { data: deps } = await db
+    .from("departments")
+    .select("id, devolver_apos_min, usa_rodizio")
+    .eq("location_id", locationId);
+
+  for (const dep of deps ?? []) {
+    const limite = Number(dep.devolver_apos_min ?? 0);
+    if (!limite || dep.usa_rodizio === false) continue;
+
+    const { data: dcs } = await db
+      .from("department_channels")
+      .select("channel_id")
+      .eq("department_id", dep.id);
+    const channelIds = (dcs ?? []).map((d: any) => d.channel_id);
+    if (!channelIds.length) continue;
+
+    /*
+     * `sla_conversations` já responde exatamente a pergunta "quem está esperando
+     * e há quantos minutos ÚTEIS" — com a resposta do bot não contando como
+     * atendimento, que é essencial aqui: o auto-responder responde em segundos e
+     * sem isso NENHUMA conversa pareceria parada.
+     *
+     * Reusar em vez de escrever a consulta de novo evita duas definições de
+     * "esperando" para divergirem — foi o cuidado que a própria 0079 registrou.
+     */
+    /*
+     * ⚠️ Os nomes são `p_from`/`p_to`/`p_target_min` (assinatura da 0079). Errar
+     * o nome de parâmetro num `rpc` do PostgREST não dá erro de compilação — dá
+     * 404 "function not found" em produção.
+     *
+     * Janela de 7 dias: a devolução só interessa para quem está esperando AGORA,
+     * e varrer 30 dias a cada minuto seria pagar caro por linhas que já foram
+     * respondidas ou fechadas há semanas.
+     */
+    const { data: linhas, error } = await db.rpc("sla_conversations", {
+      p_location: locationId,
+      p_from: new Date(Date.now() - 7 * 86400000).toISOString(),
+      p_to: new Date(Date.now() + 86400000).toISOString(),
+      p_target_min: limite,
+    });
+    if (error) {
+      console.warn("[rodizio] não deu para ler a espera:", error.message);
+      continue;
+    }
+
+    const parados = (linhas ?? []).filter(
+      (l: any) =>
+        !l.respondida && !l.fechada && Number(l.espera_util_min ?? 0) >= limite,
+    );
+    if (!parados.length) continue;
+
+    const ids = parados.map((l: any) => l.conversation_id);
+    const { data: convs } = await db
+      .from("conversations")
+      .select("id, contact_id, assigned_to")
+      .in("id", ids)
+      .in("channel_id", channelIds)
+      .not("assigned_to", "is", null)
+      .is("closed_at", null)
+      .is("archived_at", null);
+
+    for (const conv of convs ?? []) {
+      const anterior = conv.assigned_to as string;
+      /*
+       * ⚠️ Solta ANTES de redistribuir, e num passo separado: se o rodízio não
+       * achar ninguém disponível, a conversa fica na FILA DO SETOR (visível para
+       * todos) em vez de continuar presa com quem não respondeu. Redistribuir
+       * primeiro e soltar depois deixaria a conversa parada no caso ruim.
+       */
+      await db
+        .from("conversations")
+        .update({ assigned_to: null, awaiting_distribution: true, assigned_offline: false })
+        .eq("id", conv.id);
+      await db.from("messages").insert({
+        location_id: locationId,
+        conversation_id: conv.id,
+        direction: "out",
+        type: "event",
+        channel: "whatsapp",
+        body: `Devolvida ao rodízio: cliente esperando há ${Math.round(
+          parados.find((p: any) => p.conversation_id === conv.id)?.espera_util_min ?? limite,
+        )} min sem resposta`,
+      });
+      devolvidas++;
+
+      const novo = await distributeOne(db, {
+        locationId,
+        deptId: dep.id,
+        conversationId: conv.id,
+        contactId: conv.contact_id,
+        pipelineName: "Controle de Leads",
+        // ⚠️ Sem isto o rodízio pode devolver para a MESMA pessoa que não
+        // respondeu — o cursor não sabe de onde a conversa veio, e o resultado
+        // seria um evento de transferência a cada tique, para sempre.
+        excluir: [anterior],
+      });
+      if (novo) redistribuidas++;
+    }
+  }
+
+  return { devolvidas, redistribuidas };
+}
+
+/**
+ * Roda a devolução em TODAS as empresas — é o que o tick de minuto chama.
+ *
+ * O tick é máquina-a-máquina (pg_cron) e não tem sessão, então não existe
+ * "empresa atual": precisa varrer. Cada empresa é independente e uma falhar não
+ * pode parar as outras.
+ */
+export async function devolverInativasDeTodas(): Promise<{
+  devolvidas: number;
+  redistribuidas: number;
+}> {
+  const { createAdminClient } = await import("@/lib/supabase/admin");
+  const db = createAdminClient();
+  const { data: locs } = await db.from("locations").select("id");
+  let devolvidas = 0;
+  let redistribuidas = 0;
+  for (const l of locs ?? []) {
+    try {
+      const r = await devolverInativas(db, l.id as string);
+      devolvidas += r.devolvidas;
+      redistribuidas += r.redistribuidas;
+    } catch (e) {
+      console.warn(`[rodizio] devolução falhou na empresa ${l.id}:`, e);
+    }
+  }
+  return { devolvidas, redistribuidas };
+}

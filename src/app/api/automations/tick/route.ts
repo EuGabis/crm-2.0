@@ -1,6 +1,7 @@
 import { processDueRuns } from "@/lib/automations/engine";
 import { dispatchScheduledMessages } from "@/lib/messages/scheduled";
 import { processarFilaDeTranscricao } from "@/lib/ai/transcribe";
+import { devolverInativasDeTodas } from "@/lib/leads/distribution";
 
 /** Nunca cachear: a rota é o batimento do motor. */
 export const dynamic = "force-dynamic";
@@ -12,10 +13,11 @@ export const dynamic = "force-dynamic";
  * `x-automation-secret`. Sem o segredo correto responde 401 — a rota
  * roda com a service role e não pode ficar aberta.
  *
- * Faz três coisas, no mesmo tique: executa os runs de automação vencidos,
- * dispara as mensagens agendadas que chegaram a hora (migração 0028) e
- * transcreve os áudios da fila (migração 0085). São independentes — uma falhar
- * não impede as outras, daí o `allSettled`.
+ * Faz QUATRO coisas, no mesmo tique: executa os runs de automação vencidos,
+ * dispara as mensagens agendadas que chegaram a hora (migração 0028),
+ * transcreve os áudios da fila (migração 0085) e devolve ao rodízio as conversas
+ * cujo cliente está esperando demais. São independentes — uma falhar não impede
+ * as outras, daí o `allSettled`.
  *
  * A transcrição entrou AQUI de propósito, como as agendadas: um segundo cron
  * significaria segundo segredo, segunda migração de agendamento e mais um passo
@@ -35,10 +37,14 @@ export async function POST(request: Request) {
     return Response.json({ error: "não autorizado" }, { status: 401 });
   }
 
-  const [automations, scheduled, transcricoes] = await Promise.allSettled([
+  const [automations, scheduled, transcricoes, devolucoes] = await Promise.allSettled([
     processDueRuns(),
     dispatchScheduledMessages(),
     processarFilaDeTranscricao(),
+    // Mesma razão da transcrição e das agendadas: um cron próprio para isto seria
+    // segundo segredo, segunda migração de agendamento e mais um passo manual em
+    // produção — para uma varredura que cabe no batimento que já existe.
+    devolverInativasDeTodas(),
   ]);
 
   if (automations.status === "rejected") {
@@ -49,6 +55,9 @@ export async function POST(request: Request) {
   }
   if (transcricoes.status === "rejected") {
     console.error("[transcricao] falha na fila:", transcricoes.reason);
+  }
+  if (devolucoes.status === "rejected") {
+    console.error("[rodizio] falha na devolução:", devolucoes.reason);
   }
 
   if (automations.status === "rejected" && scheduled.status === "rejected") {
@@ -73,5 +82,9 @@ export async function POST(request: Request) {
       transcricoes.status === "fulfilled"
         ? transcricoes.value
         : { processados: 0, ok: 0, erros: 0, restaram: 0, tickError: true },
+    devolucoes:
+      devolucoes.status === "fulfilled"
+        ? devolucoes.value
+        : { devolvidas: 0, redistribuidas: 0, tickError: true },
   });
 }

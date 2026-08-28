@@ -619,6 +619,7 @@ function DepartmentDialog({
   const [colaborativo, setColaborativo] = useState(false);
   const [usaRodizio, setUsaRodizio] = useState(true);
   const [rodizioOffline, setRodizioOffline] = useState(false);
+  const [devolverAposMin, setDevolverAposMin] = useState(15);
   const [logoutInatividade, setLogoutInatividade] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -641,6 +642,7 @@ function DepartmentDialog({
     setColaborativo(department?.colaborativo ?? false);
     setUsaRodizio(department?.usaRodizio ?? true);
     setRodizioOffline(department?.rodizioOffline ?? false);
+    setDevolverAposMin(department?.devolverAposMin ?? 15);
     setLogoutInatividade(department?.logoutInatividade ?? true);
   }, [department, open]);
 
@@ -672,6 +674,7 @@ function DepartmentDialog({
           colaborativo,
           usaRodizio,
           rodizioOffline,
+          devolverAposMin,
           logoutInatividade,
         })
       : await departmentActions.create({
@@ -683,6 +686,7 @@ function DepartmentDialog({
           colaborativo,
           usaRodizio,
           rodizioOffline,
+          devolverAposMin,
           logoutInatividade,
         });
     setSaving(false);
@@ -829,6 +833,7 @@ function DepartmentDialog({
           </Label>
 
           {usaRodizio && (
+            <>
             <Label className="ml-4 flex cursor-pointer items-start gap-2.5 rounded-lg border border-dashed p-3">
               <Checkbox
                 checked={rodizioOffline}
@@ -841,11 +846,38 @@ function DepartmentDialog({
                 </span>
                 <span className="block text-[11px] font-normal leading-relaxed text-slate-500">
                   Ligado: o lead entra no rodízio de <strong>todos</strong> do pool,
-                  esteja online ou não (ex.: Secretaria). Desligado: prioriza quem
-                  está online e só usa os offline se ninguém estiver online.
+                  esteja online ou não. Desligado (recomendado): só quem está
+                  online recebe; se ninguém estiver, o lead fica na{" "}
+                  <strong>fila do setor</strong>, visível para todos, e vai para
+                  quem entrar primeiro.
                 </span>
               </span>
             </Label>
+
+            <div className="ml-4 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+              <Label className="text-xs font-semibold text-slate-800">
+                Devolver ao rodízio depois de
+              </Label>
+              <div className="mt-1.5 flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={0}
+                  max={480}
+                  value={devolverAposMin}
+                  onChange={(e) => setDevolverAposMin(Math.max(0, Number(e.target.value) || 0))}
+                  className="h-8 w-20 text-xs"
+                />
+                <span className="text-xs text-slate-500">minutos de espera do cliente</span>
+              </div>
+              <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
+                Conversa já atribuída em que o cliente está esperando esse tempo{" "}
+                <strong>sem resposta humana</strong> volta ao rodízio e vai para outro
+                atendente — nunca para o mesmo que não respondeu.{" "}
+                <strong>0 desliga.</strong> Conta só o horário de expediente, então
+                mensagem de sexta à noite não é devolvida na madrugada do sábado.
+              </p>
+            </div>
+            </>
           )}
 
           {/* Distribuição de leads por rodízio (migração 0057) */}
