@@ -37,6 +37,8 @@ export interface Department {
   usaRodizio: boolean;
   /** Distribui mesmo para quem está offline? (0083) */
   rodizioOffline: boolean;
+  /** Minutos de espera do cliente antes de devolver ao rodízio. 0 = desligado. */
+  devolverAposMin: number;
   /** Aplica o logout automático por inatividade (10 min) aos membros? (0081) */
   logoutInatividade: boolean;
   createdAt: string;
@@ -108,6 +110,7 @@ const mapDepartment = (r: any, channelIds: string[] = []): Department => ({
   colaborativo: r.colaborativo ?? false,
   usaRodizio: r.usa_rodizio ?? true,
   rodizioOffline: r.rodizio_offline ?? false,
+  devolverAposMin: r.devolver_apos_min ?? 15,
   logoutInatividade: r.logout_inatividade ?? true,
   createdAt: r.created_at,
 });
@@ -301,6 +304,7 @@ export const departmentActions = {
     colaborativo?: boolean;
     usaRodizio?: boolean;
     rodizioOffline?: boolean;
+    devolverAposMin?: number;
     logoutInatividade?: boolean;
   }): Promise<{ ok: boolean; error?: string }> {
     const loc = locationId();
@@ -318,6 +322,7 @@ export const departmentActions = {
         colaborativo: input.colaborativo ?? false,
         usa_rodizio: input.usaRodizio ?? true,
         rodizio_offline: input.rodizioOffline ?? false,
+        devolver_apos_min: input.devolverAposMin ?? 15,
         logout_inatividade: input.logoutInatividade ?? true,
         created_by: auth.user?.id ?? null,
       })
@@ -354,6 +359,7 @@ export const departmentActions = {
       colaborativo?: boolean;
       usaRodizio?: boolean;
       rodizioOffline?: boolean;
+      devolverAposMin?: number;
       logoutInatividade?: boolean;
     }
   ): Promise<{ ok: boolean; error?: string }> {
@@ -367,6 +373,7 @@ export const departmentActions = {
     if (patch.colaborativo !== undefined) row.colaborativo = patch.colaborativo;
     if (patch.usaRodizio !== undefined) row.usa_rodizio = patch.usaRodizio;
     if (patch.rodizioOffline !== undefined) row.rodizio_offline = patch.rodizioOffline;
+    if (patch.devolverAposMin !== undefined) row.devolver_apos_min = patch.devolverAposMin;
     if (patch.logoutInatividade !== undefined) row.logout_inatividade = patch.logoutInatividade;
     const supabase = createClient();
     const { data, error } = await supabase

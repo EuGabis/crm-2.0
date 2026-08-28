@@ -2656,6 +2656,77 @@ aplicar.
 então falta só interface e a chamada da Cloud API (`type: "reaction"`). Não foi
 feito porque o pedido era sobre a reação do contato não aparecer.
 
+## Rodízio: offline não recebe, e conversa parada volta para a fila
+
+Relato (2026-08-28): na Secretaria a atendente estava OFFLINE (começa 12h) e o
+bot moveu várias conversas para ela. Os outros atendentes não receberam esses
+contatos e **a fila de espera dos alunos ficou muito alta**.
+
+⚠️ **Eram DUAS causas independentes, e consertar só uma deixaria o problema.**
+
+**Causa 1 — o flag `rodizio_offline` (0083).** Ligado, `distributeOne` usa o pool
+INTEIRO e ignora presença: a atendente recebe a fatia dela do cursor às 5h da
+manhã. Esse flag foi **pedido pelo Gabriel** naquela migração, com o texto oposto
+("deve distribuir para todos mesmo offline"). A migração
+`202608280930_rodizio_respeita_presenca.sql` o desliga — e está registrado como
+**reversão de decisão anterior**, não como bug de ninguém.
+
+**Causa 2 — o fallback "ninguém online".** Era
+`online.length === 0 ? pool : online`, e **sobreviveria com o flag desligado**: de
+madrugada não há ninguém online, então caía no pool e a conversa ia para quem
+estivesse na vez do cursor. Foi assim que conversas de 05:55 amanheceram na caixa
+de quem começa 12h, invisíveis para o setor. Agora `distributeOne` devolve `null`,
+o chamador marca `awaiting_distribution` e o lead fica na **fila do setor** —
+visível para todos e distribuído a quem entrar primeiro. Esperar na fila do grupo
+é melhor que ficar preso com quem não está lá.
+
+### Devolução por espera (`departments.devolver_apos_min`, default 15)
+
+Respeitar presença **ainda não basta**: a pessoa pode estar online e ter saído
+para almoçar, entrado em reunião, ou simplesmente não visto. Então conversa já
+atribuída em que o cliente espera mais que o limite **sem resposta humana** volta
+ao rodízio e é redistribuída na hora (escolha do Gabriel, em vez de devolver para
+a caixa do grupo — que depende de alguém ficar olhando, e foi a fila alta que
+motivou o pedido).
+
+- ⚠️ **O relógio é a ESPERA DO CLIENTE**, não "há quanto tempo foi atribuída".
+  Não existe coluna `assigned_at`, mas o motivo principal é outro: a queixa foi a
+  FILA DE ESPERA, e medir a espera do aluno é medir exatamente a queixa.
+- ⚠️ **Espera ÚTIL, pela mesma `sla_conversations` da 0079.** Com tempo corrido,
+  toda conversa que chegasse numa sexta à noite seria "devolvida" na madrugada do
+  sábado, em rodízio, para gente que também não está lá — trocaria uma conversa
+  parada por três eventos de transferência inúteis no fio. Reusar a função da
+  0079 também evita duas definições de "esperando" para divergirem, e ela já não
+  conta resposta do BOT como atendimento — sem isso nenhuma conversa pareceria
+  parada, porque o auto-responder responde em segundos.
+- ⚠️ **`excluir` no `distributeOne`**: sem isso o rodízio pode devolver para a
+  MESMA pessoa que não respondeu (o cursor não sabe de onde a conversa veio), e o
+  resultado seria um evento de transferência a cada tique, para sempre.
+- ⚠️ **A exclusão é aplicada DEPOIS da regra de presença.** Tirar a pessoa do
+  `pool` antes mudaria o tamanho da lista e, com ele, o `cursor % list.length` —
+  o rodízio passaria a pular gente sempre que houvesse uma devolução.
+- **Solta ANTES de redistribuir, em passo separado:** se o rodízio não achar
+  ninguém, a conversa fica na fila do setor em vez de continuar presa com quem não
+  respondeu. Redistribuir primeiro e soltar depois deixaria a conversa parada no
+  caso ruim.
+- Roda no **tick de minuto que já existe** (`/api/automations/tick`), como as
+  agendadas e a transcrição — cron próprio seria segundo segredo, segunda
+  migração de agendamento e mais um passo manual em produção. ⚠️ A varredura
+  olha 7 dias, não 30: só interessa quem está esperando AGORA.
+- Janela de expediente: o padrão de 15 min é **o mesmo da meta de SLA** (0079).
+  Duas réguas para a mesma coisa só gerariam discussão sobre qual vale.
+
+⏳ **Não foi feito: horário de trabalho por atendente.** Era a minha proposta
+(pular quem está fora do turno), e o Gabriel escolheu presença + devolução. Se um
+dia a presença se mostrar frágil — gente que trabalha com a aba fechada —, turno
+por pessoa é o próximo passo, e aí `devolver_apos_min` continua valendo como rede.
+
+⚠️ A varredura automática de leads aguardando que a **0058 prometia**
+(`/api/leads/sweep`, "migração 0059") **nunca existiu** — a rota é
+`/api/leads/distribute` e exige sessão de admin. Ou seja: o que tira lead da fila
+do setor hoje é o botão do admin e a distribuição em tempo real. Vale saber ao
+mexer nessa área.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
