@@ -2727,6 +2727,82 @@ por pessoa é o próximo passo, e aí `devolver_apos_min` continua valendo como 
 do setor hoje é o botão do admin e a distribuição em tempo real. Vale saber ao
 mexer nessa área.
 
+## Toda atribuição de conversa deixa rastro (gatilho)
+
+Relato (2026-08-28): "alguns clientes estão caindo direto para o atendente sem
+finalizar com o bot". O print mostrava a conversa com o bot no MEIO da triagem
+(pediu o nome, o cliente respondeu) e **já atribuída a uma atendente** — sem
+nenhum evento no fio dizendo quem atribuiu nem por quê.
+
+⚠️ **Não deu para responder "por que foi para ela" lendo o código**, e essa é a
+descoberta que importa: o CRM troca o responsável por pelo menos OITO caminhos, e
+só DOIS deixavam rastro.
+
+| registram evento | NÃO registravam |
+|---|---|
+| `assignLeadTo` (rodízio) | `transfer_conversation` (0070) |
+| devolução por espera | `claim_conversation` (0073) |
+| | `take_over_conversation` (0080) |
+| | `get_conversation` (0086) |
+| | `assign_conversation_to_self` (0087) |
+| | `finish_conversation` (0092) |
+| | webhook: dono do contato |
+| | webhook: reabertura com humano |
+
+Investigar caminho por caminho é o método que já se provou caro aqui (doze
+rodadas no áudio recusado pela Meta, todas por falta de dado). **O conserto é
+instrumentar, não adivinhar.**
+
+⚠️ **GATILHO, e não um `insert` em cada função** — mesma decisão da transcrição
+(0085: "quem enfileira é um TRIGGER… o quinto caminho que alguém criar amanhã
+esqueceria"). São oito caminhos, dois em TypeScript e seis em SQL; consertar um
+por um deixaria de fora justamente o próximo, que é o que vai gerar a dúvida da
+próxima vez. `private.log_atribuicao` (migração `202608281530`) roda
+`after update of assigned_to` e pega todos.
+
+**`conversations.assign_reason`** carrega o POR QUÊ na mesma transação da
+atribuição. Quem não preencher gera "motivo não informado" — e isso é informação
+útil, não lacuna: aponta o caminho que ainda falta instrumentar.
+
+O evento sai como:
+`Atribuída a Jenifer (estava offline) · pelo sistema · rodízio do bot`
+`Devolvida à fila do setor · pelo sistema · devolvida: cliente esperava 22 min`
+
+- ⚠️ **Os `insert` manuais foram REMOVIDOS** de `assignLeadTo` e da devolução:
+  com o gatilho, deixá-los daria dois eventos para a mesma atribuição. O texto
+  que estava no insert virou MOTIVO na coluna.
+- `auth.uid()` é null no webhook e no cron, e **"pelo sistema" é a informação
+  certa** nesse caso — não uma lacuna a preencher.
+- `is distinct from` e não `<>`: null está dos dois lados do problema (atribuir a
+  partir da fila e devolver para ela).
+- `security definer` porque `messages` tem RLS e o gatilho precisa gravar venha a
+  atribuição de onde vier. A função mora em `private` e o gatilho é o único
+  chamador, então não há `grant` a fazer — o oposto do cuidado das funções de
+  `public`, onde o problema existe porque qualquer um alcança.
+
+⏳ **A causa do caso do Cesar continua sem resposta**, e isto é o instrumento
+para respondê-la: na próxima vez o próprio fio diz quem atribuiu e por quê. Para
+o caso já ocorrido:
+
+```sql
+select m.created_at, m.type, left(m.body, 90) as evento
+  from public.messages m
+ where m.conversation_id = '<id da conversa>'
+ order by m.created_at;
+-- e o estado atual:
+select assigned_to, bot_paused, awaiting_distribution, assigned_offline, archived_by
+  from public.conversations where id = '<id da conversa>';
+```
+
+⚠️ **De passagem, um achado que pode ser a causa e vale registrar:**
+`maybeRunBot` (`lib/bot/engine.ts`) seleciona **só `bot_paused`** e não olha
+`assigned_to` — então conversa que JÁ tem humano continua recebendo o fluxo do bot
+se `bot_paused` for false. Os dois campos são independentes e o código trata "tem
+humano" e "bot pausado" como coisas sem relação. **Não foi mudado** de propósito:
+travar o bot em conversa atribuída poderia produzir o sintoma oposto (cliente sem
+triagem nenhuma), e sem saber qual caminho atribuiu o Cesar não há como escolher
+com segurança. É a decisão que o log vai embasar.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em

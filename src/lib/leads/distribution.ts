@@ -110,7 +110,14 @@ async function leadsPipelineId(
 /** Atribui o lead ao atendente: conversa + dono do card no funil de leads. */
 export async function assignLeadTo(
   db: any,
-  p: { conversationId: string; contactId: string; locationId: string; pipelineName?: string },
+  p: {
+    conversationId: string;
+    contactId: string;
+    locationId: string;
+    pipelineName?: string;
+    /** Vai para `conversations.assign_reason` e aparece no evento do fio. */
+    reason?: string;
+  },
   userId: string,
   offline = false,
 ) {
@@ -122,20 +129,18 @@ export async function assignLeadTo(
       awaiting_distribution: false,
       // caiu enquanto o atendente estava offline → aparece na aba "Offline" dele
       assigned_offline: offline,
+      /*
+       * ⚠️ O evento no fio NÃO é mais escrito aqui: quem escreve é o gatilho
+       * `private.log_atribuicao` (202608281530), que pega TODOS os oito caminhos
+       * de atribuição — os seis em SQL inclusive. Deixar o insert manual daria
+       * dois eventos para a mesma atribuição.
+       *
+       * O que era texto no insert virou MOTIVO na coluna: o gatilho monta
+       * "Atribuída a X (estava offline) · pelo sistema · rodízio do bot".
+       */
+      assign_reason: p.reason ?? "rodízio do bot",
     })
     .eq("id", p.conversationId);
-
-  // Log inline na conversa: registra a transferência (quem recebeu, se estava off).
-  const { data: prof } = await db.from("profiles").select("name").eq("id", userId).maybeSingle();
-  const nome = prof?.name || "atendente";
-  await db.from("messages").insert({
-    location_id: p.locationId,
-    conversation_id: p.conversationId,
-    direction: "out",
-    type: "event",
-    channel: "whatsapp",
-    body: `Conversa transferida de Bot para ${nome}${offline ? " (estava offline)" : ""}`,
-  });
 
   const pid = await leadsPipelineId(db, p.locationId, p.pipelineName);
   if (!pid) return;
@@ -172,6 +177,8 @@ export async function distributeOne(
      * — e o resultado seria um evento de transferência a cada tique, para sempre.
      */
     excluir?: string[];
+    /** Motivo repassado ao `assignLeadTo` → coluna `assign_reason` → evento. */
+    reason?: string;
   },
 ): Promise<string | null> {
   const { pool, cursor } = await departmentPool(db, args.locationId, args.deptId);
@@ -216,6 +223,7 @@ export async function distributeOne(
       contactId: args.contactId,
       locationId: args.locationId,
       pipelineName: args.pipelineName,
+      reason: args.reason,
     },
     user,
     offline,
@@ -370,20 +378,19 @@ export async function devolverInativas(
        * todos) em vez de continuar presa com quem não respondeu. Redistribuir
        * primeiro e soltar depois deixaria a conversa parada no caso ruim.
        */
+      const esperou = Math.round(
+        parados.find((p: any) => p.conversation_id === conv.id)?.espera_util_min ?? limite,
+      );
       await db
         .from("conversations")
-        .update({ assigned_to: null, awaiting_distribution: true, assigned_offline: false })
+        .update({
+          assigned_to: null,
+          awaiting_distribution: true,
+          assigned_offline: false,
+          // O gatilho `log_atribuicao` escreve o evento; aqui só vai o motivo.
+          assign_reason: `devolvida: cliente esperava ${esperou} min sem resposta`,
+        })
         .eq("id", conv.id);
-      await db.from("messages").insert({
-        location_id: locationId,
-        conversation_id: conv.id,
-        direction: "out",
-        type: "event",
-        channel: "whatsapp",
-        body: `Devolvida ao rodízio: cliente esperando há ${Math.round(
-          parados.find((p: any) => p.conversation_id === conv.id)?.espera_util_min ?? limite,
-        )} min sem resposta`,
-      });
       devolvidas++;
 
       const novo = await distributeOne(db, {
@@ -392,6 +399,7 @@ export async function devolverInativas(
         conversationId: conv.id,
         contactId: conv.contact_id,
         pipelineName: "Controle de Leads",
+        reason: `redistribuída após ${esperou} min de espera`,
         // ⚠️ Sem isto o rodízio pode devolver para a MESMA pessoa que não
         // respondeu — o cursor não sabe de onde a conversa veio, e o resultado
         // seria um evento de transferência a cada tique, para sempre.
