@@ -2822,6 +2822,44 @@ o estado inconsistente aparece, para cruzar com o evento de atribuição.
 atribuiu a Beatriz, porque finalizar solta o responsável. Alguma coisa a atribuiu
 ANTES, durante a triagem.
 
+## Transcrição de áudio desligável POR CONTATO
+
+`contacts.transcrever_audio` (migração `202608281815`). Nasceu de um teste: o
+Gabriel quis enviar um áudio com a transcrição desativada **só para um contato**,
+para ver se ela tem alguma relação com a recusa da Meta (#131053) — isolando a
+variável sem tirar a transcrição de quem está atendendo.
+
+⚠️ **Coluna, e não um telefone dentro do gatilho.** Trocar o corpo de
+`marcar_audio_para_transcrever` para pular um número fixo funcionaria e não
+exigiria migração — mas deixa um telefone cravado numa função de produção, que
+fica lá para sempre se alguém esquecer de desfazer. **Um teste não pode depender
+de alguém lembrar de limpar.** Com a coluna, ligar e desligar é um `update` de uma
+linha e o estado fica visível na tabela.
+
+- ⚠️ **Marca `ignorado`, não deixa nulo.** Os dois tirariam o áudio da fila, mas
+  `ignorado` é estado que a 0085 já definiu ("saiu da fila de propósito") e
+  aparece na consulta de status; nulo seria indistinguível de "áudio anterior à
+  transcrição" — e a diferença some justamente quando alguém for conferir se o
+  teste estava valendo.
+- ⚠️ **`coalesce(v_transcrever, true)`**: contato não resolvível volta a
+  transcrever. Um lookup que falha não pode virar "desliga em silêncio".
+- A consulta extra por INSERT de áudio é irrelevante — ~200 áudios/mês neste
+  banco (medido na 0085), não 200/segundo.
+- ⚠️ **A migração termina com um `select` de conferência**, e ele não é enfeite:
+  se o telefone não casar, o `update` afeta 0 linhas SEM avisar e o teste rodaria
+  com a transcrição ligada — falso negativo que ninguém perceberia. O `select`
+  força ver o contato antes de confiar no resultado.
+- `private.phone_key` (0047) normaliza os dois lados: o CRM guarda telefone com e
+  sem DDI e com pontuação, e comparar strings cruas erraria o contato.
+
+Desligar também impede o pedido do NAVEGADOR: o balão só chama
+`/api/messages/transcribe` quando o status é `pendente`, e o tick só varre
+`pendente`. Os três caminhos param juntos.
+
+⏳ Sem interface: hoje é `update` no SQL Editor. Se virar necessidade recorrente
+(contato que não quer áudio transcrito, por exemplo), o lugar natural é o cadastro
+do contato.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
