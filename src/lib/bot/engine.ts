@@ -587,13 +587,45 @@ export async function maybeRunBot(
 ): Promise<boolean> {
   const { channel, conversationId, contact } = args;
 
-  // Humano assumiu → bot fica quieto.
+  /*
+   * Humano assumiu → bot fica quieto.
+   *
+   * ⚠️ **`assigned_to` entrou na checagem, e a falta dele era um furo real.**
+   * A consulta lia SÓ `bot_paused`, e os dois campos são independentes: conversa
+   * com responsável mas `bot_paused = false` continuava recebendo o fluxo. Foi o
+   * que apareceu no relato de 2026-08-28 — o print mostrava o bot no meio da
+   * triagem (pediu o nome, o cliente respondeu) numa conversa **já atribuída a
+   * uma atendente**. Dois donos falando com o mesmo cliente.
+   *
+   * O próprio código já diz em outro lugar que "o bot não pode roubar uma
+   * conversa ativa" (webhook, reabertura com humano); aqui a regra simplesmente
+   * não estava aplicada.
+   *
+   * ⚠️ **Isto NÃO tira triagem de ninguém**, e foi o que me fez hesitar antes.
+   * Conferido em `finish_conversation` (0092): finalizar faz
+   * `assigned_to = null`, ou seja, conversa encerrada volta SEM responsável e é
+   * triada normalmente quando o cliente escreve de novo. O rodízio também só
+   * atribui junto com `bot_paused = true`. Conversa com responsável E bot solto é
+   * estado inconsistente — e é justamente o que se quer parar de atender com duas
+   * bocas.
+   *
+   * O `console.log` fica: enquanto o gatilho de log de atribuição
+   * (202608281530) não disser QUEM atribuiu durante a triagem, esta linha é o
+   * outro lado da mesma pergunta.
+   */
   const { data: conv } = await db
     .from("conversations")
-    .select("bot_paused")
+    .select("bot_paused, assigned_to")
     .eq("id", conversationId)
     .maybeSingle();
   if (conv?.bot_paused) return false;
+  if (conv?.assigned_to) {
+    console.log(
+      `[bot] conversa ${conversationId} já tem responsável (${conv.assigned_to}) ` +
+        `com bot_paused=false — bot não fala. Ver o evento de atribuição no fio.`,
+    );
+    return false;
+  }
 
   const { data: session } = await db
     .from("bot_sessions")
