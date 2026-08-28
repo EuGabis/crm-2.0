@@ -2822,6 +2822,72 @@ o estado inconsistente aparece, para cruzar com o evento de atribuição.
 atribuiu a Beatriz, porque finalizar solta o responsável. Alguma coisa a atribuiu
 ANTES, durante a triagem.
 
+## Resposta automática com janela (Conversas → Configurações)
+
+Pedido: "um bot que quando a pessoa mande uma mensagem responda com apenas UMA
+mensagem, e a opção de escolher quando fica ativo e até quando". Escolhas do
+Gabriel: **os dois** tipos de janela (recorrente + período único) e resposta a
+**toda** mensagem.
+
+⚠️ **A parte "uma mensagem só" já era possível** no editor de bot (0055) — um
+fluxo com um único nó `end` com texto. O que NÃO existia era a JANELA: nenhuma
+tabela tinha qualquer conceito de "ativo de … até …". Migração
+`202608281945_resposta_automatica_agendada.sql`.
+
+⚠️ **Substituiu um interruptor de MENTIRA.** A aba Configurações tinha "Resposta
+automática fora do horário" ligando um `useState` que nunca saía da tela: a
+funcionalidade era prometida e não existia. Ele foi REMOVIDO — deixar os dois lado
+a lado seria pior que antes, dois controles com o mesmo nome sendo um real e um
+decorativo.
+
+### Decisões
+
+- ⚠️ **Roda ANTES do fluxo do bot e do auto-responder de IA.** Se rodasse depois,
+  um número com fluxo triaria o cliente às 3h da manhã — nome, e-mail, assunto —
+  para no fim ninguém atender. A janela existe para dizer "não estamos agora":
+  precisa calar os dois.
+- ⚠️ **`tipo` separa recorrente de período** em vez de uma linha tentar ser as
+  duas. Uma linha com os dois conjuntos de campos exigiria uma regra implícita no
+  código para decidir qual olhar. Com a separação, "qual vale quando coincidem"
+  vira regra explícita: **período ganha**, porque "estamos em recesso" é mais
+  específico que "fora do expediente". Entre iguais, a regra amarrada a um NÚMERO
+  ganha da que vale para a empresa.
+- ⚠️ **A regra é TypeScript, não função SQL.** Tem três armadilhas nada óbvias
+  (virada de meia-noite, fuso e prioridade) e em TS ela é função pura com teste;
+  em SQL eu não teria como executá-la antes de produção — e este projeto já pagou
+  caro por lógica que parecia certa e não foi rodada.
+- ⚠️ **A janela que vira a meia-noite é o caso NORMAL**, não a exceção: "fora do
+  expediente" é 19h→8h, ou seja `fim <= inicio`. Tratada como intervalo comum
+  nunca seria verdadeira e o bot não responderia nunca — sem erro nenhum.
+- ⚠️ **O dia da semana é o do INÍCIO da janela.** Numa faixa 19h→8h marcada para
+  sexta, 1h da manhã já é sábado no relógio; conferir o dia do instante atual
+  cortaria a madrugada de sexta para sábado, que é quando a mensagem mais importa.
+- ⚠️ **`Intl` com `America/Sao_Paulo`, não `getHours()`.** O servidor da Vercel
+  roda em UTC: às 21h de Brasília `getHours()` devolve 0 e a janela pareceria
+  fechada. Mesmo cuidado de `private.business_minutes` (0079).
+- **Fim EXCLUSIVO** nos dois modos: "até 02/01 08:00" significa que às 8h em
+  ponto já atende normalmente.
+- **Respeita o limite diário do número.** Responder a toda mensagem foi escolha
+  do Gabriel, e cada resposta conta na cota da Cloud API — sem a checagem, uma
+  rajada num recesso consumiria a cota e derrubaria as mensagens de verdade.
+- **Marca `automated: true`**: entra no filtro "Conversas com automação" (0027) e
+  NÃO conta como atendimento no SLA (0079) — senão o cumprimento da meta ficaria
+  perfeito sem ninguém ter atendido.
+- **Criar/editar/excluir é de ADMIN** pela RLS: a mensagem sai para todo cliente
+  que escrever na janela, e uma janela mal configurada é visível fora da empresa.
+  Ler continua liberado para o time ver o que está no ar.
+- A tela mostra **qual está valendo AGORA** usando a MESMA `respostaAplicavel` do
+  webhook. Regra escrita num lugar e aplicada em outro é como janela errada passa
+  despercebida até um cliente reclamar.
+
+Testado com **21 casos**: as duas bordas da virada de meia-noite, o fuso (21h
+local = 00h UTC do dia seguinte), a madrugada de sexta pertencendo à janela de
+sexta, fim exclusivo nos dois modos, período ganhando de recorrente, número
+específico ganhando do geral, e regra inativa.
+
+⏳ Fora do escopo: uma vez por conversa / a cada X horas (o Gabriel escolheu toda
+mensagem), e prévia de "como vai ficar na semana".
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em

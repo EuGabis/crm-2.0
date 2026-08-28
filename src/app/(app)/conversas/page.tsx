@@ -13,6 +13,7 @@ import { ConversationList } from "@/components/inbox/conversation-list";
 import { Thread } from "@/components/inbox/thread";
 import { ViewsRail } from "@/components/inbox/views-rail";
 import { ConversationsReport } from "@/components/inbox/conversations-report";
+import { AutoRespostasTab } from "@/components/inbox/auto-respostas-tab";
 import { TemplatesTab } from "@/components/whatsapp/templates-tab";
 import { TemplateLogsTab } from "@/components/whatsapp/template-logs-tab";
 import { DataTable, type Column } from "@/components/shared/data-table";
@@ -809,7 +810,6 @@ function EstatisticasTab() {
 function ConfiguracoesTab() {
   const [notificacoes, setNotificacoes] = useState(true);
   const [atribuicao, setAtribuicao] = useState(true);
-  const [respostaAuto, setRespostaAuto] = useState(false);
   const [marcarLida, setMarcarLida] = useState(true);
   const [slaAlvo, setSlaAlvo] = useState("4");
 
@@ -827,12 +827,6 @@ function ConfiguracoesTab() {
       set: setAtribuicao,
     },
     {
-      label: "Resposta automática fora do horário",
-      description: "Enviar mensagem padrão fora do horário comercial",
-      value: respostaAuto,
-      set: setRespostaAuto,
-    },
-    {
       label: "Marcar como lida ao abrir",
       description: "Zerar contador de não lidas ao visualizar a conversa",
       value: marcarLida,
@@ -841,7 +835,18 @@ function ConfiguracoesTab() {
   ];
 
   return (
-    <div className="max-w-xl">
+    <div className="max-w-3xl space-y-6">
+      {/*
+        ⚠️ A resposta automática saiu da lista de interruptores acima e virou
+        seção própria — e não por estética: o interruptor "Resposta automática
+        fora do horário" que estava ali ligava um `useState` que nunca saía da
+        tela. A funcionalidade era PROMETIDA e não existia. Deixar os dois lado a
+        lado seria pior que antes: dois controles com o mesmo nome, um real e um
+        decorativo.
+      */}
+      <AutoRespostasTab />
+
+      <div className="max-w-xl">
       <h1 className="mb-4 text-lg font-bold text-slate-900">Configurações da caixa de entrada</h1>
       <div className="space-y-3 rounded-xl border bg-white p-5">
         {toggles.map((t) => (
@@ -878,6 +883,7 @@ function ConfiguracoesTab() {
         >
           Salvar
         </Button>
+      </div>
       </div>
     </div>
   );
