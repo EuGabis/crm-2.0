@@ -50,6 +50,7 @@ import {
   useMessagesLoading,
   useReplyStore,
 } from "@/lib/data/repos/db/conversations";
+import { whatsappActions } from "@/lib/data/repos/db/whatsapp";
 import { useMyMembership, useTeam } from "@/lib/data/repos/db/team";
 import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
 import type { Conversation, Message } from "@/lib/data/types";
@@ -756,16 +757,90 @@ function Reacoes({ message, out }: { message: Message; out: boolean }) {
   );
 }
 
+/**
+ * "Enviar como arquivo" no balão de áudio que falhou.
+ *
+ * ⚠️ **É um DESVIO, não o conserto** — e a evidência diz que o conserto não está
+ * aqui. O que se sabe do #131053 neste projeto, medido:
+ *   - o arquivo é válido byte a byte, em DOIS formatos independentes
+ *     (Ogg/Opus com pre-skip da RFC e CRC conferindo; MP4/AAC nativo);
+ *   - a Meta recebe os bytes EXATOS (round-trip com hash idêntico) e tipa a
+ *     mídia guardada como `audio/mp4`;
+ *   - **imagem pela MESMA rota, MESMO canal e MESMO par upload+send é
+ *     entregue** — então canal, número, token e transmissão estão certos;
+ *   - o caminho de gravação NÃO mudou entre 24/08 e a data da quebra: mesmo
+ *     código, mesmo encoder, funcionava ontem e falha hoje.
+ *
+ * Sobra: a Meta parou de processar áudio para esta conta. Enquanto isso não se
+ * resolve, mandar como DOCUMENTO entrega o mesmo arquivo — o cliente recebe um
+ * anexo que ele toca. Perde a cara de nota de voz (sem onda no WhatsApp), e é
+ * melhor que não entregar.
+ *
+ * ⚠️ **Botão, não reenvio automático.** Reenviar sozinho ao ver a falha mandaria
+ * mensagem para o cliente sem ninguém pedir, e em cascata para todo áudio
+ * antigo que já falhou. Quem decide reenviar é quem está atendendo.
+ */
+function ReenviarComoArquivo({
+  message,
+  conversationId,
+  channelId,
+}: {
+  message: Message;
+  conversationId: string;
+  channelId?: string | null;
+}) {
+  const [enviando, setEnviando] = useState(false);
+  if (!message.mediaPath) return null;
+
+  const enviar = async () => {
+    setEnviando(true);
+    try {
+      const r = await whatsappActions.sendMedia({
+        conversationId,
+        channelId: channelId ?? undefined,
+        messageId: message.id,
+        mediaPath: message.mediaPath!,
+        mime: message.mediaMime ?? undefined,
+        // `document` põe o arquivo como anexo: sai do transcodificador de áudio
+        // da Meta, que é onde a recusa acontece.
+        kind: "document",
+        filename: message.mediaName ?? "audio.m4a",
+      });
+      if (r.ok) toast.success("Enviado como arquivo");
+      else toast.error(r.error ?? "Não foi possível enviar como arquivo");
+    } catch {
+      toast.error("Falha de conexão");
+    } finally {
+      setEnviando(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={() => void enviar()}
+      disabled={enviando}
+      className="mt-1 inline-flex items-center gap-1 rounded-md bg-white/20 px-2 py-1 text-[10px] font-semibold text-white transition hover:bg-white/30 disabled:opacity-60"
+    >
+      {enviando ? <Loader2 className="size-3 animate-spin" /> : <FileText className="size-3" />}
+      {enviando ? "enviando..." : "Enviar como arquivo"}
+    </button>
+  );
+}
+
 function MessageBubble({
   message,
   conversationId,
   quoted,
   contactFirstName,
+  channelIdDaConversa,
 }: {
   message: Message;
   conversationId: string;
   quoted?: Message | null;
   contactFirstName?: string;
+  /** Canal da conversa — o desvio "enviar como arquivo" precisa dele. */
+  channelIdDaConversa?: string | null;
 }) {
   if (message.type === "event") return <PipelineEvent message={message} />;
   const isOut = message.direction === "out";
@@ -861,6 +936,17 @@ function MessageBubble({
             <span className="[overflow-wrap:anywhere]">{textoDeFalha(message)}</span>
           </p>
         )}
+        {/* O desvio só é oferecido para ÁUDIO: é o único tipo cuja recusa foi
+            rastreada até o processamento da Meta. Imagem e documento são
+            entregues normalmente, e um botão ali sugeriria um problema que não
+            existe. */}
+        {isOut && message.status === "failed" && message.type === "audio" && (
+          <ReenviarComoArquivo
+            message={message}
+            conversationId={conversationId}
+            channelId={channelIdDaConversa}
+          />
+        )}
         <p
           className={cn(
             "mt-1 text-right text-[9px]",
@@ -883,7 +969,7 @@ function MessageBubble({
           )}
         </p>
       </div>
-        <Reacoes message={message} out={isOut && !message.internal} />
+      <Reacoes message={message} out={isOut && !message.internal} />
       </div>
       {!isOut && replyBtn}
     </div>
@@ -1308,6 +1394,7 @@ export function Thread({
                 conversationId={conversationId}
                 quoted={m.replyTo ? messages.find((x) => x.id === m.replyTo) ?? null : null}
                 contactFirstName={contact.firstName}
+                channelIdDaConversa={conversation?.channelId ?? null}
               />
             </div>
           );

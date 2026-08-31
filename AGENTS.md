@@ -2888,6 +2888,71 @@ específico ganhando do geral, e regra inativa.
 ⏳ Fora do escopo: uma vez por conversa / a cada X horas (o Gabriel escolheu toda
 mensagem), e prévia de "como vai ficar na semana".
 
+## Áudio #131053: o conserto NÃO está no CRM (2026-08-27, conclusão)
+
+Doze rodadas. A cadeia de evidência fechou, e ela aponta para fora do código.
+
+**O teste que encerrou a discussão: uma IMAGEM foi entregue** na mesma conversa,
+pela MESMA rota, com o MESMO canal e o MESMO par upload+send — **sem deploy
+nenhum**. Isso descarta de uma vez canal, número, `phone_number_id`, token,
+multipart e a hipótese do `b36f0fe`. Se algum deles estivesse errado, a imagem
+falharia junto.
+
+**E o caminho de gravação NÃO mudou.** Conferido com `git log -S` nos commits
+entre 24/08 e a quebra: nada tocou `OpusMediaRecorder`, `getUserMedia`,
+`audio/ogg` ou `startRec`. **Mesmo código, mesmo encoder, mesmo formato:
+funcionava ontem, falha hoje.**
+
+Somando tudo o que foi MEDIDO:
+
+| verificação | resultado |
+|---|---|
+| Arquivo válido | ✅ dois formatos, byte a byte (Ogg/Opus com pre-skip da RFC e CRC conferindo; MP4/AAC nativo) |
+| Bytes chegam íntegros | ✅ round-trip com hash SHA-256 idêntico |
+| A Meta tipa a mídia guardada | ✅ `audio/mp4` |
+| Imagem pelo mesmo caminho | ✅ entregue |
+| Caminho de gravação mudou? | ❌ não mudou |
+| A Meta processa o áudio | ❌ "octet-stream" |
+
+**Conclusão: a Meta parou de processar áudio para esta conta.** Não há o que
+consertar no CRM, e as onze rodadas anteriores de mudança de código não podiam
+ter funcionado.
+
+### O que fazer no lado da Meta
+
+1. ⚠️ **`WHATSAPP_GRAPH_VERSION` está em `v21.0`** (fim de 2024). Se a Meta mudou
+   comportamento, uma versão em fim de vida é o primeiro suspeito. Testar
+   `v23.0` é só a variável na Vercel. **O padrão do código NÃO foi mudado de
+   propósito**: a versão afeta TODAS as chamadas (templates, envio, webhook), e
+   trocar sem teste é arriscar o que funciona.
+2. WhatsApp Manager → o número → restrição, qualidade rebaixada, verificação
+   pendente.
+
+### O desvio, enquanto isso: "Enviar como arquivo"
+
+Botão no balão do áudio que falhou (`ReenviarComoArquivo` em `thread.tsx`).
+Manda o MESMO arquivo como `document`, o que sai do transcodificador de áudio da
+Meta — que é onde a recusa acontece. O cliente recebe um anexo que ele toca.
+Perde a cara de nota de voz; entrega.
+
+- ⚠️ **Botão, não reenvio automático.** Automático mandaria mensagem ao cliente
+  sem ninguém pedir, e em cascata para todo áudio antigo que já falhou.
+- ⚠️ **Só aparece em ÁUDIO que falhou.** Imagem e documento são entregues
+  normalmente; um botão ali sugeriria um problema que não existe.
+
+### A lição que custou doze rodadas
+
+**Pergunte "quando parou de funcionar?" ANTES da primeira hipótese.** Foi a
+décima primeira rodada que trouxe "ontem funcionava" — e essa frase valia mais
+que tudo o que eu havia investigado até então. Junto com ela:
+
+- **mensagem de erro de API não é diagnóstico** — "a frase menciona mimetype" não
+  é evidência de que o mimetype seja a causa;
+- **um teste que compara dois caminhos vale mais que dez que examinam um** — a
+  imagem, em cinco segundos, descartou o que onze rodadas não conseguiram;
+- **diagnóstico de falha assíncrona tem que aparecer onde a falha aparece**, não
+  num `console.log`.
+
 ## Padrão de migração módulo a módulo (IMPORTANTE)
 
 A estratégia é deixar **uma tela inteira funcional por vez**. Repos reais ficam em
