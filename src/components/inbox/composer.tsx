@@ -311,11 +311,29 @@ export function Composer({ conversationId }: { conversationId: string }) {
       name.endsWith(".pdf") ||
       file.type.includes("wordprocessingml") ||
       name.endsWith(".docx");
-    if (!isImg && !isVideo && !isDoc) {
-      toast.error("Aceito imagem, vídeo, PDF ou DOCX");
+    /*
+     * ⚠️ **Anexar áudio é ADIÇÃO, não mudança**: até aqui o clipe recusava
+     * qualquer arquivo de som ("Aceito imagem, vídeo, PDF ou DOCX"), então não
+     * existe comportamento anterior para regredir.
+     *
+     * E é o TESTE DECISIVO que faltava depois de treze rodadas. O áudio gravado
+     * pelo microfone sai do `MediaRecorder` como **MP4 fragmentado**
+     * (`frag=true` no diagnóstico) — o `moov` vem quase vazio e as amostras
+     * moram nos fragmentos `moof`, que é o desenho de streaming. Um arquivo
+     * escolhido do computador é PROGRESSIVO. Se ele for aceito pela Meta e o
+     * gravado não, a fragmentação está provada como causa; se os dois forem
+     * recusados, a conta é que não envia áudio, e aí é o painel da Meta.
+     *
+     * Serve de saída prática também: dá para gravar no celular e anexar.
+     */
+    const isAudio =
+      file.type.startsWith("audio/") ||
+      [".mp3", ".m4a", ".aac", ".ogg", ".opus", ".amr"].some((e) => name.endsWith(e));
+    if (!isImg && !isVideo && !isDoc && !isAudio) {
+      toast.error("Aceito imagem, vídeo, áudio, PDF ou DOCX");
       return;
     }
-    const kind = isImg ? "image" : isVideo ? "video" : "file";
+    const kind = isImg ? "image" : isVideo ? "video" : isAudio ? "audio" : "file";
     setUploading(true);
     const res = await conversationActions.sendMedia(conversationId, {
       file,
@@ -324,12 +342,23 @@ export function Composer({ conversationId }: { conversationId: string }) {
     });
     setUploading(false);
     if (res.ok) {
-      toast.success(isImg ? "Imagem enviada" : isVideo ? "Vídeo enviado" : "Arquivo enviado");
+      // ⚠️ "Enviada" aqui é no INBOX. A entrega ao cliente é a chamada abaixo, e
+      // o toast de sucesso dela vem depois — foi um defeito real dizer "enviado"
+      // antes de tentar entregar.
+      toast.success(
+        isImg
+          ? "Imagem no inbox"
+          : isVideo
+            ? "Vídeo no inbox"
+            : isAudio
+              ? "Áudio no inbox"
+              : "Arquivo no inbox"
+      );
       if (
         isWhatsapp &&
         res.messageId &&
         res.mediaPath &&
-        (kind === "image" || kind === "video" || kind === "file")
+        (kind === "image" || kind === "video" || kind === "file" || kind === "audio")
       ) {
         const wa = await whatsappActions.sendMedia({
           conversationId,
@@ -842,7 +871,7 @@ export function Composer({ conversationId }: { conversationId: string }) {
           <input
             ref={fileRef}
             type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/3gpp,application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/3gpp,audio/mpeg,audio/mp4,audio/aac,audio/ogg,audio/amr,.mp3,.m4a,.aac,.ogg,.opus,.amr,application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
