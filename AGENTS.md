@@ -3446,3 +3446,70 @@ envio**, só como recusa genérica depois).
 **Como usar:** logado como admin, abrir
 `https://lito-crm.vercel.app/api/whatsapp/diagnostico` (ou
 `?channelId=<id>` para um número só).
+
+## Áudio: o diagnóstico acusava o inocente (2026-08-31)
+
+O retrato de um MP4 REAL, recusado pela Meta, veio assim:
+
+```
+[diag] bytes=40388 head[v=null ch=null preskip=null taxa=null ganho=null map=null]
+       ogg[pag=0 tags=false audio=0 eos=false granule=0 sobra=40388 crc=0/0]
+       problemas[bytes fora de página na posição 0; primeira página não é
+                 OpusHead; falta a página OpusTags (obrigatória na RFC 7845);
+                 nenhuma página de áudio; última página sem a marca EOS]
+       preskip: sem OpusHead via=upload fmt=audio/mp4
+       meta[bytes=40388/40388 mime=audio/mp4 enviei=40388
+            hash=8ed9420be24f/8ed9420be24f IDENTICO]
+       canal[id=ac94fa64 pnid=1273256012539104 waba=1826165525416327
+             nome=Backup Comercial pedido=cliente]
+```
+
+⚠️ **Os cinco "problemas" eram MEUS, não do arquivo.** `retratoDoAudio` rodava
+`analisarOgg` em qualquer arquivo, e num MP4 aquela lista diz apenas "isto não é
+um Ogg" — `fmt=audio/mp4` na mesma linha já dizia isso. Diagnóstico que acusa o
+inocente é **pior do que diagnóstico nenhum**, porque manda a investigação para o
+lado errado; é a mesma classe de erro de ler `null` como "está mono".
+
+Agora o retrato segue o CONTÊINER: MP4 sai como `fmt=mp4 mp4[...]`, e o bloco de
+Ogg (com `head[...]`, CRC e as exigências da RFC 7845) só aparece para Ogg. Duas
+asserções escrevem a regressão como teste: um MP4 saudável não pode mencionar
+`OpusHead` nem trazer `problemas[...]`.
+
+### `analisarMp4` — o que o diagnóstico não conferia
+
+Para Ogg havia análise de fluxo desde a rodada 6; para MP4, **nada**. O parser
+percorre as caixas de topo e reporta `marca`, `moov`, `mdat`, `frag`,
+`faststart`, `sobra`. Os três candidatos que ele torna visíveis:
+
+- **sem `moov`** — é o índice do arquivo; sem ele nenhum demuxer identifica nada
+  e o farejador cai em `application/octet-stream`, que é literalmente a queixa.
+- ⚠️ **`moov` DEPOIS do `mdat`** — o padrão de quem grava em FLUXO, porque o
+  índice só fica pronto no fim. Quem processa lendo o começo não acha o índice.
+  É o que `-movflags +faststart` conserta, e é a hipótese que casa melhor com a
+  frase da Meta.
+- **fragmentado (`moof`)** — o `MediaRecorder` do navegador emite fMP4, feito
+  para streaming; o `moov` sai quase vazio e as amostras moram nos fragmentos.
+
+⚠️ **O que o retrato PROVA, e vale para não reabrir becos sem saída:**
+`meta[... hash=8ed9420be24f/8ed9420be24f IDENTICO]` — a Meta recebeu os bytes
+EXATOS e tipa a mídia guardada como `audio/mp4`. Ou seja, ela reconhece o arquivo
+ao SERVIR e não reconhece ao PROCESSAR para mensagem de áudio. A transmissão está
+fora de suspeita pela décima vez.
+
+### ✅ "Enviar como arquivo" FUNCIONA — e é o que isola a causa
+
+Confirmado em produção: o MESMO arquivo, no MESMO canal, pela MESMA rota e o
+MESMO par upload+send, é entregue como **documento**. Só o tipo `audio` é
+recusado.
+
+Isso mata o que restava de hipótese sobre transporte, canal, número, token e
+permissão de mídia: todos funcionam. **O que recusa é o transcodificador de áudio
+da Meta**, e é por isso que o desvio existe.
+
+⏳ **O canal é `nome=Backup Comercial`, com `pedido=cliente`** (o composer mandou
+o `channelId`, não foi resolvido da conversa). Vale conferir se é o número certo
+para essa conversa — `b36f0fe` (27/08 10:08, "abrir conversa escolhe canal do
+departamento do usuário") mexeu justamente nessa escolha, e o primeiro relato de
+áudio falhando é de 10:46. Documento indo pelo mesmo canal enfraquece a hipótese,
+mas o teste que discrimina é **gravar áudio numa conversa de OUTRO número**: se
+for, a limitação é daquele número na Meta; se não for, é da conta inteira.

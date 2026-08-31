@@ -391,6 +391,24 @@ export function cabecalhoOpus(bytes: ArrayBuffer): CabecalhoOpus {
 
 /** Retrato completo para diagnóstico, curto o bastante para caber num balão. */
 export function retratoDoAudio(bytes: ArrayBuffer): string {
+  const container = containerDe(new Uint8Array(bytes.slice(0, 400)));
+
+  /*
+   * ⚠️ **A análise segue o CONTÊINER.** A primeira versão rodava `analisarOgg` em
+   * qualquer arquivo, e num MP4 isso escrevia cinco "problemas" que só diziam
+   * "isto não é um Ogg": `primeira página não é OpusHead`, `falta OpusTags`,
+   * `nenhuma página de áudio`, `sem EOS`, `bytes fora de página`. O diagnóstico
+   * ACUSAVA um arquivo saudável — e diagnóstico que acusa o inocente é pior do
+   * que diagnóstico nenhum, porque manda a investigação para o lado errado. Foi
+   * exatamente o que aconteceu com o primeiro retrato de MP4 real.
+   */
+  if (container === "mp4") {
+    const m = analisarMp4(bytes);
+    return (
+      `bytes=${bytes.byteLength} fmt=mp4 mp4[${resumoDoMp4(m)}]`
+    );
+  }
+
   const h = cabecalhoOpus(bytes);
   const o = analisarOgg(bytes);
   return (
@@ -555,4 +573,112 @@ export function resumoCrc(bytes: ArrayBuffer): string {
   const p = paginasComCrc(new Uint8Array(bytes));
   const ok = p.filter((x) => x.crcGravado === x.crcCalculado).length;
   return `crc=${ok}/${p.length}`;
+}
+
+/* ------------------------------------------------------------------ *
+ * Análise do MP4 — o buraco que o diagnóstico tinha
+ *
+ * ⚠️ `retratoDoAudio` rodava `analisarOgg` em QUALQUER arquivo. Num MP4 isso
+ * produzia cinco "problemas" (`primeira página não é OpusHead`, `falta OpusTags`,
+ * `nenhuma página de áudio`, `sem EOS`, `bytes fora de página`) que descrevem
+ * apenas o fato de o arquivo não ser Ogg. Ou seja: o diagnóstico ACUSAVA um
+ * arquivo saudável, que é pior do que não dizer nada — foi o que fez o retrato
+ * de um MP4 parecer um Ogg quebrado.
+ *
+ * O MP4 tem a sua própria exigência estrutural, e um pedaço dela explica
+ * exatamente a queixa da Meta ("on processing it is of type
+ * application/octet-stream"):
+ *
+ *   - **`moov` é o índice do arquivo.** Sem ele nenhum demuxer sabe o que há
+ *     dentro, e o farejador cai em octet-stream.
+ *   - **`moov` DEPOIS do `mdat`** (o padrão de quem grava em fluxo, porque o
+ *     índice só fica pronto no fim) obriga quem processa a ler o arquivo inteiro
+ *     antes de identificá-lo. Processador que só olha o começo desiste. É o que
+ *     o `-movflags +faststart` do ffmpeg conserta.
+ *   - **fragmentado** (`moof`): o `MediaRecorder` do navegador emite fMP4, feito
+ *     para streaming. O `moov` sai quase vazio e as amostras moram nos
+ *     fragmentos — vários demuxers estritos recusam.
+ * ------------------------------------------------------------------ */
+
+export interface AnaliseMp4 {
+  /** Marca do `ftyp` (isom, mp42, M4A …). */
+  marca: string | null;
+  caixas: string[];
+  temMoov: boolean;
+  temMdat: boolean;
+  /** `true` quando há `moof` — MP4 fragmentado, o que o MediaRecorder produz. */
+  fragmentado: boolean;
+  /** `true` quando o `moov` vem ANTES do `mdat` (faststart). */
+  moovNaFrente: boolean;
+  /** Bytes que sobraram fora de qualquer caixa: truncamento. */
+  sobra: number;
+  problemas: string[];
+}
+
+export function analisarMp4(bytes: ArrayBuffer): AnaliseMp4 {
+  const b = new Uint8Array(bytes);
+  const dv = new DataView(bytes);
+  const caixas: string[] = [];
+  let marca: string | null = null;
+  let posMoov = -1;
+  let posMdat = -1;
+  let fragmentado = false;
+  let i = 0;
+
+  while (i + 8 <= b.length) {
+    let tamanho = dv.getUint32(i);
+    const tipo = String.fromCharCode(b[i + 4]!, b[i + 5]!, b[i + 6]!, b[i + 7]!);
+    let cabecalho = 8;
+    if (tamanho === 1) {
+      // `largesize`: 64 bits logo depois do tipo. Lido como dois inteiros de 32 —
+      // arquivo de áudio não chega perto de 2^53.
+      if (i + 16 > b.length) break;
+      tamanho = dv.getUint32(i + 8) * 0x100000000 + dv.getUint32(i + 12);
+      cabecalho = 16;
+    } else if (tamanho === 0) {
+      // Caixa que vai até o fim do arquivo.
+      tamanho = b.length - i;
+    }
+    if (tamanho < cabecalho || i + tamanho > b.length) break;
+
+    caixas.push(tipo);
+    if (tipo === "ftyp" && i + cabecalho + 4 <= b.length) {
+      marca = String.fromCharCode(
+        b[i + cabecalho]!,
+        b[i + cabecalho + 1]!,
+        b[i + cabecalho + 2]!,
+        b[i + cabecalho + 3]!,
+      ).trim();
+    }
+    if (tipo === "moov" && posMoov < 0) posMoov = i;
+    if (tipo === "mdat" && posMdat < 0) posMdat = i;
+    if (tipo === "moof") fragmentado = true;
+    i += tamanho;
+  }
+
+  const temMoov = posMoov >= 0;
+  const temMdat = posMdat >= 0;
+  const moovNaFrente = temMoov && temMdat && posMoov < posMdat;
+  const sobra = b.length - i;
+
+  const problemas: string[] = [];
+  if (!caixas.length) problemas.push("nenhuma caixa MP4 reconhecida");
+  if (!caixas.includes("ftyp")) problemas.push("sem a caixa ftyp");
+  if (!temMoov) problemas.push("SEM a caixa moov — nenhum demuxer identifica o arquivo");
+  if (!temMdat && !fragmentado) problemas.push("sem mdat e sem fragmentos: não há áudio");
+  if (temMoov && temMdat && !moovNaFrente) {
+    problemas.push(
+      "moov DEPOIS do mdat (sem faststart) — quem só lê o começo não identifica o arquivo",
+    );
+  }
+  if (sobra > 0) problemas.push(`${sobra} bytes fora de caixa (truncado?)`);
+  return { marca, caixas, temMoov, temMdat, fragmentado, moovNaFrente, sobra, problemas };
+}
+
+export function resumoDoMp4(a: AnaliseMp4): string {
+  return (
+    `marca=${a.marca} caixas=${a.caixas.join("/") || "-"} moov=${a.temMoov} ` +
+    `mdat=${a.temMdat} frag=${a.fragmentado} faststart=${a.moovNaFrente} sobra=${a.sobra}` +
+    (a.problemas.length ? ` PROBLEMAS[${a.problemas.join("; ")}]` : "")
+  );
 }

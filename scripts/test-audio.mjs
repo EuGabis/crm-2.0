@@ -29,6 +29,8 @@ const {
   cabecalhoOpus,
   crcOgg,
   corrigirPreSkip,
+  analisarMp4,
+  retratoDoAudio,
 } = mod;
 
 /* ------------------------------------------------------------------ *
@@ -475,6 +477,118 @@ conferir("normaliza caixa", mimeSemParametros("AUDIO/OGG"), "audio/ogg");
     mimeParaUpload(pdf, "audio/ogg; codecs=opus", true),
     "audio/ogg",
   );
+}
+
+/* ================================================================== *
+ * 7. MP4 — a estrutura que o diagnóstico não conferia
+ *
+ * ⚠️ O retrato de um MP4 REAL (o que a Meta recusou) saía assim:
+ *   head[v=null ch=null preskip=null ...] ogg[pag=0 tags=false ...]
+ *   problemas[bytes fora de página; primeira página não é OpusHead; falta
+ *             OpusTags; nenhuma página de áudio; última página sem EOS]
+ * Cinco "problemas" que diziam apenas "isto não é um Ogg". O diagnóstico
+ * acusava um arquivo saudável e mandou a investigação para o lado errado.
+ * ================================================================== */
+
+console.log("  analisarMp4 — moov, mdat e faststart");
+
+/** Caixa MP4: 4 bytes de tamanho (big-endian) + 4 do tipo + carga. */
+function caixa(tipo, carga = new Uint8Array(0)) {
+  const total = 8 + carga.length;
+  const c = new Uint8Array(total);
+  c[0] = (total >>> 24) & 0xff;
+  c[1] = (total >>> 16) & 0xff;
+  c[2] = (total >>> 8) & 0xff;
+  c[3] = total & 0xff;
+  c.set([...tipo].map((x) => x.charCodeAt(0)), 4);
+  c.set(carga, 8);
+  return c;
+}
+
+const FTYP = caixa("ftyp", new Uint8Array([..."M4A mp42isom"].map((x) => x.charCodeAt(0))));
+
+{
+  // MP4 saudável, com faststart: moov ANTES do mdat.
+  const b = juntar(FTYP, caixa("moov", new Uint8Array(40)), caixa("mdat", new Uint8Array(200)));
+  const a = analisarMp4(b);
+  conferir("mp4 saudável: marca", a.marca, "M4A");
+  conferir("mp4 saudável: caixas", a.caixas, ["ftyp", "moov", "mdat"]);
+  verdade("mp4 saudável: tem moov", a.temMoov);
+  verdade("mp4 saudável: tem mdat", a.temMdat);
+  verdade("mp4 saudável: faststart", a.moovNaFrente);
+  conferir("mp4 saudável: sem problemas", a.problemas, []);
+  conferir("mp4 saudável: sem sobra", a.sobra, 0);
+}
+
+{
+  /*
+   * ⚠️ moov DEPOIS do mdat. É o que sai de quem grava em FLUXO (o índice só fica
+   * pronto no fim) e é a hipótese que casa com a queixa da Meta: quem processa
+   * lendo o começo do arquivo não acha o índice e cai em octet-stream. É o que o
+   * `-movflags +faststart` do ffmpeg conserta.
+   */
+  const b = juntar(FTYP, caixa("mdat", new Uint8Array(200)), caixa("moov", new Uint8Array(40)));
+  const a = analisarMp4(b);
+  verdade("moov no fim: tem as duas caixas", a.temMoov && a.temMdat);
+  verdade("moov no fim: faststart = false", a.moovNaFrente === false);
+  verdade(
+    "moov no fim: acusa a falta de faststart",
+    a.problemas.some((p) => /faststart/.test(p)),
+    `problemas: ${a.problemas}`,
+  );
+}
+
+{
+  // SEM moov: nenhum demuxer identifica o arquivo. É o pior caso.
+  const b = juntar(FTYP, caixa("mdat", new Uint8Array(200)));
+  const a = analisarMp4(b);
+  verdade("sem moov: acusa", a.problemas.some((p) => /moov/.test(p)), `${a.problemas}`);
+}
+
+{
+  // Fragmentado (fMP4) — o que o MediaRecorder do navegador emite.
+  const b = juntar(
+    FTYP,
+    caixa("moov", new Uint8Array(40)),
+    caixa("moof", new Uint8Array(30)),
+    caixa("mdat", new Uint8Array(200)),
+  );
+  const a = analisarMp4(b);
+  verdade("fMP4: marcado como fragmentado", a.fragmentado === true);
+  verdade("fMP4: tem moov", a.temMoov);
+}
+
+{
+  // Truncado: bytes fora de qualquer caixa.
+  const inteiro = new Uint8Array(
+    juntar(FTYP, caixa("moov", new Uint8Array(40)), caixa("mdat", new Uint8Array(200))),
+  );
+  const a = analisarMp4(inteiro.slice(0, inteiro.length - 50).buffer);
+  verdade("mp4 truncado: acusa sobra", a.sobra > 0 || a.problemas.length > 0, `${a.problemas}`);
+}
+
+/* ================================================================== *
+ * 8. O retrato segue o CONTÊINER — a regressão escrita como teste
+ * ================================================================== */
+
+console.log("  retratoDoAudio — análise do contêiner certo");
+
+{
+  const mp4 = juntar(FTYP, caixa("moov", new Uint8Array(40)), caixa("mdat", new Uint8Array(200)));
+  const r = retratoDoAudio(mp4);
+  verdade("mp4: retrato diz fmt=mp4", /fmt=mp4/.test(r), r);
+  verdade("mp4: retrato traz o bloco mp4[...]", /mp4\[/.test(r), r);
+  // ⚠️ A regressão: um MP4 saudável NÃO pode sair com problemas de Ogg.
+  verdade("mp4: NÃO fala de OpusHead", !/OpusHead/.test(r), r);
+  verdade("mp4: NÃO fala de OpusTags", !/OpusTags/.test(r), r);
+  verdade("mp4: NÃO traz bloco ogg[...]", !/ogg\[/.test(r), r);
+  verdade("mp4: sem lista de problemas", !/problemas\[/.test(r), r);
+}
+
+{
+  const r = retratoDoAudio(fluxoCompleto());
+  verdade("ogg: retrato traz head[...] e ogg[...]", /head\[/.test(r) && /ogg\[/.test(r), r);
+  verdade("ogg válido: sem lista de problemas", !/problemas\[/.test(r), r);
 }
 
 /* ------------------------------------------------------------------ *

@@ -14,6 +14,8 @@ import {
   mimeParaUpload,
   resumoDaInspecao,
   resumoDoOgg,
+  analisarMp4,
+  resumoDoMp4,
   retratoDoAudio,
   corrigirPreSkip,
 } from "@/lib/whatsapp/audio";
@@ -272,7 +274,11 @@ export async function POST(request: Request) {
         `declarado=${JSON.stringify(mime ?? blob.type)} enviado=${sendMime} ` +
         `commit=${(process.env.VERCEL_GIT_COMMIT_SHA ?? "local").slice(0, 7)}
 ` +
-        `[send-media] fluxo ogg: ${resumoDoOgg(analisarOgg(bytes))} ${notaPreSkip}`
+        `[send-media] estrutura: ${
+          insp.container === "mp4"
+            ? resumoDoMp4(analisarMp4(bytes))
+            : `${resumoDoOgg(analisarOgg(bytes))} ${notaPreSkip}`
+        }`
     );
     if (!insp.aceitavel) {
       return recusar(`${insp.motivo} (${resumoDaInspecao(insp)})`, 422);
