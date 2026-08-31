@@ -3513,3 +3513,62 @@ departamento do usuário") mexeu justamente nessa escolha, e o primeiro relato d
 áudio falhando é de 10:46. Documento indo pelo mesmo canal enfraquece a hipótese,
 mas o teste que discrimina é **gravar áudio numa conversa de OUTRO número**: se
 for, a limitação é daquele número na Meta; se não for, é da conta inteira.
+
+## Áudio, rodada 14: sobrou UMA anomalia — MP4 fragmentado
+
+Com o diagnóstico seguindo o contêiner certo, o retrato do arquivo real ficou
+legível — e restou uma única coisa fora do lugar:
+
+```
+[diag] bytes=61997 fmt=mp4
+       mp4[marca=isom caixas=ftyp/moov/moof/mdat moov=true mdat=true
+           frag=true faststart=true sobra=0]
+       via=upload fmt=audio/mp4
+       meta[bytes=61997/61997 mime=audio/mp4 hash=35457adaa7bf/35457adaa7bf IDENTICO]
+       canal[... nome=Backup Comercial pedido=cliente]
+```
+
+`moov` presente, **antes** do `mdat` (faststart), sem truncamento, e a Meta
+recebeu os bytes exatos. **`frag=true` é o que sobra.**
+
+⚠️ **O `MediaRecorder` do navegador emite fMP4 — MP4 FRAGMENTADO**, que é o
+desenho de streaming (MSE/DASH/HLS): o `moov` sai praticamente vazio, sem tabela
+de amostras, e as amostras moram nos fragmentos `moof`+`mdat`. Um analisador que
+lê o `moov` para identificar o arquivo encontra **zero amostras** e não consegue
+tipá-lo — que é literalmente a frase da Meta, "on processing it is of type
+application/octet-stream".
+
+E isso explica de uma vez o que enganou por rodadas: **navegador e Whisper tocam
+fMP4 sem reclamar** (é para isso que ele existe), e a própria Meta **serve** o
+arquivo de volta como `audio/mp4` — ela farejou o `ftyp` ao guardar. Só o
+processamento para mensagem de ÁUDIO recusa.
+
+⚠️ **Esta variante foi introduzida por MIM**, em 274e23b (27/08 12:34, "grava
+áudio em MP4/AAC"). Antes disso o caminho era Ogg/Opus — que também é recusado,
+com `pre-skip` corrigido e conferido. Dois codificadores, dois defeitos
+diferentes, o mesmo sintoma: é o que fez a investigação parecer circular.
+
+### ✅ O desvio funciona (confirmado em produção)
+
+"Enviar como arquivo" entrega o MESMO arquivo, no MESMO canal, pela MESMA rota,
+com o MESMO par upload+send. **Só o tipo `audio` é recusado** — o que exonera
+canal, número, token, permissão de mídia e transmissão de uma vez.
+
+### O teste que discrimina, e por que ele é aditivo
+
+Anexar áudio pelo clipe passou a ser aceito (`kind: "audio"`). ⚠️ **Não há
+regressão possível**: até aqui o clipe RECUSAVA qualquer arquivo de som ("Aceito
+imagem, vídeo, PDF ou DOCX"), então não existe comportamento anterior a quebrar.
+
+O que ele responde: um arquivo escolhido do computador é **progressivo**, o
+gravado é **fragmentado**. Se o anexado for aceito e o gravado não, a fragmentação
+está provada como causa e o conserto é remuxar (ou transcodificar). Se os dois
+forem recusados, a conta é que não envia áudio, e o caminho passa a ser o painel
+da Meta — não código. É a mesma bisseção que já funcionou aqui duas vezes (link ×
+upload, imagem × áudio).
+
+De saída prática, ele também permite gravar no celular e anexar.
+
+⚠️ Os toasts do anexo passaram a dizer **"no inbox"**, não "enviada": gravar no
+CRM não é entregar ao cliente, e dizer "enviado" antes de tentar a entrega já foi
+um defeito real aqui.
