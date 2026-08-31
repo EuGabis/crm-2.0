@@ -7,6 +7,20 @@
 import { buildBodyComponents } from "./templates";
 
 const VERSION = process.env.WHATSAPP_GRAPH_VERSION || "v21.0";
+
+/**
+ * Versão da Graph API que ESTÁ em uso, para diagnóstico.
+ *
+ * ⚠️ Não é segredo — ela aparece no caminho da URL de toda chamada à Meta. E era
+ * a última variável do lado do CRM que a investigação do áudio recusado nunca
+ * conseguiu MEDIR: `v21.0` é o padrão do código, mas a Vercel pode ter outro
+ * valor em `WHATSAPP_GRAPH_VERSION`, e as duas situações eram indistinguíveis
+ * sem abrir o painel. Este projeto já perdeu rodadas inteiras por deduzir o que
+ * dava para conferir em dois segundos.
+ */
+export function graphVersion(): string {
+  return VERSION;
+}
 const BASE = `https://graph.facebook.com/${VERSION}`;
 
 function token(): string {

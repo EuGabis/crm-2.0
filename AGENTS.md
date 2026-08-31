@@ -3271,3 +3271,62 @@ os módulos ainda não migrados continuam importando dos repos mock em
 - ⏳ Próximo: Automações reais (Edge Functions) tarefas 5–8, Agentes de IA.
 - ⏳ Backlog: personalizar template/remetente dos e-mails de auth do Supabase
   (pedido do Gabriel), storage (Mídia Drive/arquivos), dark mode, mobile.
+
+## Áudio: a rede de testes que faltava (`npm run test:audio`)
+
+Doze rodadas de investigação produziram `src/lib/whatsapp/audio.ts` — inspeção de
+contêiner por bytes, análise de fluxo Ogg pela RFC 7845, CRC-32, correção do
+`pre-skip` — e **nenhum teste comitado**. As verificações de cada rodada foram
+feitas em scripts descartáveis, jogados fora depois de responderem à pergunta do
+dia. Ou seja: a peça mais depurada do repositório era a única sem rede contra
+regressão, e uma refatoração futura quebraria em silêncio — o sintoma apareceria
+como "Não foi entregue" no balão de um atendente, dias depois.
+
+`scripts/test-audio.mjs` (58 asserções) roda direto no Node 24, que executa
+TypeScript nativamente — sem runner de teste, sem dependência nova.
+
+⚠️ **O CRC é calculado no teste por uma SEGUNDA implementação, com tabela.**
+Testar `crcOgg` contra si mesma não provaria nada. A do módulo é bit a bit,
+direto da especificação; a do teste é pré-calculada por tabela. Duas derivações
+independentes que concordam é evidência — e é a mesma lógica da autovalidação de
+`corrigirPreSkip`, que só reescreve a página quando o CRC confere com o do
+codificador. O vetor `crc("123456789") = 0x89a1897f` amarra as duas na
+especificação, e a ausência de reflexão (que separa o CRC do Ogg do CRC-32 de
+zip/PNG) é justamente o erro que uma tabela copiada de outro lugar esconderia.
+
+⚠️ **Os fluxos Ogg são MONTADOS página por página no teste**, com tabela de
+segmentos e CRC de verdade, em vez de um `.ogg` binário comitado. Arquivo binário
+no repositório ninguém sabe regerar quando o caso muda — e cada caso aqui é uma
+variação de UM byte (canais, `pre-skip`) ou de uma página inteira (sem OpusTags,
+sem EOS).
+
+O que os casos cobrem, e por que cada um existe:
+- **sem OpusTags** e **sem EOS** — obrigatórios pela RFC; navegador e Whisper
+  toleram a falta, demuxer estrito não. Foi o que fez "o áudio toca, então está
+  bom" enganar por seis rodadas.
+- **`pre-skip = 0` → 312 com o CRC de todas as páginas conferindo** (5/5, pela
+  implementação de tabela), e o fluxo seguindo válido depois da reescrita. Mudar
+  a carga sem refazer o CRC trocaria um arquivo que o navegador aceita por um que
+  NADA aceita.
+- **CRC corrompido → RECUSA corrigir.** É a autovalidação, escrita como teste.
+- **ogg sem OpusHead → `canais = null`, e reprova.** `null` lido como "está mono"
+  foi um furo real: um WebM ou WAV (o que sai quando o codificador Opus não
+  carrega) passava calado, e eu li "sem aviso" como "está mono".
+- **ogg + `application/octet-stream` → declara `audio/ogg`.** O furo que o teste
+  pegou na primeira versão de `mimeParaUpload`: um OGG legítimo cujo mime se
+  perdeu no caminho era enviado COMO octet-stream — a divergência exata que a
+  Meta recusa.
+- **pdf → mantém o declarado.** Assinatura não conclusiva não vira palpite: um
+  chute nosso por cima de um mime correto trocaria um erro por outro.
+
+### `graph` no `GET /api/whatsapp/send-media`
+
+A versão da Graph API em USO passou a sair no endpoint de versão. Era **a última
+variável do lado do CRM que a investigação nunca conseguiu MEDIR**: `v21.0` é o
+padrão do código (e é de 2024), mas a Vercel pode ter outro valor em
+`WHATSAPP_GRAPH_VERSION` — e "o padrão do código" e "o que está configurado" eram
+indistinguíveis sem abrir o painel. Não é segredo: vai no caminho da URL de toda
+chamada à Meta.
+
+⚠️ Mesma lição da rodada 6, agora aplicada antes de custar: **o que dá para
+medir não se deduz.**
