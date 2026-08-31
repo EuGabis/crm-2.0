@@ -6,6 +6,7 @@ import {
   sendMediaMessage,
   getMediaInfo,
   downloadMedia,
+  graphVersion,
 } from "@/lib/whatsapp/client";
 import {
   analisarOgg,
@@ -89,6 +90,14 @@ export async function GET() {
   return Response.json({
     rota: "whatsapp/send-media",
     commit: (process.env.VERCEL_GIT_COMMIT_SHA ?? "local").slice(0, 7),
+    /*
+     * ⚠️ A versão da Graph API em USO, não a do código. Era a última variável do
+     * lado do CRM que a investigação do áudio nunca mediu: `v21.0` é de 2024, a
+     * Cloud API já vai muito além, e "o padrão do código" e "o que a Vercel
+     * definiu" eram indistinguíveis sem abrir o painel. Não é segredo — vai no
+     * caminho da URL de toda chamada à Meta.
+     */
+    graph: graphVersion(),
     correcoes: {
       /** Mime enviado à Meta sem `; codecs=...` (limpo na rota E em uploadMedia). */
       audioMimeSemParametro: true,
