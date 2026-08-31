@@ -211,7 +211,14 @@ function quoteSnippet(m: Message): string {
 function textoDeFalha(m: Message): string {
   const d = m.errorDetail ?? "";
   if (m.type === "audio" && (/131053/.test(d) || /media upload error/i.test(d))) {
-    return "Não foi possível enviar o áudio por este número (limitação da conta na Meta). Envie por texto ou use outro canal.";
+    /*
+     * ⚠️ A frase anterior mandava "envie por texto ou use outro canal" — e logo
+     * ABAIXO dela fica o botão "Enviar como arquivo", que está CONFIRMADO
+     * funcionando com o mesmo arquivo, no mesmo número. A orientação contradizia
+     * a única saída que entrega, e quem lê o aviso primeiro desiste antes de ver
+     * o botão.
+     */
+    return "A Meta recusou o áudio neste número. Use o botão abaixo para entregar o mesmo áudio como arquivo.";
   }
   // Demais erros: só a 1ª frase, sem a cauda de diagnóstico.
   const limpo = d.split("·")[0].split("[diag]")[0].trim();
