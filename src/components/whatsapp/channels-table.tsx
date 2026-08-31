@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { MessageCircle, Pencil } from "lucide-react";
+import { MessageCircle, Pencil, Star } from "lucide-react";
+import { toast } from "sonner";
 import { useWhatsappChannels, whatsappActions } from "@/lib/data/repos/db/whatsapp";
 import { EmptyState } from "@/components/shared/empty-state";
 import { EditChannelDialog } from "./edit-channel-dialog";
@@ -32,7 +33,7 @@ export function ChannelsTable() {
       <table className="w-full text-xs">
         <thead className="border-b bg-slate-50 text-left text-slate-500">
           <tr>
-            {["Canal", "Nome na Meta", "Número", "Status", "Setor", "Limite diário", "Bot", "Coexistência", "Criado em", "Ações"].map(
+            {["Canal", "Nome na Meta", "Número", "Status", "Principal", "Setor", "Limite diário", "Bot", "Coexistência", "Criado em", "Ações"].map(
               (h) => (
                 <th key={h} className="whitespace-nowrap px-3 py-2 font-semibold">
                   {h}
@@ -57,6 +58,40 @@ export function ChannelsTable() {
                   }
                 >
                   {c.active ? "Ativo" : "Inativo"}
+                </button>
+              </td>
+              {/*
+                ⚠️ O principal é o número usado ao ABRIR conversa nova. Antes o
+                critério era "o canal ativo mais antigo", que não é critério
+                nenhum: bastava o backup ter sido cadastrado antes para toda
+                conversa sair por ele. Não mexe em conversa que já existe — essa
+                pertence ao número que o cliente procurou.
+              */}
+              <td className="px-3 py-2">
+                <button
+                  onClick={async () => {
+                    if (c.principal) {
+                      toast.info("Este já é o número principal. Marque outro para trocar.");
+                      return;
+                    }
+                    const r = await whatsappActions.setPrincipal(c.id);
+                    toast[r.ok ? "success" : "error"](
+                      r.ok ? `"${c.name}" é o número principal` : r.error ?? "Não foi possível"
+                    );
+                  }}
+                  title={
+                    c.principal
+                      ? "Número principal: usado ao abrir conversa nova"
+                      : "Tornar este o número principal"
+                  }
+                  className={
+                    c.principal
+                      ? "inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
+                      : "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold text-slate-400 hover:bg-slate-100"
+                  }
+                >
+                  <Star className={c.principal ? "size-3 fill-current" : "size-3"} />
+                  {c.principal ? "Principal" : "Definir"}
                 </button>
               </td>
               <td className="px-3 py-2 text-slate-600">{c.sector || "—"}</td>

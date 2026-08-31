@@ -3598,3 +3598,70 @@ isso descreve uma conta que não envia mensagem de ÁUDIO, não um arquivo ruim.
 GRAVAÇÕES (`frag=true` no retrato prova: o clipe produz arquivo progressivo, o
 microfone produz fragmentado). Enquanto for gravação, o teste não responde nada —
 e `frag=true`/`frag=false` no diagnóstico é como saber qual dos dois foi.
+
+## 🔴 VEREDITO do áudio: é a WABA, não o CRM (2026-08-31)
+
+Três números diferentes, **a mesma WABA `1826165525416327`**, a mesma recusa:
+
+| canal | phone_number_id | áudio | documento |
+|---|---|---|---|
+| Backup Comercial | 1273256012539104 | ❌ #131053 | ✅ |
+| Backup Secretaria | 1272264769300017 | ❌ #131053 | ✅ |
+| **Secretaria Principal** | 1292488653952451 | ❌ #131053 | ✅ |
+
+⚠️ **Um problema de NÚMERO não se repete idêntico em três `pnid` distintos.** Some
+isso ao que já estava provado por medida e a investigação fecha:
+
+| eixo | prova |
+|---|---|
+| arquivo | válido byte a byte em DOIS formatos — Ogg/Opus pela RFC 7845 (mono, pre-skip 312, OpusTags, EOS, CRC de todas as páginas) e MP4/AAC |
+| transmissão | round-trip: baixado de volta da Meta com hash IDÊNTICO |
+| caminho | falha igual por upload multipart E por link assinado |
+| número | **três** números da mesma WABA, falha igual |
+| tipo | documento e imagem passam pelos MESMOS números |
+| versão | Graph v25.0 |
+
+**A WABA não envia mensagem de ÁUDIO.** O caminho é chamado no suporte da Meta —
+não código. Levar: o `#131053`, os três `pnid`, e o fato de documento passar.
+
+⚠️ **A hipótese do fMP4 (rodada 14) está MORTA.** Ela já era fraca — um Ogg
+comprovadamente válido também tinha sido recusado — e o terceiro número enterrou:
+remuxar o fragmentado para progressivo teria sido trabalho perdido. Fica a lição:
+quando duas hipóteses independentes sobre o mesmo componente falham, o componente
+está certo; a terceira hipótese sobre ele também vai falhar.
+
+**Saída em produção:** "Enviar como arquivo" entrega o mesmo áudio como documento,
+confirmado nos três números. O aviso do balão aponta para ele.
+
+## Canal PRINCIPAL (migração 202608312055)
+
+Achado ENQUANTO se investigava o áudio, e é defeito independente dele: as
+conversas saíam por "Backup Comercial" e "Backup Secretaria" **com o número
+principal de Secretaria cadastrado**.
+
+⚠️ **A causa é um critério arbitrário.** `conversationActions.open()` escolhia,
+entre os canais do departamento, o **ativo mais antigo** (`created_at asc`) — não
+existia nenhuma noção de "qual é o principal". Bastava o backup ter sido
+cadastrado primeiro para toda conversa nova nascer nele. E número de backup é,
+por definição, o que só deveria entrar quando o principal não serve.
+
+Isso é errado independente do áudio: o cliente passa a ver um número que não é o
+divulgado, responde nele, e a conversa fica presa lá.
+
+- `whatsapp_channels.principal` + **índice único PARCIAL** por empresa
+  (`where principal`): um principal por empresa garantido pelo BANCO. Sem ele,
+  dois cliques simultâneos deixariam dois, e `open()` voltaria a desempatar por
+  data — o defeito de origem.
+- `public.definir_canal_principal(uuid)` promove e rebaixa **na mesma
+  transação**. Em dois `update` do cliente, uma falha no meio deixa a empresa SEM
+  principal, e o índice único faria a segunda escrita estourar se a ordem se
+  invertesse. Checagem de empresa na primeira linha (padrão 0049) + admin-only:
+  definir o número que fala com o cliente é decisão de administrador. Com o par
+  `revoke`/`grant`.
+- `created_at` continua como DESEMPATE — quem nunca marcou principal precisa de
+  uma ordem definida.
+- ⚠️ **NÃO mexe em conversa existente.** `conversations.channel_id` de conversa
+  vinda de mensagem do cliente é o número que ELE procurou; reescrever faria a
+  resposta sair por um número diferente do que ele conhece — exatamente o defeito
+  que isto corrige.
+- Coluna "Principal" na tabela de `/whatsapp`, com estrela.
