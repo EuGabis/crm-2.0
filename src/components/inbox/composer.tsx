@@ -894,7 +894,7 @@ export function Composer({ conversationId }: { conversationId: string }) {
               audioLiberado
                 ? startRec()
                 : toast.info(
-                    "Envio de áudio está temporariamente indisponível (limitação da conta na Meta). Use texto ou outro canal."
+                    "Gravação de áudio indisponível (a Meta recusa áudio nesta conta). Você pode anexar um arquivo de áudio pelo clipe."
                   )
             }
             disabled={uploading}

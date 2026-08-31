@@ -3572,3 +3572,29 @@ De saída prática, ele também permite gravar no celular e anexar.
 ⚠️ Os toasts do anexo passaram a dizer **"no inbox"**, não "enviada": gravar no
 CRM não é entregar ao cliente, e dizer "enviado" antes de tentar a entrega já foi
 um defeito real aqui.
+
+## Áudio, rodada 15: o aviso contradizia a saída que funciona
+
+A faixa do balão dizia *"Envie por texto ou use outro canal"* — e logo ABAIXO
+dela ficava o botão **"Enviar como arquivo"**, confirmado entregando o mesmo
+arquivo, no mesmo número. Quem lê o aviso primeiro desiste antes de ver o botão.
+Agora a frase aponta para ele. O mesmo valia para o `toast` do microfone
+desligado, que mandava "usar outro canal" quando o clipe já aceita arquivo de som.
+
+### ⚠️ Correção da minha própria leitura: fMP4 é hipótese FRACA
+
+A rodada 14 apontou `frag=true` como "a única anomalia" e tratou isso como quase
+conclusão. **A evidência mais forte é contra**, e ela já estava documentada aqui:
+o Ogg/Opus com `pre-skip` corrigido — mono, 312, OpusTags, EOS, `crc=8/8`, sem
+truncamento, ou seja **válido por toda medida da RFC 7845** — foi recusado com o
+MESMO #131053.
+
+Se um Ogg comprovadamente correto é recusado, o formato provavelmente não é a
+causa, e remuxar o fMP4 seria trabalho perdido. Dois formatos independentes,
+ambos válidos, ambos recusados, enquanto **documento passa pelo mesmo número**:
+isso descreve uma conta que não envia mensagem de ÁUDIO, não um arquivo ruim.
+
+⚠️ **A bisseção do anexo ainda NÃO foi feita.** As duas últimas tentativas foram
+GRAVAÇÕES (`frag=true` no retrato prova: o clipe produz arquivo progressivo, o
+microfone produz fragmentado). Enquanto for gravação, o teste não responde nada —
+e `frag=true`/`frag=false` no diagnóstico é como saber qual dos dois foi.
