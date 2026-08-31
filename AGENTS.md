@@ -3330,3 +3330,54 @@ chamada à Meta.
 
 ⚠️ Mesma lição da rodada 6, agora aplicada antes de custar: **o que dá para
 medir não se deduz.**
+
+## `GET /api/whatsapp/diagnostico` — o que a META diz sobre o nosso número
+
+⚠️ **Graph v25.0 mata a última hipótese do lado do CRM.** Consultado em produção
+(`GET /api/whatsapp/send-media` → `{"commit":"185cf3b","graph":"v25.0"}`), o
+número já roda numa versão recente da API, e o áudio continua sendo recusado.
+Com isso, tudo que é NOSSO está exonerado **por medida, não por argumento**:
+
+| eixo | como foi provado |
+|---|---|
+| o arquivo | Ogg/Opus mono, pre-skip 312, OpusTags, EOS, CRC de todas as páginas — e também MP4/AAC, formato de primeira classe da Cloud API |
+| a transmissão | round-trip: baixado de volta da Meta com hash IDÊNTICO ao enviado |
+| o caminho | falha igual por upload multipart E por link assinado |
+| a rota | IMAGEM vai pelo MESMO canal, MESMA rota, MESMO par upload+send |
+| a versão da API | v25.0 |
+
+O que sobrou por perguntar é o **estado da conta** — e sobrou exatamente porque a
+resposta mora no painel da Meta, onde eu não alcanço e onde ninguém sabe qual
+campo olhar. Esta rota pergunta à API dela.
+
+⚠️ **`platform_type` é o campo que interessa, e `getNumberInfo` nunca o pediu.**
+Ele revela se o número está em **coexistência** — o modo em que o mesmo número
+serve o aplicativo WhatsApp Business E a Cloud API ao mesmo tempo. É a única
+hipótese que casa com a evidência que nunca teve explicação: **"pelo celular o
+áudio é enviado normalmente"**. Um número 100% migrado para a Cloud API **não
+funciona no aplicativo**; se ele funciona nos dois, está em coexistência — e aí
+as limitações de mídia são da conta, não do arquivo.
+
+`numberDiagnostics` pede ainda `status`, `throughput`, `messaging_limit_tier`,
+`name_status`, `is_official_business_account`; `wabaDiagnostics` pede
+`account_review_status` e `business_verification_status` (revisão pendente ou
+negócio não verificado limita a conta e **não aparece como erro na chamada de
+envio**, só como recusa genérica depois).
+
+- **Admin-only** e o token nunca é devolvido. O estado da conta não é segredo,
+  mas também não é assunto de todo atendente.
+- ⚠️ **Best-effort por canal E por bloco.** Conta com problema é justamente a que
+  faz a chamada falhar; se um erro derrubasse a resposta, a rota ficaria muda no
+  único caso que ela existe para diagnosticar. Aqui **o erro é dado**, não
+  exceção — vem no JSON, por canal.
+- A rota devolve uma `leitura` em português, para não exigir de quem a abre o
+  vocabulário da Meta. **Campo ausente é informação**: "a conta não devolveu
+  `platform_type`" é diferente de "`platform_type = CLOUD_API`", e tratar os dois
+  como iguais é o erro que custou rodadas nesta investigação (ler `null` como
+  "está mono").
+- `ehCoexistencia` casa por SUBSTRING e não por lista fechada: valor novo da Meta
+  deve ser sinalizado, não ignorado em silêncio.
+
+**Como usar:** logado como admin, abrir
+`https://lito-crm.vercel.app/api/whatsapp/diagnostico` (ou
+`?channelId=<id>` para um número só).

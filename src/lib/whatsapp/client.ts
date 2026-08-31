@@ -143,6 +143,55 @@ export async function deleteTemplate(wabaId: string, name: string): Promise<void
   });
 }
 
+/**
+ * Estado COMPLETO do número, para diagnóstico.
+ *
+ * ⚠️ Difere de `getNumberInfo` justamente nos campos que a investigação do áudio
+ * precisava e nunca pediu:
+ *   - **`platform_type`** — revela COEXISTÊNCIA (número servindo o aplicativo
+ *     WhatsApp Business E a Cloud API ao mesmo tempo). É a única hipótese que
+ *     explica "pelo celular o áudio é enviado normalmente": um número 100%
+ *     migrado para a Cloud API não funciona no aplicativo;
+ *   - `status` — CONNECTED ou não;
+ *   - `throughput`, `messaging_limit_tier` — capacidade;
+ *   - `is_official_business_account`, `name_status`.
+ *
+ * Campos que a conta não expõe simplesmente não vêm no JSON — e a AUSÊNCIA é
+ * dado, não erro.
+ */
+export function numberDiagnostics(phoneNumberId: string) {
+  const campos = [
+    "verified_name",
+    "display_phone_number",
+    "quality_rating",
+    "code_verification_status",
+    "platform_type",
+    "status",
+    "throughput",
+    "messaging_limit_tier",
+    "is_official_business_account",
+    "name_status",
+  ].join(",");
+  return graph(`${phoneNumberId}?fields=${campos}`, { method: "GET" });
+}
+
+/**
+ * Estado da conta (WABA). Revisão pendente ou negócio não verificado limita o que
+ * a conta pode fazer — e é o tipo de coisa que não aparece como erro na chamada
+ * de envio, só como recusa genérica depois.
+ */
+export function wabaDiagnostics(wabaId: string) {
+  const campos = [
+    "name",
+    "account_review_status",
+    "business_verification_status",
+    "country",
+    "ownership_type",
+    "message_template_namespace",
+  ].join(",");
+  return graph(`${wabaId}?fields=${campos}`, { method: "GET" });
+}
+
 export function getNumberInfo(phoneNumberId: string) {
   return graph(
     `${phoneNumberId}?fields=verified_name,quality_rating,display_phone_number,code_verification_status`,
