@@ -3889,3 +3889,62 @@ criado" sem ter criado. Ao trocar um retorno booleano por objeto, procure os
 ⏳ Ainda existem **8 `window.prompt`/`alert`** e outros pontos que devolvem
 `boolean` cego para a UI. O padrão que este caso ensina: quando há mais de um
 motivo de falha e eles pedem condutas diferentes, o retorno tem de dizer QUAL.
+
+## 🔴 O código vai ao ar ANTES da migração — e isso quebrou o envio (2026-09-01)
+
+Relato: a secretaria não consegue enviar num atendimento ativo; a tela diz
+**"Cadastre um canal de WhatsApp em Canais de atendimento para enviar"** — numa
+empresa que tem TRÊS canais cadastrados e ativos.
+
+**Causa: regressão minha, do PR do canal principal.** O `open()` passou a ordenar
+por `whatsapp_channels.principal`; o código foi mesclado e a Vercel publicou no
+merge, mas a **migração `202608312055` é aplicada À MÃO e ainda não tinha sido**.
+Nessa janela o PostgREST recusa a consulta inteira por causa da coluna
+inexistente, `escolherCanal` devolve nada, e o `open()` criava a conversa com
+`channel_id` **NULO** — uma conversa incapaz de enviar.
+
+Conferido no banco: **2 conversas** nesse estado, ambas de hoje (13:18 e 15:53
+BRT), ambas sem nenhuma mensagem do cliente — as duas criadas pelo CRM depois do
+deploy. Nenhuma conversa vinda de mensagem de cliente foi afetada (o webhook
+resolve o canal pelo `phone_number_id` do payload).
+
+### ⚠️ A regra geral que sai daqui
+
+**Neste projeto o código chega à produção ANTES da migração**, sempre: o deploy é
+automático no merge e a migração é um passo manual. Então **toda consulta que
+depende de coluna nova precisa sobreviver à ausência dela.** `escolherCanal`
+agora tenta com `principal` e, se a consulta falhar, **refaz sem** — em vez de
+devolver nada.
+
+Isso vale para qualquer PR futuro que leia coluna nova. Não é zelo: é a ordem
+real dos eventos aqui.
+
+### As outras três correções do mesmo incidente
+
+- ⚠️ **`open()` não cria mais conversa de WhatsApp SEM canal.** Criá-la em
+  silêncio transforma uma falha de configuração (ou uma migração atrasada) num
+  objeto quebrado que alguém descobre ao tentar atender. Devolve `null`, que o
+  chamador já sabe tratar.
+- ⚠️ **`conversationActions.ensureChannel` cura as que já nasceram assim.** Só
+  age quando `channel_id` é NULO — reescrever o canal de uma conversa que já tem
+  um trocaria o número que o cliente conhece, que é o defeito que a seção do
+  canal principal existe para evitar. Confere as LINHAS devolvidas, não o `error`
+  (UPDATE recusado pela RLS volta calado). Sem isso, a única saída para as duas
+  conversas seria excluir e recriar, perdendo o que já foi escrito.
+- ⚠️ **A mensagem culpava a configuração por um defeito nosso.** Agora o composer
+  TENTA escolher o número antes de desistir, e só reclama quando realmente não há
+  nenhum disponível para o setor — aí a frase é verdadeira.
+
+### E um defeito antigo que apareceu no caminho
+
+`open()` lia o próprio departamento assim:
+
+```ts
+.from("location_members").select("department_id").eq("location_id", location).maybeSingle()
+```
+
+**Sem `.eq("user_id", ...)`.** A policy de leitura de `location_members` é por
+EMPRESA ("ver equipe da location"), então vinham TODAS as pessoas,
+`maybeSingle()` reclamava de várias linhas e o departamento saía nulo — virando
+"sem restrição de canal" em silêncio. Com uma pessoa só na empresa funcionava;
+com equipe, não. Corrigido com o filtro por `auth.uid()`.

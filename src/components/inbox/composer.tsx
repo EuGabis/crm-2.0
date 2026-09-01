@@ -532,9 +532,25 @@ export function Composer({ conversationId }: { conversationId: string }) {
       await uploadFile(file, caption);
       return;
     }
+    /*
+     * ⚠️ Conversa de WhatsApp sem número: a versão anterior BLOQUEAVA aqui com
+     * "Cadastre um canal de WhatsApp em Canais de atendimento" — numa empresa
+     * que tinha três canais cadastrados. A mensagem culpava a configuração por
+     * um defeito nosso: em 01/09/2026 o código que ordena por `principal` foi ao
+     * ar antes da migração da coluna, a escolha de canal falhou e `open()` criou
+     * a conversa com o campo nulo.
+     *
+     * Agora tenta ESCOLHER o número antes de desistir, e só reclama quando
+     * realmente não há nenhum disponível — aí a mensagem é verdadeira.
+     */
     if (conversation?.channel === "whatsapp" && !conversation?.channelId && !internal && !scheduledFor) {
-      toast.error("Cadastre um canal de WhatsApp em Canais de atendimento para enviar.");
-      return;
+      const canal = await conversationActions.ensureChannel(conversationId);
+      if (!canal) {
+        toast.error(
+          "Esta conversa não tem número de WhatsApp associado, e não encontrei um disponível para o seu setor. Fale com um administrador."
+        );
+        return;
+      }
     }
     // WhatsApp real: envia pela Cloud API. Envio OTIMISTA — a mensagem aparece na
     // hora (não espera o round-trip); ao voltar, troca pela real (ou desfaz).
