@@ -3773,3 +3773,57 @@ fez uma PERGUNTA em vez de responder — mudança grande, não tentada aqui.
 `owner_id` (de atendente) para mandar o cliente direto a quem já o atendia, uma
 transferência passa a definir esse caminho. É provavelmente a intenção, mas não
 está escrito em lugar nenhum — vale confirmar com o Gabriel antes de mexer.
+
+## Template parou de sair: #131042 é a COBRANÇA DA NOSSA CONTA (2026-09-01)
+
+Erro no balão: *"Message failed to send because there were one or more errors
+related to your payment method · Business eligibility payment issue · #131042"*.
+
+Medido no banco, o padrão é decisivo:
+
+| dia | templates | falharam | por #131042 | entregues |
+|---|---|---|---|---|
+| 31/08 | 46 | 0 | 0 | 46 |
+| **01/09** | **12** | **12** | **11** | **0** |
+
+Primeira falha: **01/09 13:12 UTC (10:12 BRT)**. E no mesmo dia, **406 mensagens
+NORMAIS entregues** contra 3 falhas.
+
+⚠️ **É esse contraste que identifica a causa:** template é mensagem **PAGA**;
+resposta dentro da janela de 24h é **gratuita** desde 2024. Problema de cobrança
+derruba só as pagas — 100% dos templates, nenhuma das respostas. Não é código, e
+não é o número (a falha é da WABA).
+
+**Impacto de negócio:** sem template, não há como iniciar conversa nem reabrir
+contato fora da janela de 24h. Atendimento em curso continua normal.
+
+**Onde resolve:** Meta Business Manager → Configurações de cobrança da WABA
+(meio de pagamento recusado, cartão vencido ou limite). Só administrador da conta
+na Meta faz isso; o CRM não tem o que ajustar.
+
+### ⚠️ A tradução no balão evita um mal-entendido caro
+
+O texto que a Meta manda diz "your payment method". Lido dentro da conversa de um
+aluno, numa escola que vende curso PARCELADO, o atendente conclui que o **cartão
+do aluno** falhou e vai falar disso com ele. É pior do que erro técnico sem
+tradução: manda a pessoa dar informação errada ao cliente.
+
+`textoDeFalha` agora diz, em pt-BR: é a cobrança **da empresa**, não do cliente;
+nenhum template sai até resolver no painel; avise um administrador; e resposta
+dentro da janela de 24h continua funcionando — porque a última frase é o que
+evita o atendente achar que perdeu o contato.
+
+⏳ **Não implementado: aviso ativo para o admin.** Hoje isto foi descoberto por um
+atendente notando um balão vermelho — uma interrupção total de template ficou ~3h
+sem ninguém saber. `payment_new_sales` e "mensagem agendada que falhou" já são
+fontes do sino (a Central deriva do banco, sem tabela própria); template falhando
+por #131042 cabe no mesmo padrão e seria a próxima fonte a acrescentar.
+
+Consulta para conferir o estado:
+```sql
+select date_trunc('day', created_at)::date as dia, count(*) as templates,
+       count(*) filter (where status='failed') as falharam,
+       count(*) filter (where error_detail ilike '%131042%') as por_pagamento
+  from public.messages where template_name is not null
+   and created_at > now() - interval '7 days' group by 1 order by 1 desc;
+```

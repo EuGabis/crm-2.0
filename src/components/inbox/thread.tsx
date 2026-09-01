@@ -220,6 +220,29 @@ function textoDeFalha(m: Message): string {
      */
     return "A Meta recusou o áudio neste número. Use o botão abaixo para entregar o mesmo áudio como arquivo.";
   }
+  /*
+   * ⚠️ **#131042 é a COBRANÇA DA NOSSA CONTA na Meta, não o pagamento do
+   * cliente** — e o texto que a Meta manda ("errors related to your payment
+   * method") lido no balão de uma conversa faz exatamente a leitura errada.
+   *
+   * Numa escola que vende curso parcelado, o atendente que lê "payment method"
+   * dentro da conversa de um aluno conclui que o CARTÃO DO ALUNO falhou e vai
+   * falar disso com ele. É pior do que um erro técnico sem tradução: manda a
+   * pessoa dar uma informação errada ao cliente.
+   *
+   * Medido em 01/09/2026: começou às 10:12 (BRT); no mesmo dia, 12 de 12
+   * templates falharam e 406 mensagens normais foram entregues. Template é
+   * mensagem PAGA e resposta dentro da janela de 24h é gratuita — por isso a
+   * falha atinge só os templates. Não há nada que o atendente possa fazer, e
+   * dizer isso é parte da mensagem.
+   */
+  if (/131042/.test(d) || /business eligibility payment/i.test(d)) {
+    return (
+      "Não foi entregue: a cobrança da conta do WhatsApp (da empresa, não do cliente) " +
+      "está com problema na Meta. Nenhum template sai até isso ser resolvido no painel — " +
+      "avise um administrador. Resposta dentro da janela de 24h continua funcionando."
+    );
+  }
   // Demais erros: só a 1ª frase, sem a cauda de diagnóstico.
   const limpo = d.split("·")[0].split("[diag]")[0].trim();
   return limpo ? `Não foi entregue: ${limpo}` : "Não foi entregue.";
