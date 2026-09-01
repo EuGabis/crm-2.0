@@ -65,6 +65,11 @@ export const triagemFlow: BotFlow = {
       type: "ask",
       text: "Digite seu e-mail cadastrado na plataforma:",
       var: "email",
+      // ⚠️ Sem `validate` a resposta ia crua para o campo, e a pergunta do
+      // cliente virava o e-mail do lead. O fluxo VIVO mora em `bot_flows`
+      // (banco) — a migração 202609011* põe o mesmo `validate` lá; aqui é o
+      // padrão em código, usado quando o banco não tem o fluxo.
+      validate: "email",
       next: "salva_email",
     },
     salva_email: {

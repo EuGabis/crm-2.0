@@ -3665,3 +3665,111 @@ divulgado, responde nele, e a conversa fica presa lá.
   resposta sair por um número diferente do que ele conhece — exatamente o defeito
   que isto corrige.
 - Coluna "Principal" na tabela de `/whatsapp`, com estrela.
+
+## "Contato caindo na caixa sem passar pelo bot" — a resposta, medida (2026-09-01)
+
+⚠️ **Consultado o banco de PRODUÇÃO por MCP** (`execute_sql`, projeto
+`boykcuhxmndlkjhojxhl`). Várias afirmações deste arquivo dizem que não há como
+conferir contra o Postgres ("falta `DATABASE_URL`"); com o conector MCP, há.
+
+O relato tinha **três causas diferentes** misturadas, e nenhuma era a suspeita:
+
+**1. A maioria não é o bot sendo pulado — é conversa aberta PELO CRM.** Sete
+dias: 40 das 57 conversas "sem bot" na caixa da Cibelle Paiva **não têm nenhuma
+mensagem do cliente**. Foram abertas por "Nova conversa"/"Abrir conversa". O bot
+só roda em mensagem que ENTRA, então ali não há o que triar — é o desenho.
+
+**2. O defeito de verdade já estava corrigido.** Os 17 casos de "cliente escreveu
+e o bot ficou calado" são TODOS de 25–27/08, antes da correção do
+`contacts.owner_id`. Depois de 28/08: **33 conversas de cliente em números com
+bot, e o bot falou em 33.** Zero casos.
+
+**3. O caso relatado (contato Marcilio Mattos, 31/08) era a atendente
+assumindo.** O gatilho da 202608281530 respondeu: `Atribuída a Jenifer Martins ·
+Jenifer Martins · motivo não informado`, às 18:57:04 — 6 segundos antes da
+primeira resposta dela. O contato tem `owner_id` NULO e o canal TEM bot, então os
+dois caminhos automáticos estão descartados.
+
+⚠️ **E o fio explica por que ela assumiu**: o cliente pediu três coisas sobre
+pagamento (problema no pagamento, gerar PIX, quantas parcelas pagou) e o bot
+respondeu pedindo nome, e-mail e curso. O bot não estava atendendo — ela entrou.
+
+### Migração 202609011300 — motivo em toda atribuição
+
+**29 atribuições por pessoa em 7 dias saíam como "motivo não informado"**: os
+caminhos em TypeScript foram instrumentados na 202608281530, as funções SQL não.
+Foi essa lacuna que obrigou a ler a conversa inteira para responder o caso acima.
+
+Cinco funções mudam `assigned_to` e nenhuma gravava motivo — `claim_conversation`
+("assumida da fila"), `assign_conversation_to_self` ("assumida ao responder"),
+`take_over_conversation` ("supervisão assumiu"), `transfer_conversation`
+("transferida" / "devolvida à fila", que precisam ser distintos) e
+`finish_conversation` ("atendimento finalizado", que solta o responsável).
+
+- ⚠️ **O corpo de cada função é o que JÁ ESTAVA no banco**, copiado de
+  `pg_get_functiondef`. Só o `assign_reason` mudou. Reescrever a lógica junto
+  seria mudança de comportamento disfarçada de correção de log.
+- ⚠️ Em `assign_conversation_to_self`, o ramo em que a conversa **já tem dono**
+  não toca `assign_reason`: o responsável não muda, o gatilho não dispara, e um
+  motivo novo descreveria uma atribuição que não aconteceu.
+- 🔴 **Conferido no banco: `anon` tinha EXECUTE em `assign_conversation_to_self` e
+  em `take_over_conversation`** — as duas que TROCAM o dono da conversa. Mesmo
+  defeito da 0080 (`create function` concede a PUBLIC; `create or replace` NÃO
+  reseta grants). O dano era limitado porque as duas checam empresa/supervisão
+  antes de escrever e `private.user_locations()` de `anon` é vazio — mas isso é
+  rede única. As cinco ganharam o par `revoke`/`grant`.
+- ⚠️ `npm run db:check` acusou `take_over_conversation` por não mencionar
+  `user_locations`/`is_admin`/`sees_all`. **Falso positivo, conferido:** a
+  checagem está DELEGADA a `private.can_supervise_conv`, que amarra na
+  `location_id` da conversa. Está escrito no arquivo para ninguém reauditar.
+
+### Migração 202609011230 — o bot valida o e-mail
+
+O nó `ask` só validava `name`; o resto caía em `vars[node.var] = args.text`, CRU.
+Como o bot trata QUALQUER mensagem como resposta à pergunta atual, a pergunta do
+cliente virava o valor do campo. Gravado no banco em 01/09:
+
+```
+email = "Será do dia 14.10 ate dia 21.10, o ideal seria eu fazer a visita…"
+email = "Usmetzket9@gmail. Com"
+curso = "Muito obrigado novamente Beatriz"
+nome  = "Mário José Coppini da"   ← de "…da Silva"
+nome  = "Eduardo Gama dos"
+```
+
+Isso alimenta o card do funil e a base de contatos.
+
+- ⚠️ **O fluxo que VALE é o do banco.** `getFlow` lê `bot_flows.definition` e só
+  cai no padrão em código quando não acha a linha — marcar `validate` só no
+  TypeScript não teria efeito nenhum em produção. Daí a migração.
+- ⚠️ **Dois modos**: `email` (estrito) e `email_ou_doc`. O nó `fin_pede_doc` do
+  financeiro pede "e-mail **ou** CPF"; validador estrito recusaria o CPF e
+  travaria quem respondeu certo.
+- ⚠️ **Depois de 2 tentativas o bot segue com o campo VAZIO**, não com o texto.
+  Travar prenderia o cliente num laço (o caso do Marcilio quase foi isso), e
+  guardar o texto é o defeito que o ramo existe para fechar. Campo vazio o
+  atendente preenche; frase de 130 caracteres ele precisa primeiro descobrir que
+  está errada.
+- ⚠️ **O teto do nome era 4 palavras** (`slice(0, 4)`, nos DOIS caminhos —
+  heurística e IA). Cortava depois da preposição. Agora 6, mais teto de 80
+  caracteres como rede.
+- ⚠️ **A migração NÃO apaga o lixo já gravado.** `contacts.email` pode ter sido
+  corrigido à mão depois, e um `update` por heurística apagaria correção humana
+  junto. O arquivo traz a consulta para ver o que ficou torto.
+- ⚠️ **Tolerar espaço perdido só vale na emenda de um PONTO ou do arroba.** A
+  tentação é normalizar a frase inteira; isso transformaria
+  "obrigado. joao@gmail.com" em "obrigado.joao@gmail.com". Três casos assim
+  falharam na primeira implementação e só o teste pegou.
+- `npm run test:bot` — 47 asserções, e **os casos marcados `[real]` são valores
+  que estavam gravados no banco**. Metade dos casos vigia o lado oposto (não
+  recusar e-mail de cliente de verdade), que é onde um validador estrito faz mais
+  dano que o defeito.
+
+⏳ **Fica sem validação o campo `curso`** (texto livre: "MMA + Célula + GMP"). Não
+há forma para conferir, e a saída de verdade seria o bot perceber que o cliente
+fez uma PERGUNTA em vez de responder — mudança grande, não tentada aqui.
+
+⏳ `transfer_conversation` grava `contacts.owner_id = to_user`. Como o webhook usa
+`owner_id` (de atendente) para mandar o cliente direto a quem já o atendia, uma
+transferência passa a definir esse caminho. É provavelmente a intenção, mas não
+está escrito em lugar nenhum — vale confirmar com o Gabriel antes de mexer.
