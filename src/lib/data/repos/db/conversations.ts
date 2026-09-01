@@ -632,7 +632,118 @@ async function autor(): Promise<string | null> {
   return useDbStore.getState().userId;
 }
 
+/**
+ * Escolhe o número (canal) a usar ao ABRIR uma conversa nova de WhatsApp.
+ *
+ * A RLS de INSERT de `messages` exige `channel_allowed`: se o departamento da
+ * pessoa tem canais próprios, só esses valem. Departamento sem vínculo (ou
+ * usuário sem departamento) = sem restrição.
+ *
+ * ⚠️ **A ordenação por `principal` tem QUEDA PARA TRÁS, e isso não é zelo
+ * excessivo — é um incidente real de 01/09/2026.** O código foi mesclado e
+ * publicado pela Vercel no merge; a migração que cria
+ * `whatsapp_channels.principal` é aplicada À MÃO, depois. Nessa janela o
+ * PostgREST recusa a consulta inteira por causa da coluna inexistente, e o
+ * `open()` criava a conversa com `channel_id` NULO — que é uma conversa
+ * incapaz de enviar, com a mensagem "Cadastre um canal de WhatsApp" numa
+ * empresa que tem três. Duas conversas nasceram assim antes de alguém notar.
+ *
+ * ⚠️ **Regra geral que sai daqui: neste projeto o código vai ao ar ANTES da
+ * migração.** Toda consulta que depende de coluna nova precisa sobreviver à
+ * ausência dela.
+ */
+async function escolherCanal(location: string): Promise<string | null> {
+  const supabase = createClient();
+
+  /*
+   * ⚠️ `.eq("user_id", ...)` é obrigatório aqui. A policy de leitura de
+   * `location_members` é por EMPRESA ("ver equipe da location"), então sem o
+   * filtro vêm todas as pessoas, `maybeSingle()` reclama de várias linhas e o
+   * departamento sai nulo — silenciosamente virando "sem restrição".
+   */
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess?.user?.id ?? null;
+  let deptId: string | null = null;
+  if (uid) {
+    const { data: me } = await supabase
+      .from("location_members")
+      .select("department_id")
+      .eq("location_id", location)
+      .eq("user_id", uid)
+      .maybeSingle();
+    deptId = (me as { department_id: string | null } | null)?.department_id ?? null;
+  }
+
+  let allowedIds: string[] | null = null;
+  if (deptId) {
+    const { data: dc } = await supabase
+      .from("department_channels")
+      .select("channel_id")
+      .eq("department_id", deptId);
+    if (dc && dc.length) allowedIds = dc.map((r) => (r as { channel_id: string }).channel_id);
+  }
+
+  const buscar = async (comPrincipal: boolean) => {
+    let q = supabase
+      .from("whatsapp_channels")
+      .select("id")
+      .eq("location_id", location)
+      .eq("active", true);
+    if (allowedIds) q = q.in("id", allowedIds);
+    if (comPrincipal) q = q.order("principal", { ascending: false });
+    return q.order("created_at", { ascending: true }).limit(1).maybeSingle();
+  };
+
+  // Tenta com o PRINCIPAL primeiro (migração 202608312055); se a coluna ainda
+  // não existe no banco, refaz sem ela em vez de devolver nada.
+  const comPrincipal = await buscar(true);
+  if (!comPrincipal.error && comPrincipal.data) {
+    return (comPrincipal.data as { id: string }).id;
+  }
+  const semPrincipal = await buscar(false);
+  return (semPrincipal.data as { id: string } | null)?.id ?? null;
+}
+
 export const conversationActions = {
+  /**
+   * Garante que a conversa de WhatsApp tem um número, escolhendo um se faltar.
+   *
+   * ⚠️ Existe para CURAR as conversas que nasceram com `channel_id` nulo — duas
+   * delas em 01/09/2026, quando o código que ordena por `principal` foi ao ar
+   * antes da migração que cria a coluna. Sem isto, cada uma é um atendimento
+   * ativo que não sai, e a única saída seria excluir a conversa e recriar,
+   * perdendo o que já foi escrito nela.
+   *
+   * ⚠️ **Só age quando o campo está NULO.** Reescrever o canal de uma conversa
+   * que já tem um trocaria o número que o cliente conhece pelo do meio do
+   * caminho — o defeito que a própria seção do canal principal existe para
+   * evitar.
+   */
+  async ensureChannel(conversationId: string): Promise<string | null> {
+    const conv = useConvStore.getState().conversations.find((c) => c.id === conversationId);
+    if (conv?.channelId) return conv.channelId;
+    const location = loc();
+    if (!location) return null;
+    const canal = await escolherCanal(location);
+    if (!canal) return null;
+    const supabase = createClient();
+    // Confere as LINHAS e não só o `error`: UPDATE recusado pela RLS volta sem
+    // erro e afeta 0 linhas (armadilha nº 1 do projeto).
+    const { data } = await supabase
+      .from("conversations")
+      .update({ channel_id: canal })
+      .eq("id", conversationId)
+      .is("channel_id", null)
+      .select("id");
+    if (!data?.length) return null;
+    useConvStore.getState().patch({
+      conversations: useConvStore
+        .getState()
+        .conversations.map((c) => (c.id === conversationId ? { ...c, channelId: canal } : c)),
+    });
+    return canal;
+  },
+
   async send(
     conversationId: string,
     msg: Omit<Message, "id" | "conversationId" | "at">
@@ -1225,54 +1336,15 @@ export const conversationActions = {
       }
       return conv.id;
     }
-    let channelId: string | null = null;
-    if (channel === "whatsapp") {
-      // Escolhe um canal que o usuário PODE usar. A RLS de INSERT exige
-      // `channel_allowed`: se o departamento da pessoa tem canais próprios, só
-      // esses valem. Pegar o canal ativo mais antigo cegamente barrava quem é de
-      // um setor cujo canal não é o mais antigo (erro "não foi possível abrir").
-      const { data: me } = await supabase
-        .from("location_members")
-        .select("department_id")
-        .eq("location_id", location)
-        .maybeSingle();
-      const deptId = (me as { department_id: string | null } | null)?.department_id ?? null;
-
-      let allowedIds: string[] | null = null;
-      if (deptId) {
-        const { data: dc } = await supabase
-          .from("department_channels")
-          .select("channel_id")
-          .eq("department_id", deptId);
-        // Departamento COM canais vinculados → restringe a eles. SEM vínculo →
-        // sem restrição (igual ao channel_allowed), então deixa null.
-        if (dc && dc.length) allowedIds = dc.map((r) => (r as { channel_id: string }).channel_id);
-      }
-
-      let q = supabase
-        .from("whatsapp_channels")
-        .select("id")
-        .eq("location_id", location)
-        .eq("active", true);
-      if (allowedIds) q = q.in("id", allowedIds);
-      /*
-       * ⚠️ **O PRINCIPAL vem primeiro** (migração 202608312055). Antes o critério
-       * era só `created_at asc` — "o canal ativo mais antigo" —, o que não é
-       * critério nenhum: bastava um número de BACKUP ter sido cadastrado antes do
-       * principal para toda conversa nova nascer nele. Foi o que se encontrou em
-       * 31/08: conversas saindo por "Backup Comercial" e "Backup Secretaria" com
-       * o principal de Secretaria cadastrado.
-       *
-       * `created_at` continua como desempate para quem ainda não marcou nenhum
-       * principal — sem ele, essas empresas ficariam com ordem indefinida.
-       */
-      const { data: ch } = await q
-        .order("principal", { ascending: false })
-        .order("created_at", { ascending: true })
-        .limit(1)
-        .maybeSingle();
-      channelId = (ch as { id: string } | null)?.id ?? null;
-    }
+    const channelId = channel === "whatsapp" ? await escolherCanal(location) : null;
+    /*
+     * ⚠️ Conversa de WhatsApp SEM canal é uma conversa que não consegue enviar
+     * nada — o composer bloqueia com "Cadastre um canal de WhatsApp". Criá-la em
+     * silêncio transforma uma falha de configuração (ou uma migração atrasada,
+     * como em 01/09) num objeto quebrado que alguém descobre ao tentar atender.
+     * Melhor não criar e devolver null, que o chamador já sabe tratar.
+     */
+    if (channel === "whatsapp" && !channelId) return null;
     const { data, error } = await supabase
       .from("conversations")
       .insert({
