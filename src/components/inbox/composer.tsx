@@ -13,6 +13,8 @@ import {
   Loader2,
   Mic,
   Paperclip,
+  Pencil,
+  Plus,
   Send,
   Smile,
   Square,
@@ -39,6 +41,14 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { RespostaRapidaDialog } from "./resposta-rapida-dialog";
 import { ScheduleDialog } from "./schedule-dialog";
 import { channelLabel } from "@/components/shared/channel-icon";
 import {
@@ -48,6 +58,7 @@ import {
   useReplyStore,
   useReplyTarget,
   useSnippets,
+  snippetActions,
   useTemplateIntentStore,
 } from "@/lib/data/repos/db/conversations";
 import { whatsappActions } from "@/lib/data/repos/db/whatsapp";
@@ -61,6 +72,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { Channel, Message } from "@/lib/data/types";
@@ -81,13 +93,14 @@ const ENVIO_DE_AUDIO_LIBERADO = false;
 
 const EMOJIS = "😀 😁 😂 🤣 😊 😍 😘 😎 🤩 🥳 👍 👏 🙏 💪 🔥 🎉 ✅ ❤️ 💜 💙 ⭐ ✨ 📌 📎 📅 ⏰ 💰 📞 💬 👋".split(" ");
 
-const QUICK_REPLIES = [
-  "Olá! Tudo bem? 👋",
-  "Obrigado pelo contato! Em que posso ajudar?",
-  "Só um momento, já verifico isso pra você.",
-  "Perfeito! Vou dar andamento.",
-  "Qualquer dúvida, estou à disposição. 😊",
-];
+/*
+ * ⚠️ A lista FIXA de respostas rápidas saiu daqui (migração 202609011821, que
+ * moveu as 5 frases para `snippets`). O composer tinha DOIS menus, os dois
+ * chamados "Respostas rápidas": este, fixo no código, e o botão "Trechos", que
+ * lê o banco e é editável. Duas listas com o mesmo nome, uma editável e a outra
+ * não, é o que fez pedirem "quero editar as respostas rápidas" olhando para a
+ * que não dava. Agora existe UMA, e ela é editável no próprio menu.
+ */
 
 /** Resumo de uma mensagem para a prévia da citação (texto ou rótulo de mídia). */
 function msgSnippet(m: Message): string {
@@ -232,6 +245,10 @@ export function Composer({ conversationId }: { conversationId: string }) {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cancelRef = useRef(false);
   const snippets = useSnippets();
+  /** Resposta rápida em edição. `id` vazio = criando. `null` = diálogo fechado. */
+  const [editando, setEditando] = useState<{ id: string; name: string; content: string } | null>(
+    null
+  );
   const conversation = useConversation(conversationId);
   const contactId = conversation?.contactId ?? null;
   const { contact } = useDbContact(contactId);
@@ -960,28 +977,6 @@ export function Composer({ conversationId }: { conversationId: string }) {
             </PopoverContent>
           </Popover>
 
-          {/* Respostas rápidas */}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <button
-                  title="Respostas rápidas"
-                  className="flex size-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                />
-              }
-            >
-              <Zap className="size-4" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-64">
-              <DropdownMenuLabel className="text-[10px] text-slate-400">Respostas rápidas</DropdownMenuLabel>
-              {QUICK_REPLIES.map((q) => (
-                <DropdownMenuItem key={q} className="text-xs" onClick={() => setBody((b) => (b ? `${b} ${q}` : q))}>
-                  {q}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-
           {/* Link de cobrança (área Pagamentos) */}
           <button
             onClick={() => toast.info("Link de cobrança chega com o módulo Pagamentos")}
@@ -1033,35 +1028,74 @@ export function Composer({ conversationId }: { conversationId: string }) {
             </TooltipTrigger>
             <TooltipContent className="text-[10px]">Enviar template</TooltipContent>
           </Tooltip>
+          {/*
+            Menu ÚNICO de respostas rápidas — antes eram dois com o mesmo nome.
+            Cada item insere o texto; o lápis abre a edição sem fechar o
+            atendimento, e "Nova resposta rápida" cria dali mesmo. Antes, criar
+            exigia sair da conversa e ir na aba Trechos, e editar não existia.
+          */}
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
-                <button className="ml-1 rounded-md px-2 py-1 text-[11px] font-medium text-indigo-600 hover:bg-indigo-50" />
+                <button
+                  title="Respostas rápidas"
+                  className="ml-1 flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-indigo-600 hover:bg-indigo-50"
+                />
               }
             >
-              Trechos
+              <Zap className="size-3.5" /> Respostas rápidas
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-64">
+            <DropdownMenuContent align="start" className="w-72">
               <DropdownMenuLabel className="text-[10px] text-slate-400">
-                Respostas rápidas
+                Clique para inserir no texto
               </DropdownMenuLabel>
               {snippets.length === 0 && (
                 <DropdownMenuItem disabled className="text-xs text-slate-400">
-                  Nenhum trecho — crie na aba Trechos
+                  Nenhuma resposta rápida ainda
                 </DropdownMenuItem>
               )}
               {snippets.map((s) => (
-                <DropdownMenuItem
-                  key={s.id}
-                  className="flex-col items-start text-xs"
-                  onClick={() => setBody((b) => (b ? `${b} ${s.content}` : s.content))}
-                >
-                  <span className="font-semibold">{s.name}</span>
-                  <span className="line-clamp-1 text-[10px] text-slate-400">{s.content}</span>
-                </DropdownMenuItem>
+                <div key={s.id} className="flex items-start gap-1 px-1">
+                  <DropdownMenuItem
+                    className="min-w-0 flex-1 flex-col items-start text-xs"
+                    onClick={() => setBody((b) => (b ? `${b} ${s.content}` : s.content))}
+                  >
+                    <span className="font-semibold">{s.name}</span>
+                    <span className="line-clamp-2 text-[10px] text-slate-400">{s.content}</span>
+                  </DropdownMenuItem>
+                  {/*
+                    ⚠️ Fora do DropdownMenuItem, e é por isso que o botão vive num
+                    <div> irmão: clicar dentro do item fecharia o menu E inseriria
+                    o texto no campo, que é o oposto de "editar".
+                  */}
+                  <button
+                    type="button"
+                    title={`Editar "${s.name}"`}
+                    onClick={() => setEditando(s)}
+                    className="mt-1 flex size-6 shrink-0 items-center justify-center rounded text-slate-300 hover:bg-slate-100 hover:text-slate-600"
+                  >
+                    <Pencil className="size-3" />
+                  </button>
+                </div>
               ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-xs font-medium text-indigo-600"
+                onClick={() => setEditando({ id: "", name: "", content: body.trim() })}
+              >
+                <Plus className="size-3.5" /> Nova resposta rápida
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          {/* Montado só quando há item, e com `key`: é o que garante campos
+              limpos a cada abertura sem precisar de efeito. */}
+          {editando && (
+            <RespostaRapidaDialog
+              key={editando.id || "novo"}
+              item={editando}
+              onOpenChange={(o) => !o && setEditando(null)}
+            />
+          )}
         </div>
         <Button
           size="sm"

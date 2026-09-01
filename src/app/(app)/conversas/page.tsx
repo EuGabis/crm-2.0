@@ -4,11 +4,12 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { CalendarClock, Link2, Phone, Plus, Smartphone, Trash2 } from "lucide-react";
+import { CalendarClock, Link2, Pencil, Phone, Plus, Smartphone, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { SubNav } from "@/components/layout/subnav";
 import { Composer } from "@/components/inbox/composer";
 import { ContactPanel } from "@/components/inbox/contact-panel";
+import { RespostaRapidaDialog } from "@/components/inbox/resposta-rapida-dialog";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { Thread } from "@/components/inbox/thread";
 import { ViewsRail } from "@/components/inbox/views-rail";
@@ -579,28 +580,18 @@ function TrechosTab() {
   const confirm = useConfirm();
   const snippets = useSnippets();
   const loaded = useConvStore((s) => s.loaded);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [content, setContent] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const create = async () => {
-    if (!name.trim() || !content.trim()) {
-      toast.error("Preencha nome e conteúdo");
-      return;
-    }
-    setSaving(true);
-    const ok = await snippetActions.add(name.trim(), content.trim());
-    setSaving(false);
-    if (!ok) {
-      toast.error("Não foi possível salvar o trecho");
-      return;
-    }
-    toast.success(`Trecho "${name.trim()}" criado — disponível no composer`);
-    setName("");
-    setContent("");
-    setDialogOpen(false);
-  };
+  /*
+   * ⚠️ O formulário é o MESMO componente que o composer usa
+   * (`RespostaRapidaDialog`). Manter um formulário aqui e outro lá deixaria duas
+   * validações e duas mensagens de erro para divergirem na primeira mudança — e
+   * foi exatamente assim que o CRM ficou com duas listas de "respostas rápidas",
+   * uma editável e outra não.
+   *
+   * `id` vazio = criando; com id = editando; `null` = fechado.
+   */
+  const [editando, setEditando] = useState<{ id: string; name: string; content: string } | null>(
+    null
+  );
 
   const columns: Column<(typeof snippets)[number]>[] = [
     {
@@ -619,17 +610,27 @@ function TrechosTab() {
       key: "acao",
       header: "",
       render: (r) => (
-        <button
-          onClick={async () => {
-            if (!(await confirm({ title: `Excluir o trecho "${r.name}"?`, confirmLabel: "Excluir", destructive: true }))) return;
-            (await snippetActions.remove(r.id))
-              ? toast.success("Trecho excluído")
-              : toast.error("Não foi possível excluir");
-          }}
-          className="text-slate-300 hover:text-red-500"
-        >
-          <Trash2 className="size-3.5" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            title={`Editar "${r.name}"`}
+            onClick={() => setEditando({ id: r.id, name: r.name, content: r.content })}
+            className="text-slate-300 hover:text-indigo-600"
+          >
+            <Pencil className="size-3.5" />
+          </button>
+          <button
+            title={`Excluir "${r.name}"`}
+            onClick={async () => {
+              if (!(await confirm({ title: `Excluir a resposta rápida "${r.name}"?`, description: "Ela deixa de aparecer no composer. Não tem desfazer.", confirmLabel: "Excluir", destructive: true }))) return;
+              (await snippetActions.remove(r.id))
+                ? toast.success("Resposta rápida excluída")
+                : toast.error("Não foi possível excluir");
+            }}
+            className="text-slate-300 hover:text-red-500"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        </div>
       ),
     },
   ];
@@ -638,11 +639,17 @@ function TrechosTab() {
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <h1 className="text-lg font-bold text-slate-900">Trechos</h1>
-          <Badge variant="secondary">{snippets.length} trechos</Badge>
+          <h1 className="text-lg font-bold text-slate-900">Respostas rápidas</h1>
+          <Badge variant="secondary">
+            {snippets.length} {snippets.length === 1 ? "resposta" : "respostas"}
+          </Badge>
         </div>
-        <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setDialogOpen(true)}>
-          <Plus className="size-3.5" /> Novo trecho
+        <Button
+          size="sm"
+          className="h-8 gap-1.5 text-xs"
+          onClick={() => setEditando({ id: "", name: "", content: "" })}
+        >
+          <Plus className="size-3.5" /> Nova resposta rápida
         </Button>
       </div>
       {loaded && snippets.length === 0 ? (
@@ -651,8 +658,12 @@ function TrechosTab() {
           title="Nenhum trecho ainda"
           description="Crie respostas rápidas para inserir com um clique no composer da conversa."
           cta={
-            <Button size="sm" className="text-xs" onClick={() => setDialogOpen(true)}>
-              <Plus className="size-3.5" /> Criar trecho
+            <Button
+              size="sm"
+              className="text-xs"
+              onClick={() => setEditando({ id: "", name: "", content: "" })}
+            >
+              <Plus className="size-3.5" /> Criar resposta rápida
             </Button>
           }
         />
@@ -660,41 +671,13 @@ function TrechosTab() {
         <DataTable data={snippets} columns={columns} pageSize={10} />
       )}
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Novo trecho</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <Label className="text-xs">Nome</Label>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Ex.: Tabela de preços"
-                className="h-8"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Conteúdo</Label>
-              <Textarea
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                placeholder="Olá! Nossos planos começam em..."
-                className="min-h-24 text-sm"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setDialogOpen(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={create} disabled={saving}>
-              {saving ? "Salvando..." : "Criar trecho"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {editando && (
+        <RespostaRapidaDialog
+          key={editando.id || "novo"}
+          item={editando}
+          onOpenChange={(o) => !o && setEditando(null)}
+        />
+      )}
     </div>
   );
 }
