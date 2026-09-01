@@ -9,6 +9,7 @@ import { toWhatsAppNumber } from "@/lib/whatsapp/phone";
 import { chat } from "@/lib/ai/openai";
 import { channelDepartmentId, distributeOne, assignLeadTo } from "@/lib/leads/distribution";
 import { normalize, type BotFlow, type BotNode, type BotOption } from "./types";
+import { extrairEmail, extrairEmailOuDoc, limitarNome } from "./campos";
 import { triagemFlow } from "./flows/triagem";
 import { secretariaFlow } from "./flows/secretaria";
 
@@ -81,7 +82,7 @@ function heuristicName(raw: string): string | null {
   if (!cleaned || /\d/.test(cleaned)) return null;
   if (cleaned.replace(/[^\p{L}]/gu, "").length < 2) return null;
   if (NOT_A_NAME.has(normalize(cleaned))) return null;
-  return cleaned.split(" ").slice(0, 4).join(" ");
+  return limitarNome(cleaned);
 }
 
 /**
@@ -113,7 +114,7 @@ async function extractName(text: string): Promise<string | null> {
     );
     const clean = out.trim().replace(/^["']+|["'.]+$/g, "").trim();
     if (!clean || /^none$/i.test(clean)) return null;
-    return clean.split(/\s+/).slice(0, 4).join(" ");
+    return limitarNome(clean);
   } catch {
     return heuristicName(raw);
   }
@@ -708,6 +709,44 @@ export async function maybeRunBot(
           // segue sem `first_name` (o render omite o nome e ajusta a pontuação).
           delete vars._nameAttempts;
           vars.first_name = "";
+        }
+      } else if (node.validate === "email" || node.validate === "email_ou_doc") {
+        /*
+         * ⚠️ Sem este ramo a resposta ia CRUA para a variável, e a pergunta do
+         * próprio cliente virava o valor do campo. Medido no banco em 01/09:
+         * e-mail = "Será do dia 14.10 ate dia 21.10, o ideal seria…". Esse valor
+         * alimenta o card do funil e a base de contatos.
+         */
+        const valor =
+          node.validate === "email" ? extrairEmail(args.text) : extrairEmailOuDoc(args.text);
+        if (valor) {
+          vars[node.var] = valor;
+          delete vars._emailAttempts;
+        } else {
+          const attempts = Number(vars._emailAttempts ?? 0) + 1;
+          // Mesma mecânica do nome: repergunta UMA vez, com a dica do que falta.
+          if (!looksLikeRefusal(args.text) && attempts < 2) {
+            vars._emailAttempts = attempts;
+            await botSend(
+              ctx,
+              node.validate === "email"
+                ? "Não consegui ler o e-mail 😅. Pode enviar só o endereço, no formato nome@dominio.com? (ou responda \"pular\")"
+                : "Não consegui ler o e-mail nem o CPF 😅. Pode enviar só um dos dois? (ou responda \"pular\")",
+            );
+            await saveSession(ctx, session.node_id ?? null, "aguardando", vars);
+            return true;
+          }
+          /*
+           * ⚠️ Depois de duas tentativas o bot NÃO trava e NÃO guarda o que veio:
+           * segue com o campo VAZIO. Travar deixaria o cliente preso num laço
+           * (foi o que quase aconteceu no caso do Marcílio, que perguntava sobre
+           * pagamento enquanto o bot insistia em nome/e-mail/curso), e guardar o
+           * texto é justamente o defeito que este ramo existe para fechar. Campo
+           * vazio o atendente preenche; campo com frase de 130 caracteres ele
+           * precisa primeiro descobrir que está errado.
+           */
+          delete vars._emailAttempts;
+          vars[node.var] = "";
         }
       } else {
         vars[node.var] = args.text;

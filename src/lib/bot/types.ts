@@ -32,8 +32,20 @@ export type BotNode =
       options?: BotOption[];
       /** Rótulo do botão que abre a lista (default "Ver opções"). */
       listButton?: string;
-      /** "name": valida com IA se a resposta é um nome de verdade; senão repergunta. */
-      validate?: "name";
+      /**
+       * Validação da resposta antes de guardar na variável.
+       *
+       * - `name`: valida com IA se é nome de pessoa de verdade; senão repergunta.
+       * - `email`: exige um e-mail com forma válida.
+       * - `email_ou_doc`: e-mail OU CPF/CNPJ — para o nó do financeiro, que pede
+       *   "e-mail ou CPF". Validador estrito de e-mail recusaria o CPF.
+       *
+       * ⚠️ Sem `validate`, a resposta é guardada CRUA, e foi isso que encheu o
+       * lead de lixo: a pergunta do próprio cliente virava o valor do campo
+       * (e-mail = "Será do dia 14.10 ate dia 21.10...", curso = "Muito obrigado
+       * novamente Beatriz").
+       */
+      validate?: "name" | "email" | "email_ou_doc";
       next: string | null;
     }
   // Grava a resposta num campo do contato (ex.: first_name a partir de "name").
