@@ -1255,7 +1255,19 @@ export const conversationActions = {
         .eq("location_id", location)
         .eq("active", true);
       if (allowedIds) q = q.in("id", allowedIds);
+      /*
+       * ⚠️ **O PRINCIPAL vem primeiro** (migração 202608312055). Antes o critério
+       * era só `created_at asc` — "o canal ativo mais antigo" —, o que não é
+       * critério nenhum: bastava um número de BACKUP ter sido cadastrado antes do
+       * principal para toda conversa nova nascer nele. Foi o que se encontrou em
+       * 31/08: conversas saindo por "Backup Comercial" e "Backup Secretaria" com
+       * o principal de Secretaria cadastrado.
+       *
+       * `created_at` continua como desempate para quem ainda não marcou nenhum
+       * principal — sem ele, essas empresas ficariam com ordem indefinida.
+       */
       const { data: ch } = await q
+        .order("principal", { ascending: false })
         .order("created_at", { ascending: true })
         .limit(1)
         .maybeSingle();

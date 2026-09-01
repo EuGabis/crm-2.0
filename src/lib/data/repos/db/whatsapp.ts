@@ -19,6 +19,8 @@ export interface WhatsappChannel {
   active: boolean;
   /** Fluxo de bot que este número roda (null/"" = sem bot). */
   botFlow: string;
+  /** Número preferido ao ABRIR conversa nova. Um por empresa (índice único). */
+  principal: boolean;
   createdAt: string;
 }
 
@@ -34,6 +36,7 @@ function mapRow(r: any): WhatsappChannel {
     dailyLimit: r.daily_limit ?? 1000,
     active: r.active,
     botFlow: r.bot_flow ?? "",
+    principal: r.principal ?? false,
     createdAt: r.created_at,
   };
 }
@@ -139,6 +142,23 @@ export const whatsappActions = {
     const s = useChannelsStore.getState();
     s.set(s.channels.map((c) => (c.id === id ? { ...c, active } : c)));
     return true;
+  },
+
+  /**
+   * Marca o canal como PRINCIPAL — o número preferido ao abrir conversa nova.
+   *
+   * ⚠️ Via RPC e não com dois `update`: rebaixar o anterior e promover o novo
+   * precisa ser ATÔMICO. Em duas chamadas, uma falha no meio deixa a empresa sem
+   * principal, e o índice único parcial (`whatsapp_channels_um_principal`) faria
+   * a segunda escrita estourar se a ordem se invertesse.
+   */
+  async setPrincipal(id: string): Promise<{ ok: boolean; error?: string }> {
+    const supabase = createClient();
+    const { error } = await supabase.rpc("definir_canal_principal", { p_channel: id });
+    if (error) return { ok: false, error: error.message };
+    const s = useChannelsStore.getState();
+    s.set(s.channels.map((c) => ({ ...c, principal: c.id === id })));
+    return { ok: true };
   },
 
   /** Edita os dados editáveis do canal (nome, setor, limite). Os ids da Meta ficam fixos. */
