@@ -3827,3 +3827,65 @@ select date_trunc('day', created_at)::date as dia, count(*) as templates,
   from public.messages where template_name is not null
    and created_at > now() - interval '7 days' group by 1 order by 1 desc;
 ```
+
+## "Não foi possível salvar o contato — tente novamente" (2026-09-01)
+
+Relato: alguns usuários não conseguem adicionar contato, **nem abrir a conversa
+com o contato adicionado**. Pareciam dois problemas; é **um só**, e o segundo
+sintoma é consequência do primeiro — o contato nunca foi criado, então não havia
+conversa para abrir.
+
+### A causa: dedupe procurando no array do store
+
+`dbContactActions.findByPhone` achava o duplicado pelo RPC (certo) e depois
+procurava a LINHA no array do Zustand:
+
+```ts
+return contacts.find((c) => c.id === existingId) ?? null;   // ← array do store
+```
+
+⚠️ **A tela de Contatos deixou de carregar os 41 mil no store** (virou
+`useContactsSearch`, consulta no servidor). Com o array vazio, `findByPhone`
+respondia "não há duplicado"; o `add`, que consulta o banco de verdade, recusava
+devolvendo `false`; e a tela traduzia isso em **"tente novamente"** — o único
+conselho que não pode dar certo, porque repetir encontra o mesmo contato para
+sempre.
+
+⚠️ **É a MESMA armadilha já documentada nesta seção de Contatos** ("o dedupe da
+importação era um `Set` do array do store… com a tela sem carregar a lista, o
+array vive vazio e a checagem sumiria EM SILÊNCIO"). Lá foi resolvida com
+`existing_contact_keys`; aqui passou batida.
+
+⚠️ **E é o que explica "alguns usuários":** quem chegou por uma tela que ainda
+carrega a lista inteira (Conversas, Calendários) tinha o array cheio e via a
+mensagem certa; quem foi direto para Contatos via a genérica. Não era permissão
+nem departamento.
+
+Caso conferido no banco: o contato do print ("Leonardo Correa", CPF
+06578979573) **já existia desde 24/08**, com telefone `557799331370`.
+`private.phone_key` normaliza o digitado (`77999331370`) e o gravado para o mesmo
+`7799331370` — o dedupe estava certo, a mensagem é que mentia.
+
+### O que mudou
+
+- `findByPhone` lê a linha do BANCO, não do store. Uma consulta por id é barata e
+  torna a resposta independente do que a tela carregou.
+- `dbContactActions.add` devolve **`ResultadoAdd`** (`ok` | `duplicado` +
+  `existingId` | `erro` + mensagem) em vez de `boolean`. "Duplicado" e "falhou"
+  chegavam como o MESMO `false`, e quem cria contato precisa saber qual dos dois
+  foi.
+- O aviso de duplicado leva **botão "Abrir contato"**. Dizer só "já existe" deixa
+  a pessoa procurando à mão numa base de 41 mil — que é o que ela tentou evitar
+  cadastrando de novo.
+- O ramo no `add` é **segunda barreira**: mesmo que a checagem prévia da tela
+  falhe, a mensagem sai certa porque o motivo vem do repo.
+
+⚠️ **`tsc` NÃO pegou a troca de `boolean` por objeto**, e isso quase virou
+regressão pior que o bug: `if (!ok)` sobre um objeto é sempre falso, então a tela
+deixaria de mostrar QUALQUER erro e o formulário fecharia dizendo "Contato
+criado" sem ter criado. Ao trocar um retorno booleano por objeto, procure os
+`if (!x)` à mão — o compilador não avisa.
+
+⏳ Ainda existem **8 `window.prompt`/`alert`** e outros pontos que devolvem
+`boolean` cego para a UI. O padrão que este caso ensina: quando há mais de um
+motivo de falha e eles pedem condutas diferentes, o retorno tem de dizer QUAL.

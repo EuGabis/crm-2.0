@@ -316,6 +316,21 @@ export function useDbTeam() {
   return team;
 }
 
+/**
+ * Resultado de criar contato.
+ *
+ * ⚠️ Era `boolean`, e foi isso que produziu o sintoma relatado: "duplicado" e
+ * "falhou" chegavam à tela como o MESMO `false`, e a mensagem virava "tente
+ * novamente" — conselho impossível de seguir, porque repetir encontra o mesmo
+ * contato para sempre. Quem cria contato precisa saber QUAL das duas coisas
+ * aconteceu, e no caso do duplicado precisa do contato que já existe para poder
+ * abri-lo.
+ */
+export type ResultadoAdd =
+  | { ok: true; id: string }
+  | { ok: false; motivo: "duplicado"; existingId: string }
+  | { ok: false; motivo: "erro"; erro?: string };
+
 export const dbContactActions = {
   async add(input: {
     firstName: string;
@@ -326,9 +341,10 @@ export const dbContactActions = {
     company?: string;
     tags: string[];
     customFields?: Record<string, string>;
-  }): Promise<boolean> {
+  }): Promise<ResultadoAdd> {
+    await useDbStore.getState().ensureSession();
     const { locationId, userId, setContacts } = useDbStore.getState();
-    if (!locationId) return false;
+    if (!locationId) return { ok: false, motivo: "erro", erro: "empresa não encontrada" };
     const supabase = createClient();
     // Bloqueia duplicado por número (0047): não deixa criar 2 contatos com o
     // mesmo telefone, em qualquer formato.
@@ -337,7 +353,14 @@ export const dbContactActions = {
         p_location: locationId,
         p_phone: input.phone,
       });
-      if (existingId) return false;
+      /*
+       * ⚠️ Duplicado devolvia o MESMO `false` de uma falha de rede, e a tela
+       * dizia "tente novamente" — conselho que não pode dar certo, porque
+       * repetir sempre encontra o mesmo contato. Agora o motivo sai daqui, então
+       * a mensagem certa aparece mesmo quando a checagem prévia da tela é
+       * pulada.
+       */
+      if (existingId) return { ok: false, motivo: "duplicado", existingId: existingId as string };
     }
     const { data, error } = await supabase
       .from("contacts")
@@ -355,14 +378,35 @@ export const dbContactActions = {
       })
       .select()
       .single();
-    if (error || !data) return false;
+    if (error || !data) return { ok: false, motivo: "erro", erro: error?.message };
     setContacts((prev) => [mapContact(data), ...prev]);
-    return true;
+    return { ok: true, id: data.id as string };
   },
 
   /** Devolve o contato já existente com esse número (ou null) — p/ avisar antes de duplicar. */
+  /**
+   * Contato já cadastrado com este telefone (0047), ou `null`.
+   *
+   * ⚠️ **Buscava o contato no ARRAY DO STORE e por isso falhava em silêncio.** A
+   * linha era `contacts.find((c) => c.id === existingId) ?? null`: o RPC achava o
+   * duplicado e o `find` não achava a LINHA, porque a tela de Contatos deixou de
+   * carregar os 41 mil no store (virou `useContactsSearch`, consulta no
+   * servidor). Com o array vazio, esta função respondia "não há duplicado"; o
+   * `add`, que consulta o banco, recusava com `false`; e a tela traduzia isso em
+   * "não foi possível salvar — tente novamente", que é a única coisa que nunca
+   * vai funcionar.
+   *
+   * É a MESMA armadilha já documentada para o dedupe da importação ("com a tela
+   * sem carregar a lista, o array vive vazio e a checagem sumiria EM SILÊNCIO").
+   * Lá foi resolvida com `existing_contact_keys`; aqui tinha passado batida.
+   *
+   * ⚠️ E é o que explica "alguns usuários": quem chegou por uma tela que ainda
+   * carrega a lista inteira (Conversas, Calendários) tinha o array cheio e via a
+   * mensagem certa; quem foi direto para Contatos via a genérica.
+   */
   async findByPhone(phone: string): Promise<Contact | null> {
-    const { locationId, contacts } = useDbStore.getState();
+    await useDbStore.getState().ensureSession();
+    const locationId = useDbStore.getState().locationId;
     if (!locationId || !phone.trim()) return null;
     const supabase = createClient();
     const { data: existingId } = await supabase.rpc("find_contact_by_phone", {
@@ -370,7 +414,14 @@ export const dbContactActions = {
       p_phone: phone,
     });
     if (!existingId) return null;
-    return contacts.find((c) => c.id === existingId) ?? null;
+    // A linha vem do BANCO, não do store. Uma consulta por id é barata e é o que
+    // torna a resposta independente do que a tela carregou.
+    const { data } = await supabase
+      .from("contacts")
+      .select("*")
+      .eq("id", existingId as string)
+      .maybeSingle();
+    return data ? mapContact(data) : null;
   },
 
   async addTag(ids: string[], tag: string): Promise<boolean> {

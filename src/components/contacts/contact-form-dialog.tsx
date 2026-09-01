@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,9 +42,34 @@ export function ContactFormDialog({
   });
   const [custom, setCustom] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const router = useRouter();
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  /**
+   * Aviso de duplicado com CAMINHO para o contato existente.
+   *
+   * Dizer só "já existe" deixa a pessoa procurando à mão numa base de 41 mil —
+   * e foi o que ela tentou evitar cadastrando de novo.
+   */
+  const avisarDuplicado = (nome: string, id: string) => {
+    toast.error(
+      nome
+        ? `Já existe um contato com esse telefone: ${nome}`
+        : "Já existe um contato com esse telefone",
+      {
+        action: {
+          label: "Abrir contato",
+          onClick: () => {
+            onOpenChange(false);
+            router.push(`/contatos/${id}`);
+          },
+        },
+        duration: 8000,
+      },
+    );
+  };
 
   const submit = async () => {
     if (!form.firstName.trim()) {
@@ -53,14 +79,13 @@ export function ContactFormDialog({
     if (form.phone.trim()) {
       const dup = await dbContactActions.findByPhone(form.phone);
       if (dup) {
-        toast.error(
-          `Já existe um contato com esse número: ${`${dup.firstName} ${dup.lastName}`.trim()}`,
-        );
+        // Nomear o contato não basta: quem tentou cadastrar quer CHEGAR nele.
+        avisarDuplicado(`${dup.firstName} ${dup.lastName}`.trim(), dup.id);
         return;
       }
     }
     setSaving(true);
-    const ok = await dbContactActions.add({
+    const res = await dbContactActions.add({
       firstName: form.firstName.trim(),
       lastName: form.lastName.trim(),
       email: form.email.trim(),
@@ -76,8 +101,23 @@ export function ContactFormDialog({
       ),
     });
     setSaving(false);
-    if (!ok) {
-      toast.error("Não foi possível salvar o contato — tente novamente");
+    /*
+     * ⚠️ Antes era `if (!ok)` sobre um booleano, e "duplicado" e "falhou" caíam
+     * na MESMA frase: "tente novamente". No duplicado esse conselho é impossível
+     * de seguir — repetir encontra o mesmo contato para sempre. Foi o sintoma
+     * relatado, e a checagem prévia acima não pegava porque `findByPhone`
+     * procurava no array do store, que hoje vive vazio.
+     *
+     * Este ramo é a segunda barreira: mesmo que a checagem prévia falhe, a
+     * mensagem sai certa, porque o motivo vem do repo.
+     */
+    if (!res.ok) {
+      if (res.motivo === "duplicado") {
+        const dup = await dbContactActions.findByPhone(form.phone);
+        avisarDuplicado(dup ? `${dup.firstName} ${dup.lastName}`.trim() : "", res.existingId);
+      } else {
+        toast.error(res.erro ? `Não foi possível salvar: ${res.erro}` : "Não foi possível salvar o contato");
+      }
       return;
     }
     toast.success("Contato criado");
