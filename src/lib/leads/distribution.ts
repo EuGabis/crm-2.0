@@ -71,6 +71,19 @@ export async function onlineOrdered(
   return pool.filter((u) => online.has(u));
 }
 
+/**
+ * Uma pessoa específica está online agora?
+ *
+ * Existe para o nó `handoff` de atendente FIXO, que atribui direto e por isso
+ * não passava por `onlineOrdered`. Reusa o mesmo `PRESENCE_MS` do rodízio — duas
+ * definições de "online" divergiriam na primeira mudança, e aí a mesma pessoa
+ * seria online para um caminho e offline para o outro.
+ */
+export async function estaOnline(db: any, locationId: string, userId: string): Promise<boolean> {
+  const online = await onlineOrdered(db, locationId, [userId]);
+  return online.length > 0;
+}
+
 /** Funil de leads para setar o dono do card: por nome, senão pelas etapas típicas. */
 async function leadsPipelineId(
   db: any,
@@ -138,7 +151,15 @@ export async function assignLeadTo(
        * O que era texto no insert virou MOTIVO na coluna: o gatilho monta
        * "Atribuída a X (estava offline) · pelo sistema · rodízio do bot".
        */
-      assign_reason: p.reason ?? "rodízio do bot",
+      /*
+       * ⚠️ **O padrão era "rodízio do bot", e isso MENTIA** para o chamador que
+       * não é rodízio. O nó `handoff` de atendente FIXO chama esta função direto,
+       * e o fio dizia "rodízio do bot" numa atribuição que o rodízio nunca viu —
+       * foi o que fez a investigação de 02/09 procurar defeito na presença
+       * enquanto a causa era rota fixa no fluxo. Sem motivo informado, agora diz
+       * que não sabe, em vez de chutar o caminho mais comum.
+       */
+      assign_reason: p.reason ?? "atribuída pelo bot (origem não informada)",
     })
     .eq("id", p.conversationId);
 

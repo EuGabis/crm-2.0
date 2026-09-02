@@ -7,7 +7,12 @@
 import { sendText, sendInteractiveList } from "@/lib/whatsapp/client";
 import { toWhatsAppNumber } from "@/lib/whatsapp/phone";
 import { chat } from "@/lib/ai/openai";
-import { channelDepartmentId, distributeOne, assignLeadTo } from "@/lib/leads/distribution";
+import {
+  channelDepartmentId,
+  distributeOne,
+  assignLeadTo,
+  estaOnline,
+} from "@/lib/leads/distribution";
 import { normalize, type BotFlow, type BotNode, type BotOption } from "./types";
 import { extrairEmail, extrairEmailOuDoc, limitarNome } from "./campos";
 import { triagemFlow } from "./flows/triagem";
@@ -419,7 +424,15 @@ async function syncCard(
  * está online (lógica em @/lib/leads/distribution). Sem departamento vinculado ou
  * ninguém online → segura para o admin/varredura distribuir depois (Etapa B).
  */
-async function distributeLead(ctx: Ctx, node: { pipeline?: string }) {
+async function distributeLead(
+  ctx: Ctx,
+  node: { pipeline?: string },
+  /**
+   * Quem NÃO pode receber nesta distribuição. Usado quando o atendente fixo do
+   * fluxo está offline: sem isso o cursor poderia escolher justamente ele.
+   */
+  excluir?: string[],
+) {
   const deptId = await channelDepartmentId(ctx.db, ctx.channel.id);
   if (deptId) {
     // Rodízio é POR DEPARTAMENTO (0081): se o setor não usa rodízio, o lead não é
@@ -439,6 +452,8 @@ async function distributeLead(ctx: Ctx, node: { pipeline?: string }) {
       conversationId: ctx.conversationId,
       contactId: ctx.contact.id,
       pipelineName: node.pipeline,
+      excluir,
+      reason: excluir?.length ? "rodízio (atendente do fluxo offline)" : "rodízio do bot",
     });
     if (user) return; // assignLeadTo já registrou o log da transferência
   }
@@ -533,17 +548,48 @@ async function advance(
         // IA principal responde as próximas mensagens (auto-reply).
         await botLogEvent(ctx, "Conversa transferida de Bot para o Agente de IA");
       } else if (to === "usuario" && node.assignTo) {
-        // Atendente FIXO escolhido no fluxo: recebe a conversa + o card e o bot
-        // pausa (mesma mecânica do rodízio, mas sem rodízio).
-        await assignLeadTo(
+        /*
+         * Atendente FIXO escolhido no fluxo: recebe a conversa + o card e o bot
+         * pausa.
+         *
+         * ⚠️ **Este caminho ignorava a presença por completo**, e era a causa do
+         * relato de 02/09/2026: o nó `transfere_outros` do fluxo da secretaria —
+         * o ramo "qualquer outro assunto", o mais usado — aponta para uma
+         * atendente fixa, então TODA conversa daquele ramo caía na caixa dela
+         * mesmo com 17h sem sinal de presença. Não era o rodízio (que já
+         * respeita presença desde a 202608280930); era rota fixa no fluxo.
+         *
+         * Regra definida pelo Gabriel: **atendente offline não recebe; a conversa
+         * é distribuída.** Então, se o escolhido não está online, cai no rodízio
+         * do setor — que, por sua vez, já devolve para a FILA quando não há
+         * ninguém online. A intenção do fluxo ("esse assunto é da Jenifer") é
+         * preservada sempre que ela estiver lá.
+         */
+        const online = await estaOnline(
           ctx.db,
-          {
-            conversationId: ctx.conversationId,
-            contactId: ctx.contact.id,
-            locationId: ctx.channel.location_id,
-          },
+          ctx.channel.location_id,
           node.assignTo,
         );
+        if (online) {
+          await assignLeadTo(
+            ctx.db,
+            {
+              conversationId: ctx.conversationId,
+              contactId: ctx.contact.id,
+              locationId: ctx.channel.location_id,
+              reason: "atendente do fluxo",
+            },
+            node.assignTo,
+          );
+        } else {
+          await botLogEvent(
+            ctx,
+            "Atendente do fluxo está offline — encaminhado para o rodízio do setor",
+          );
+          // `excluir` para o rodízio não devolver a conversa para quem está fora:
+          // sem isso, o cursor poderia escolher justamente a pessoa offline.
+          await distributeLead(ctx, {}, [node.assignTo]);
+        }
       } else {
         // "humano" = passar pro atendimento: distribui por rodízio (escolhe UM
         // atendente e registra pra quem foi), igual ao nó "distribuir". Assim o

@@ -4049,3 +4049,62 @@ comum nesta base. Quem precisa do outro salva com "+".
 estavam no banco falhando. ⚠️ **Metade vigia o lado oposto** (não estragar o
 número brasileiro): regra estrita demais aqui é PIOR que o bug, porque pararia de
 entregar para 41 mil contatos em vez de 219.
+
+## Atendente offline recebendo contato: era ROTA FIXA no fluxo, não o rodízio (2026-09-02)
+
+Relato: "a Jenifer Martins não está online e está recebendo contatos". Medido no
+banco: **último sinal de presença 01/09 21:11**, e ainda assim **10 conversas
+atribuídas a ela em 02/09**, entre 06:44 e 11:42.
+
+⚠️ **Não era o rodízio.** A `202608280930` já respeita presença, `rodizio_offline`
+está `false` nos três departamentos, e `distributeOne` devolve `null` quando não
+há ninguém online. O erro estava em outro caminho.
+
+**A pista foi o TEXTO DO EVENTO.** O gatilho escreve
+`"Atribuída a X (estava offline) · …"` quando a pessoa está fora — e os eventos
+dela **não tinham** o "(estava offline)". Ou seja, o código acreditava que ela
+estava online. Confirmado na coluna: `assigned_offline = false` em todas.
+
+**A causa:** o nó `handoff` com `to: "usuario"` e `assignTo` chama `assignLeadTo`
+**direto**, sem passar por `onlineOrdered`. E o fluxo `triagem-secretaria` tem
+três desses:
+
+| nó | atendente fixo |
+|---|---|
+| `transfere_docs` | Daniel Messias |
+| `transfere_imersao` | Beatriz Brito |
+| **`transfere_outros`** | **Jenifer Martins** |
+
+`transfere_outros` é o ramo "qualquer outro assunto" — de longe o mais usado.
+Toda conversa dele caía na caixa dela, presente ou não.
+
+### ⚠️ O motivo padrão MENTIA, e foi o que fez a investigação errar o alvo
+
+`assignLeadTo` usava `p.reason ?? "rodízio do bot"`. O nó de atendente fixo não
+passa motivo, então o fio dizia **"rodízio do bot"** numa atribuição que o
+rodízio nunca viu. Procurei defeito na presença por causa dessa frase.
+
+Hoje o padrão é `"atribuída pelo bot (origem não informada)"` — diz que não sabe,
+em vez de chutar o caminho mais comum. **Valor padrão que afirma uma coisa
+plausível é pior que um que admite ignorância**: o primeiro manda a investigação
+para o lado errado com aparência de evidência.
+
+### A correção, seguindo a regra já definida
+
+Decisão do Gabriel, de 28/08: **atendente offline não recebe; a conversa é
+distribuída.** Então o nó de atendente fixo passou a conferir presença
+(`estaOnline`, que reusa o `PRESENCE_MS` do rodízio — duas definições de "online"
+divergiriam e a mesma pessoa seria online num caminho e offline no outro):
+
+- **online** → recebe, com motivo `"atendente do fluxo"`;
+- **offline** → cai no rodízio do setor, com `excluir` para o cursor não escolher
+  justamente quem está fora, e motivo
+  `"rodízio (atendente do fluxo offline)"`. O rodízio, por sua vez, já devolve
+  para a FILA do setor quando ninguém está online.
+
+A intenção do fluxo ("esse assunto é da Jenifer") é preservada sempre que ela
+estiver lá; o que muda é que a ausência dela deixa de ser invisível.
+
+⏳ **Não mexi nos nós do fluxo** — a configuração é do Gabriel, e "esse assunto é
+da Jenifer" é uma decisão de operação legítima. O que estava errado era o CRM
+tratar isso como incondicional.
