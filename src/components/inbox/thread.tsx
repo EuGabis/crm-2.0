@@ -21,6 +21,9 @@ import {
   Star,
   Trash2,
   UserPlus,
+  Ban,
+  MoreVertical,
+  Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
 import { HandoffSummaryDialog } from "./handoff-summary-dialog";
@@ -33,6 +36,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,6 +56,8 @@ import {
 } from "@/lib/data/repos/db/conversations";
 import { whatsappActions } from "@/lib/data/repos/db/whatsapp";
 import { useMyMembership, useTeam } from "@/lib/data/repos/db/team";
+import { useConfirm } from "@/components/shared/confirm";
+import { useDbStore } from "@/lib/data/repos/db/contacts";
 import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
 import type { Conversation, Message } from "@/lib/data/types";
 import { cn } from "@/lib/utils";
@@ -858,6 +864,100 @@ function ReenviarComoArquivo({
   );
 }
 
+/**
+ * Texto do `title` do selo "editada": as versões anteriores, da mais recente
+ * para a mais antiga.
+ *
+ * ⚠️ **Entradas de `acao: "apagada"` são FILTRADAS.** Elas carregam o texto que
+ * foi apagado (o log que ficou no banco para auditoria), e mostrá-lo aqui faria
+ * o CRM revelar na tela exatamente o que a pessoa pediu para esconder.
+ */
+/**
+ * Diálogo de edição do texto de uma mensagem.
+ *
+ * ⚠️ **O aviso sobre o cliente é obrigatório aqui, não opcional.** A Cloud API
+ * não tem editar: o celular do cliente continua com o texto ORIGINAL. Sem dizer
+ * isso na cara, o atendente corrige um valor errado, vê o balão atualizado e
+ * acredita que o cliente também viu — e passa a conversar sobre um texto que só
+ * existe do nosso lado.
+ *
+ * Montado por `key` no ponto de uso, então o campo nasce com o texto atual sem
+ * precisar de efeito (ver o mesmo padrão em `resposta-rapida-dialog.tsx`).
+ */
+function EditarMensagemDialog({
+  message,
+  onOpenChange,
+}: {
+  message: Message;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [texto, setTexto] = useState(message.body ?? "");
+  const [salvando, setSalvando] = useState(false);
+
+  const salvar = async () => {
+    const t = texto.trim();
+    if (!t) {
+      toast.error("A mensagem não pode ficar vazia — use Apagar");
+      return;
+    }
+    if (t === (message.body ?? "")) {
+      onOpenChange(false);
+      return;
+    }
+    setSalvando(true);
+    const ok = await conversationActions.editMessage(message.id, t);
+    setSalvando(false);
+    if (!ok) {
+      toast.error("Não foi possível editar — só o autor e administradores podem");
+      return;
+    }
+    toast.success("Mensagem editada no CRM");
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Editar mensagem</DialogTitle>
+        </DialogHeader>
+        <Textarea
+          value={texto}
+          onChange={(e) => setTexto(e.target.value)}
+          rows={5}
+          className="text-sm"
+        />
+        <p className="flex gap-1.5 rounded-md bg-amber-50 px-2.5 py-2 text-[11px] leading-snug text-amber-900">
+          <AlertTriangle className="mt-px size-3.5 shrink-0" aria-hidden />
+          <span>
+            O cliente <b>continua vendo o texto original</b> no celular dele — o WhatsApp não
+            permite editar mensagem já enviada. Isto muda só o histórico do CRM, e o balão passa
+            a mostrar &ldquo;editada&rdquo; com a versão anterior.
+          </span>
+        </p>
+        <DialogFooter>
+          <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => onOpenChange(false)}>
+            Cancelar
+          </Button>
+          <Button size="sm" className="h-8 text-xs" onClick={() => void salvar()} disabled={salvando}>
+            {salvando ? "Salvando..." : "Salvar"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function tituloDoHistorico(m: Message): string | undefined {
+  const versoes = (m.editHistory ?? []).filter((h) => h.acao === "editada");
+  if (!versoes.length) return undefined;
+  const linhas = versoes
+    .slice()
+    .reverse()
+    .map((h) => `· ${format(new Date(h.at), "dd/MM HH:mm", { locale: ptBR })} — ${h.body}`);
+  return ["Versões anteriores:", ...linhas].join(String.fromCharCode(10));
+}
+
 function MessageBubble({
   message,
   conversationId,
@@ -872,6 +972,17 @@ function MessageBubble({
   /** Canal da conversa — o desvio "enviar como arquivo" precisa dele. */
   channelIdDaConversa?: string | null;
 }) {
+  /*
+   * ⚠️ **Os hooks vêm ANTES do `return` antecipado de `event`.** Chamá-los depois
+   * de um retorno condicional quebra a regra dos hooks: a ordem passaria a
+   * depender do tipo da mensagem, e o React perderia o pareamento de estado
+   * entre renders.
+   */
+  const confirm = useConfirm();
+  const { isAdmin } = useMyMembership();
+  const meuId = useDbStore((st) => st.userId);
+  const [editando, setEditando] = useState(false);
+
   if (message.type === "event") return <PipelineEvent message={message} />;
   const isOut = message.direction === "out";
   const replyBtn = (
@@ -883,6 +994,67 @@ function MessageBubble({
       <CornerUpLeft className="size-3.5" />
     </button>
   );
+  /*
+   * ⚠️ Editar e apagar aparecem só onde fazem sentido, e o SERVIDOR repete cada
+   * uma destas condições (`editar_mensagem`/`apagar_mensagem`): esconder o botão
+   * não é controle de acesso.
+   *
+   *  - só mensagem de SAÍDA — editar o que o cliente escreveu é pôr palavra na
+   *    boca dele, e nem admin pode;
+   *  - editar só TEXTO — legenda de mídia e duração de áudio não se editam;
+   *  - apagada não reabre para edição;
+   *  - autor OU admin.
+   */
+  const meu = !!message.createdBy && message.createdBy === meuId;
+  const podeMexer = isOut && (meu || isAdmin) && !message.scheduleStatus;
+  const podeEditar = podeMexer && message.type === "text" && !message.deletedAt;
+  const podeApagar = podeMexer && !message.deletedAt;
+  const acoesBtn =
+    podeEditar || podeApagar ? (
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <button
+              title="Ações da mensagem"
+              className="flex size-6 shrink-0 items-center justify-center self-center rounded-full text-slate-400 opacity-0 transition hover:bg-slate-200 hover:text-slate-600 group-hover:opacity-100"
+            />
+          }
+        >
+          <MoreVertical className="size-3.5" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align={isOut ? "end" : "start"} className="w-44">
+          {podeEditar && (
+            <DropdownMenuItem className="text-xs" onClick={() => setEditando(true)}>
+              <Pencil className="size-3.5" /> Editar
+            </DropdownMenuItem>
+          )}
+          {podeApagar && (
+            <DropdownMenuItem
+              className="text-xs text-red-600"
+              onClick={async () => {
+                if (
+                  !(await confirm({
+                    title: "Apagar esta mensagem?",
+                    description:
+                      "O balão passa a dizer \"Esta mensagem foi apagada\". ⚠️ O cliente CONTINUA com a mensagem no celular dele — o WhatsApp não permite apagar do lado dele.",
+                    confirmLabel: "Apagar",
+                    destructive: true,
+                  }))
+                )
+                  return;
+                if (await conversationActions.softDeleteMessage(message.id)) {
+                  toast.success("Mensagem apagada");
+                } else {
+                  toast.error("Não foi possível apagar — só o autor e administradores podem");
+                }
+              }}
+            >
+              <Ban className="size-3.5" /> Apagar
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    ) : null;
   // Rótulo explícito do rastreio (WhatsApp): aparece no hover do checkzinho, com
   // a hora de entrega/leitura quando a Meta informou.
   const at = (iso?: string) =>
@@ -899,6 +1071,10 @@ function MessageBubble({
           : "Enviado";
   return (
     <div className={cn("group flex items-center gap-1", isOut ? "justify-end" : "justify-start")}>
+      {editando && (
+        <EditarMensagemDialog message={message} onOpenChange={setEditando} />
+      )}
+      {isOut && acoesBtn}
       {isOut && replyBtn}
       {/*
         ⚠️ Coluna envolvendo balão + reação. O balão tem `overflow-hidden` (a
@@ -939,7 +1115,23 @@ function MessageBubble({
           </div>
         )}
         {message.scheduleStatus && <ScheduleTag message={message} />}
-        {message.type === "audio" ||
+        {/*
+          ⚠️ Apagada substitui TODO o conteúdo — texto, mídia, legenda e a faixa
+          de falha. Deixar qualquer pedaço aparecendo (a onda do áudio, o nome do
+          arquivo) faria o balão dizer "apagada" e mostrar a mensagem ao mesmo
+          tempo, que é o oposto do pedido.
+        */}
+        {message.deletedAt ? (
+          <span
+            className={cn(
+              "flex items-center gap-1.5 text-xs italic",
+              isOut ? "text-indigo-200" : "text-slate-400"
+            )}
+          >
+            <Ban className="size-3.5 shrink-0" aria-hidden />
+            Esta mensagem foi apagada
+          </span>
+        ) : message.type === "audio" ||
         message.type === "image" ||
         message.type === "video" ||
         message.type === "file" ? (
@@ -957,7 +1149,7 @@ function MessageBubble({
           exige descobrir que há algo para passar o mouse em cima não comunica
           isso. Antes o balão dizia apenas "falhou", e nem o motivo era gravado.
         */}
-        {isOut && message.status === "failed" && (
+        {isOut && message.status === "failed" && !message.deletedAt && (
           <p
             title={message.errorDetail ?? undefined}
             className="mt-1 flex gap-1 rounded-md bg-rose-500/25 px-2 py-1 text-[10px] leading-snug text-rose-50"
@@ -970,7 +1162,7 @@ function MessageBubble({
             rastreada até o processamento da Meta. Imagem e documento são
             entregues normalmente, e um botão ali sugeriria um problema que não
             existe. */}
-        {isOut && message.status === "failed" && message.type === "audio" && (
+        {isOut && message.status === "failed" && message.type === "audio" && !message.deletedAt && (
           <ReenviarComoArquivo
             message={message}
             conversationId={conversationId}
@@ -984,6 +1176,16 @@ function MessageBubble({
           )}
         >
           {format(new Date(message.at), "HH:mm")}
+          {/*
+            "editada" ao lado da hora, como no WhatsApp. O `title` traz a versão
+            anterior — quem lê o fio precisa poder conferir o que mudou, e foi
+            justamente isso que o Gabriel pediu ao escolher "com histórico".
+          */}
+          {message.editedAt && !message.deletedAt && (
+            <span className="ml-1 italic" title={tituloDoHistorico(message)}>
+              editada
+            </span>
+          )}
           {isOut && message.status && (
             <span className="ml-1 inline-flex align-middle" title={statusLabel}>
               {message.status === "read" ? (
@@ -1002,6 +1204,7 @@ function MessageBubble({
       <Reacoes message={message} out={isOut && !message.internal} />
       </div>
       {!isOut && replyBtn}
+      {!isOut && acoesBtn}
     </div>
   );
 }

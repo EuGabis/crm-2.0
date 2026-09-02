@@ -94,6 +94,20 @@ export interface Message {
   errorDetail?: string;
   /** Reações (emoji) na mensagem — uma por pessoa, como no WhatsApp. */
   reactions?: { emoji: string; by: string; at: string }[];
+  /** Editada no CRM (o cliente continua com o texto original). */
+  editedAt?: string | null;
+  editedBy?: string | null;
+  /** Apagada no CRM: o balão vira "Esta mensagem foi apagada". */
+  deletedAt?: string | null;
+  deletedBy?: string | null;
+  /**
+   * Versões anteriores, do mais antigo ao mais novo. `body` é o texto que ESTAVA
+   * ali antes da ação — é o log de quem mexeu.
+   *
+   * ⚠️ A entrada de `acao: "apagada"` carrega o texto apagado, e a TELA NUNCA o
+   * mostra (nem para admin). Existe para auditoria no banco.
+   */
+  editHistory?: { at: string; by: string | null; body: string; acao: "editada" | "apagada" }[];
   /** Escrita por automação/IA, não por uma pessoa (migração 0027). */
   automated?: boolean;
   /** Transcrição do áudio (migração 0085). */
