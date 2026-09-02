@@ -154,7 +154,20 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
         location_id: channel.location_id,
         first_name: first,
         last_name: parts.join(" "),
-        phone,
+        /*
+         * ⚠️ **Guardado com "+", e isso não é cosmética.** O `from` da Meta é
+         * sempre o número internacional COMPLETO, só sem o "+". Salvo cru, o CRM
+         * perde a informação de que o país já está ali — e `toWhatsAppNumber`,
+         * ao responder, tentava adivinhar pelos dois primeiros dígitos. Vários
+         * códigos de país colidem com DDD brasileiro (`+1 514…` parece Sorocaba,
+         * `+61 412…` parece Brasília), então a resposta saía para um número
+         * inexistente e a Meta devolvia #131026. O "+" torna a dedução
+         * desnecessária.
+         *
+         * `private.phone_key` (0047) só olha dígitos, então o "+" não afeta o
+         * dedupe por telefone.
+         */
+        phone: "+" + phone.replace(/\D/g, ""),
         last_activity_channel: "whatsapp",
         last_activity_at: nowIso,
       })

@@ -11,7 +11,8 @@
     "db:audit": "node scripts/check-migrations.mjs --todos",
     "db:apply": "node scripts/apply-migration.mjs",
     "test:audio": "node scripts/test-audio.mjs",
-    "test:bot": "node scripts/test-bot-campos.mjs"
+    "test:bot": "node scripts/test-bot-campos.mjs",
+    "test:phone": "node scripts/test-phone.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

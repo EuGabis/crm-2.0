@@ -3948,3 +3948,54 @@ EMPRESA ("ver equipe da location"), então vinham TODAS as pessoas,
 `maybeSingle()` reclamava de várias linhas e o departamento saía nulo — virando
 "sem restrição de canal" em silêncio. Com uma pessoa só na empresa funcionava;
 com equipe, não. Corrigido com o filtro por `auth.uid()`.
+
+## #131026 no template: o CRM mandava para número INEXISTENTE (2026-09-02)
+
+Relato: template falhando com **"Message Undeliverable · #131026"**. Não tem
+relação com o #131042 de cobrança do dia anterior.
+
+⚠️ **A causa é o "+" que se perde no webhook, e o efeito é o CRM enviando para
+números que não existem.** O `from` da Meta é o número internacional COMPLETO, só
+sem o "+", e era gravado cru em `contacts.phone`. Sem o "+", `toWhatsAppNumber`
+adivinhava o país pelos dois primeiros dígitos — e **vários códigos de país
+COLIDEM com DDD brasileiro**. Medido no banco:
+
+```
+61412914627  (+61 412 914 627, Austrália) -> 5561412914627   "61" = DF
+15149635422  (+1 514 963 5422, Canadá)    -> 5515149635422   "15" = Sorocaba
+16472895906  (+1 647 289 5906, Canadá)    -> 5516472895906   "16" = Ribeirão
+```
+
+⚠️ **O que fazia parecer problema DA CONTA e não nosso:** os três contatos
+**escreveram** para nós (a entrada funciona, porque quem resolve o número é a
+Meta) e **nenhum jamais recebeu resposta**. Do lado de dentro, parecia que o
+WhatsApp recusava a conversa.
+
+Escala medida: **219 contatos** com forma não-brasileira levando `55` na frente,
+e **99** contatos internacionais que já nos escreveram e estavam nessa situação.
+
+### As três frentes da correção
+
+1. **`pareceBrasileiro`** — o DDD sozinho não decide mais. Exige a FORMA do
+   assinante: celular com 11 dígitos começando em **9** (obrigatório no Brasil
+   desde 2016), fixo com 10 dígitos começando em **2–5**. Isso resolve todos os
+   casos de 11 dígitos sem tocar em número brasileiro nenhum.
+2. **O webhook grava com "+"** (`"+" + from`). Torna a adivinhação desnecessária
+   daqui para frente. `private.phone_key` (0047) só olha dígitos, então o "+" não
+   afeta o dedupe por telefone.
+3. **Migração 202609021021**, com critério ESTREITO: só contato que já nos
+   ESCREVEU. Se existe mensagem de entrada, o telefone veio do `from` da Meta e é
+   comprovadamente completo — não é suposição. ⚠️ Contato digitado à mão ou vindo
+   da importação **não entra**: ali 11 dígitos podem genuinamente ser brasileiros
+   sem o 55, e carimbar "+" criaria o defeito INVERSO.
+
+⏳ **Sobra um caso genuinamente ambíguo, e está escrito como teste para não ser
+"corrigido" sem pensar:** 10 dígitos que são ao mesmo tempo fixo brasileiro e
+internacional plausíveis (`9549373665` = "(95) 4937-3665" ou "+1 954 937 3665").
+Pelos dígitos não há como decidir; assume-se brasileiro, que é o caso muito mais
+comum nesta base. Quem precisa do outro salva com "+".
+
+`npm run test:phone` — **30 asserções**, com os casos `[real]` sendo números que
+estavam no banco falhando. ⚠️ **Metade vigia o lado oposto** (não estragar o
+número brasileiro): regra estrita demais aqui é PIOR que o bug, porque pararia de
+entregar para 41 mil contatos em vez de 219.
