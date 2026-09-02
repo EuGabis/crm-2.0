@@ -4108,3 +4108,46 @@ estiver lá; o que muda é que a ausência dela deixa de ser invisível.
 ⏳ **Não mexi nos nós do fluxo** — a configuração é do Gabriel, e "esse assunto é
 da Jenifer" é uma decisão de operação legítima. O que estava errado era o CRM
 tratar isso como incondicional.
+
+## Áudio: o parâmetro `voice` que nunca enviamos (2026-09-02)
+
+O suporte da Meta encaminhou a documentação de mensagens de áudio, e ela tem um
+campo que o CRM **nunca usou** — `audio.voice`, com exigências de formato
+DIFERENTES em cada modo:
+
+| `voice` | resultado no WhatsApp | formato exigido |
+|---|---|---|
+| `true` | nota de voz nativa (onda, download automático, ícone de voz) | **só `.ogg` com OPUS, mono** |
+| `false` / omitido | áudio comum (ícone de música) | aac, amr, mpeg, **mp4**, ogg/opus |
+
+⚠️ **Omitir o campo deixava a escolha para o padrão do SERVIDOR — e essa é a
+primeira hipótese, em toda a investigação, que explica uma quebra SEM mudança
+nossa.** Se aquele padrão passar a ser `true`, o nosso MP4/AAC deixa de atender a
+regra do modo de voz e é recusado no processamento da mídia, que é exatamente o
+que o #131053 descreve. Casa com o formato do incidente: 98,5% de entrega até
+26/08 e 6,9% depois, sem deploy nosso no meio.
+
+`voice` agora vai **sempre explícito** (`AUDIO_VOICE_PADRAO = false`) e aparece no
+diagnóstico do balão (`voice=false`) e no `GET /api/whatsapp/send-media`
+(`audioVoiceExplicito: true`). ⚠️ **Não é palpite sobre a causa: é tirar da
+equação uma variável que não controlamos** — e sem o campo no diagnóstico, "qual
+modo foi usado?" volta a ser dedução, que é o que custou rodadas aqui.
+
+### ⚠️ A resposta do suporte estava errada, e de um jeito específico
+
+O primeiro retorno (caso `#38131516393161422`, assinado "Meta AI Agent") diz que
+"a Cloud API não suporta envio de mensagens de voz". A documentação que **eles
+mesmos** encaminharam depois descreve `voice: true` justamente para isso. E a
+mesma resposta se contradiz na frase seguinte, ao afirmar que a API suporta
+"texto e mídia (como imagens, **áudio** e vídeo)".
+
+Vale como lembrete: resposta de primeiro nível pode ser confiante e errada nas
+duas direções. O que decidiu o caso foi a MEDIÇÃO (191 áudios entregues nesta
+WABA), não a discussão.
+
+⏳ **Nota de voz nativa continua possível e não foi feita**: exige `voice: true`
+com Ogg/Opus **mono**, que é exatamente o que `corrigirPreSkip` e
+`microfoneMono()` já produzem. Não foi ligado agora porque o Ogg também está
+sendo recusado desde 26/08 — trocar dois eixos ao mesmo tempo tornaria o
+resultado do teste ilegível. Se o `voice: false` explícito resolver o envio, aí
+vale experimentar o modo de voz com Ogg.
