@@ -282,6 +282,29 @@ export async function uploadMedia(
  * do caminho. Ou funciona — e o problema era o upload —, ou falha igual, e aí a
  * causa não está em nada que o CRM controla.
  */
+/**
+ * ⚠️ **`voice` NÃO era enviado, e o padrão ficava por conta da Meta.**
+ *
+ * A documentação de mensagens de áudio (que o suporte encaminhou em 02/09/2026)
+ * descreve dois modos, com exigências DIFERENTES de formato:
+ *
+ *   - `voice: true`  → nota de voz nativa (onda, download automático, ícone de
+ *     voz). Exige **`.ogg` com codec OPUS, mono**. Nada mais serve.
+ *   - `voice: false` → áudio comum (ícone de música). Aceita `audio/aac`,
+ *     `audio/amr`, `audio/mpeg`, **`audio/mp4`** e `audio/ogg` (opus).
+ *
+ * Omitir o campo deixava a escolha para o padrão do servidor — e é a ÚNICA
+ * hipótese levantada até agora que explica uma quebra sem mudança nossa: se
+ * aquele padrão passar a ser `true`, o nosso MP4/AAC deixa de atender a regra do
+ * modo de voz e é recusado no processamento da mídia, exatamente como o #131053
+ * descreve. Casa com o formato do incidente — 98,5% de entrega até 26/08 e 6,9%
+ * depois, sem deploy nosso no meio.
+ *
+ * Agora vai SEMPRE explícito. Não é palpite sobre a causa: é tirar da equação uma
+ * variável que não controlamos.
+ */
+export const AUDIO_VOICE_PADRAO = false;
+
 export function sendMediaMessage(
   phoneNumberId: string,
   to: string,
@@ -290,10 +313,17 @@ export function sendMediaMessage(
   origem: { id: string } | { link: string },
   caption?: string,
   filename?: string,
+  /**
+   * Só para `kind === "audio"`. `true` só funciona com Ogg/Opus mono — ver o
+   * aviso acima. Omitido = `AUDIO_VOICE_PADRAO`.
+   */
+  voice?: boolean,
 ) {
   const media: Record<string, unknown> = "id" in origem ? { id: origem.id } : { link: origem.link };
   if (caption && kind !== "audio") media.caption = caption; // áudio não leva caption
   if (kind === "document" && filename) media.filename = filename; // nome do arquivo p/ o cliente
+  // Explícito e sempre, para áudio: o padrão do servidor deixa de decidir.
+  if (kind === "audio") media.voice = voice ?? AUDIO_VOICE_PADRAO;
   return graph(`${phoneNumberId}/messages`, {
     method: "POST",
     body: JSON.stringify({ messaging_product: "whatsapp", to, type: kind, [kind]: media }),

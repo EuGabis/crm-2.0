@@ -7,6 +7,7 @@ import {
   getMediaInfo,
   downloadMedia,
   graphVersion,
+  AUDIO_VOICE_PADRAO,
 } from "@/lib/whatsapp/client";
 import {
   analisarOgg,
@@ -118,7 +119,9 @@ export async function GET() {
       /** Áudio é relido da Meta e comparado com o que enviamos (round-trip). */
       roundTripDaMeta: true,
       /** Diagnóstico mostra qual canal/número foi usado no envio. */
-      canalNoDiagnostico: true
+      canalNoDiagnostico: true,
+      /** `voice` vai EXPLÍCITO no envio de áudio (não fica no padrão do servidor). */
+      audioVoiceExplicito: true
     },
   });
 }
@@ -445,7 +448,9 @@ export async function POST(request: Request) {
          * #131053 é justamente o erro dessa família. Sem o número no
          * diagnóstico, "é o canal?" continuaria sendo suposição.
          */
-        ` via=upload fmt=${sendMime}${notaRoundTrip}` +
+        ` via=upload fmt=${sendMime}` +
+        (kind === "audio" ? ` voice=${AUDIO_VOICE_PADRAO}` : "") +
+        `${notaRoundTrip}` +
         ` canal[id=${channel.id.slice(0, 8)} pnid=${channel.phone_number_id}` +
         ` waba=${channel.waba_id ?? "?"} nome=${channel.name ?? "?"}` +
         ` pedido=${channelId ? "cliente" : "conversa"}]`,
