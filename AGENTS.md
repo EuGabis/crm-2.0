@@ -4209,3 +4209,76 @@ e tratei intermitência como prova de que o arquivo estava certo. Não é: um
 arquivo no limite de um analisador falho produz exatamente isso.
 **Intermitência não absolve o arquivo; ela só descarta a explicação
 determinística.**
+
+## Departamento VENDAS (migração 202609021519)
+
+Pedido: "preparar o CRM para o time de vendas". Escolhas do Gabriel: o time são
+**Alberto, Paulo Lopes e Rogério**; o número de WhatsApp é **novo** e ainda vai
+ser cadastrado; o escopo é **departamento + permissões + rodízio** e
+**painel/relatório** (funil e bot ficaram de fora).
+
+⚠️ **E a instrução que definiu a migração: "não vamos mexer em nenhum que já está
+lá dentro".** Nada de departamento, canal, vínculo, pipeline ou membro existente
+é alterado — só se acrescenta.
+
+Isso descartou o caminho que eu ia tomar: **renomear "Secretaria Backup" para
+"Vendas"**, já que é lá que os três estão e é esse departamento que hoje é dono do
+funil Comercial. Seria uma linha de SQL, e era exatamente o proibido — com razão,
+porque aquele departamento também está vinculado ao número "Backup Secretaria",
+que segue atendendo secretaria.
+
+### O que o levantamento encontrou (vale saber ao mexer nessa base)
+
+- O funil **Comercial existe e está em uso**: 284 oportunidades, **279 abertas**,
+  40 sem responsável. Mas é `scope='department'` e pertence a **"Secretaria
+  Backup"**.
+- **Não existia departamento de vendas.** Só Financeiro, Secretaria e Secretaria
+  Backup.
+- O único número marcado como setor "Comercial" (+55 11 96585-3408) está
+  vinculado ao **Financeiro** e roda o `bot-financeiro`.
+- O painel de departamento existente chama-se **"Dashboard Comercial"** e é do
+  **Financeiro**.
+
+Ou seja: o time de vendas já operava, dentro de estruturas com nome de outra
+coisa. O departamento novo é o primeiro passo para o CRM dizer a verdade.
+
+### Decisões
+
+- **`relatorios: true`**, e é a única diferença em relação às permissões de quem
+  faz esse trabalho hoje (lá está `false`). Sem isso o time não abre Relatórios —
+  metade do que foi pedido. A aba Atendimento e o widget de SLA checam essa
+  permissão no **servidor** (`lib/auth/module-access.ts`), então esconder na tela
+  não seria proteção nem liberação.
+- **`pagamentos: false`**: vendas não precisa de token nem de histórico de
+  cobrança da Guru, e o cruzamento no detalhe do lead depende dessa permissão de
+  propósito.
+- **`colaborativo: false`**, igual ao departamento onde os três estão. Ligar
+  deixaria cada um assumir a conversa do outro — decisão de operação, não de
+  infraestrutura. Fica a um clique no diálogo.
+- `usa_rodizio: true`, `rodizio_offline: false`, `devolver_apos_min: 15` (mesma
+  régua da meta de SLA da 0079).
+- **`lead_pool` fica vazio de propósito**: `departmentPool` cai nos MEMBROS do
+  departamento quando o pool está vazio, então a lista se mantém sozinha à medida
+  que gente entra e sai. Preencher à mão criaria uma segunda lista para
+  divergir.
+
+### ⏳ Os TRÊS passos que faltam — e por que acontecem JUNTOS
+
+As pessoas, o funil e o número estão amarrados em "Secretaria Backup". Mover UM
+só quebra os outros dois:
+
+- mover os três para Vendas AGORA, com Vendas sem canal vinculado, faz
+  `private.channel_allowed` cair na regra **"departamento sem número = SEM
+  restrição"** — eles passariam a ver TODAS as conversas da empresa, inclusive as
+  da secretaria. **Mais acesso do que têm hoje, e ninguém pediu isso.**
+- mover o funil Comercial agora o tira de quem está atendendo
+  (`private.pipeline_visible` é por departamento);
+- e o número novo ainda não existe.
+
+Quando o chip entrar, na mesma sessão: **(1)** cadastrar o número em `/whatsapp` e
+vinculá-lo a Vendas; **(2)** mover os três em Configurações → Departamentos;
+**(3)** apontar o funil Comercial para Vendas (botão "Quem vê", em Leads).
+
+⚠️ Os cards **Funil de leads** e **Distribuição de fases** do painel já estão
+configurados apontando para o Comercial e **nascem VAZIOS até o passo 3** — é o
+estado final correto, e refazer o painel depois seria trabalho repetido.
