@@ -4151,3 +4151,61 @@ com Ogg/Opus **mono**, que é exatamente o que `corrigirPreSkip` e
 sendo recusado desde 26/08 — trocar dois eixos ao mesmo tempo tornaria o
 resultado do teste ilegível. Se o `voice: false` explícito resolver o envio, aí
 vale experimentar o modo de voz com Ogg.
+
+## ✅ A CAUSA do áudio, provada: MP4 FRAGMENTADO (2026-09-02)
+
+Depois de treze rodadas, o teste que fechou custou trinta segundos — e foi o
+Gabriel que insistiu no arquivo quando eu já tinha dado a conta como culpada.
+
+**No MESMO número, no MESMO minuto:**
+
+| hora | tipo | mime | fragmentado | resultado |
+|---|---|---|---|---|
+| 14:39 | audio | `audio/mp4` (gravado) | **sim** | ❌ #131053 |
+| **14:55** | audio | **`audio/mpeg`** (MP3 anexado) | **não** | ✅ **entregue e LIDO** |
+
+⚠️ **A causa é a FRAGMENTAÇÃO, não o formato.** O `MediaRecorder` do navegador
+emite fMP4: o `moov` sai sem tabela de amostras e as amostras moram nos
+fragmentos `moof`. O farejador de mídia da Meta não identifica o arquivo e cai em
+`application/octet-stream` — exatamente a frase do erro. MP3 é fluxo elementar,
+sem índice de contêiner para o analisador errar.
+
+**E isso reconcilia as duas leituras que pareciam incompatíveis:** arquivo no
+LIMITE (não inválido — navegador toca, Whisper transcreve, a Meta serve de volta
+como `audio/mp4`) com um analisador de comportamento VARIÁVEL produz falha
+intermitente. Era por isso que o mesmo arquivo passava de vez em quando, e era
+por isso que eu descartei a hipótese do arquivo cedo demais.
+
+### O conserto
+
+A gravação passa a sair em **MP3** (`lib/whatsapp/to-mp3.ts`: Web Audio
+decodifica, lamejs codifica, tudo no cliente — não há ffmpeg no serverless).
+
+- ⚠️ **Transcodifica SEMPRE**, qualquer que seja o formato gravado. Esta peça
+  existia (42b4580) e foi **revertida** em 7c3dbf5 sem motivo registrado; ela
+  convertia só o ramo Ogg, por causa da hipótese "esta conta recusa todo Ogg" —
+  errada, o Ogg entregou 191 vezes até 26/08. Deixar o MP4 passar direto manteria
+  o caminho que falha. **A solução estava certa pelo motivo errado.**
+- **Import dinâmico**: o lamejs só é baixado por quem grava áudio.
+- Falhando a conversão, manda o original — melhor tentar do que travar a gravação
+  que a pessoa acabou de fazer.
+- **`ENVIO_DE_AUDIO_LIBERADO` volta a `true`.** O microfone foi desligado em 27/08
+  porque prometer um botão que nunca entrega é pior que não ter o botão; o motivo
+  deixou de existir.
+
+### ⚠️ Um bug que o próprio teste revelou: `.m4a` saindo como VÍDEO
+
+Em 02/09 14:54, o arquivo `audio-2s.m4a.mp4` foi enviado como `type: "video"` e a
+Meta respondeu **"No video stream found in given video file"**. A causa é minha,
+do PR que passou a aceitar áudio pelo clipe: a ordem era
+`isVideo ? "video" : isAudio ? "audio"`, e um `.m4a` é tipado pelo navegador como
+`video/mp4` (é o mesmo contêiner). **Áudio-só num contêiner MP4 é áudio.** Agora a
+EXTENSÃO decide primeiro e o áudio é testado ANTES do vídeo.
+
+### A lição, que é a mais cara desta série
+
+Eu abandonei a hipótese do arquivo porque **o mesmo arquivo passava às vezes** —
+e tratei intermitência como prova de que o arquivo estava certo. Não é: um
+arquivo no limite de um analisador falho produz exatamente isso.
+**Intermitência não absolve o arquivo; ela só descarta a explicação
+determinística.**
