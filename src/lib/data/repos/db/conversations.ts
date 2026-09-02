@@ -1449,10 +1449,36 @@ export const snippetActions = {
     s.patch({ snippets: [...s.snippets, { id: data.id, name: data.name, content: data.content }] });
     return true;
   },
+  /**
+   * Edita nome e conteúdo de uma resposta rápida.
+   *
+   * ⚠️ Não existia: dava para criar e excluir, e a única forma de corrigir uma
+   * vírgula era apagar e escrever de novo. Em texto que o atendente manda
+   * dezenas de vezes por dia (preço de curso, requisitos), isso é atrito real.
+   *
+   * ⚠️ Confere as LINHAS devolvidas, não só o `error`: UPDATE recusado pela RLS
+   * volta SEM erro e afeta 0 linhas, e a tela diria "salvo" com o texto antigo
+   * no banco. É a armadilha nº 1 deste projeto.
+   */
+  async update(id: string, name: string, content: string): Promise<boolean> {
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("snippets")
+      .update({ name, content })
+      .eq("id", id)
+      .select("id, name, content");
+    if (!data?.length) return false;
+    const s = useConvStore.getState();
+    s.patch({
+      snippets: s.snippets.map((x) => (x.id === id ? { id, name, content } : x)),
+    });
+    return true;
+  },
   async remove(id: string): Promise<boolean> {
     const supabase = createClient();
-    const { error } = await supabase.from("snippets").delete().eq("id", id);
-    if (error) return false;
+    const { data } = await supabase.from("snippets").delete().eq("id", id).select("id");
+    // Mesmo motivo do `update`: DELETE recusado pela RLS não vem com erro.
+    if (!data?.length) return false;
     const s = useConvStore.getState();
     s.patch({ snippets: s.snippets.filter((x) => x.id !== id) });
     return true;

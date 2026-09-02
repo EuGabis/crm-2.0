@@ -3949,6 +3949,56 @@ EMPRESA ("ver equipe da location"), então vinham TODAS as pessoas,
 "sem restrição de canal" em silêncio. Com uma pessoa só na empresa funcionava;
 com equipe, não. Corrigido com o filtro por `auth.uid()`.
 
+## Respostas rápidas: eram DUAS listas com o mesmo nome (2026-09-01)
+
+Pedido: "adicionar a opção de editar e adicionar respostas rápidas". Ao abrir o
+composer, o motivo do pedido ficou claro — **existiam dois menus, os dois
+chamados "Respostas rápidas"**:
+
+| menu | fonte | editável |
+|---|---|---|
+| ícone de raio | `QUICK_REPLIES`, array **fixo no código** | ❌ |
+| botão "Trechos" | `public.snippets` (0003) | criar/excluir, **sem editar** |
+
+⚠️ **O `DropdownMenuLabel` do menu "Trechos" já dizia "Respostas rápidas"** — ou
+seja, o próprio código chamava as duas coisas pelo mesmo nome. Quem pedia para
+editar estava olhando justamente a que não dava, e não havia como descobrir isso
+pela tela.
+
+Agora existe **UMA** lista, no banco, editável nos dois lugares.
+
+- A lista fixa **saiu do código**, e a migração **202609011821** move as 5 frases
+  para `snippets` para ninguém perder o que já usava. Idempotente por
+  `(location_id, name)`: a tabela é editada pela tela, então reexecutar não pode
+  encher a lista de repetidas.
+- ⚠️ **As 5 ganharam NOME** ("Saudação", "Pedir um momento"…). No código eram
+  anônimas e o menu mostrava o texto inteiro; `snippets` tem nome + conteúdo, e o
+  menu mostra o nome em negrito com prévia embaixo. Sem nome curto, o menu vira
+  uma pilha de parágrafos — que é o que a lista de trechos de curso já evitava.
+- `snippetActions.update` **não existia**: dava para criar e excluir, e corrigir
+  uma vírgula exigia apagar e reescrever. Em texto que o atendente manda dezenas
+  de vezes por dia (valores de curso, requisitos), isso é atrito real. Confere as
+  LINHAS devolvidas, não o `error` — UPDATE recusado pela RLS volta calado. O
+  `remove` tinha o mesmo furo e foi corrigido junto.
+- **Criar e editar acontecem no composer**, sem sair do atendimento. Antes,
+  criar exigia abandonar a conversa e ir na aba; "Nova resposta rápida" já vem
+  com o que estiver escrito no campo, que é o momento natural de salvar um texto
+  que se acabou de compor.
+- ⚠️ **O lápis fica FORA do `DropdownMenuItem`**, num `<div>` irmão: dentro dele,
+  o clique fecharia o menu E inseriria o texto no campo — o oposto de "editar".
+- ⚠️ **O formulário é UM componente** (`resposta-rapida-dialog.tsx`), usado pelo
+  composer e pela aba. Dois formulários teriam duas validações e duas mensagens
+  de erro para divergirem — e foi exatamente assim que o CRM acabou com duas
+  listas de respostas rápidas.
+- ⚠️ **Campos limpos por `key`, não por `useEffect`.** O inicializador do
+  `useState` só vale na primeira montagem, então sem isso abrir o diálogo para
+  uma segunda resposta mostraria o texto da primeira (o defeito que a transcrição
+  de áudio já teve aqui). A saída óbvia — um efeito semeando os campos — é
+  `setState` dentro de efeito, que causa renderização em cascata e o lint acusa.
+  Remontar por `key={editando.id || "novo"}` resolve sem efeito nenhum.
+- A aba **"Trechos" passou a se chamar "Respostas rápidas"**, e o vocabulário do
+  CRM fica sendo o do usuário. Ainda é a mesma tabela: nada a migrar além do seed.
+
 ## #131026 no template: o CRM mandava para número INEXISTENTE (2026-09-02)
 
 Relato: template falhando com **"Message Undeliverable · #131026"**. Não tem
