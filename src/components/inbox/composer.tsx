@@ -41,13 +41,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { RespostaRapidaDialog } from "./resposta-rapida-dialog";
 import { ScheduleDialog } from "./schedule-dialog";
 import { channelLabel } from "@/components/shared/channel-icon";
@@ -58,7 +51,6 @@ import {
   useReplyStore,
   useReplyTarget,
   useSnippets,
-  snippetActions,
   useTemplateIntentStore,
 } from "@/lib/data/repos/db/conversations";
 import { whatsappActions } from "@/lib/data/repos/db/whatsapp";
@@ -89,7 +81,21 @@ const CHANNELS: Channel[] = ["whatsapp", "sms", "email"];
  * Meta não resolver, o microfone fica desligado para ninguém gravar em vão.
  * Religar = mudar para `true` (uma linha) quando a Meta consertar.
  */
-const ENVIO_DE_AUDIO_LIBERADO = false;
+/*
+ * ⚠️ **Religado em 02/09/2026.** Foi desligado em 27/08 porque a Meta recusava
+ * todo áudio gravado (#131053) e o atendente só via "falhou" — prometer um botão
+ * que nunca entrega é pior que não ter o botão.
+ *
+ * O motivo deixou de existir: a causa era o MP4 FRAGMENTADO que o
+ * `MediaRecorder` produz, e a gravação agora sai em MP3 (ver `to-mp3.ts`), o
+ * único formato que temos PROVA de ser entregue nesta conta — MP3 anexado do
+ * computador foi entregue e lido em 02/09 14:55, no mesmo minuto em que um MP4
+ * gravado foi recusado.
+ *
+ * Se voltar a falhar, o balão traz o motivo e o botão "Enviar como arquivo"
+ * continua como saída.
+ */
+const ENVIO_DE_AUDIO_LIBERADO = true;
 
 const EMOJIS = "😀 😁 😂 🤣 😊 😍 😘 😎 🤩 🥳 👍 👏 🙏 💪 🔥 🎉 ✅ ❤️ 💜 💙 ⭐ ✨ 📌 📎 📅 ⏰ 💰 📞 💬 👋".split(" ");
 
@@ -321,6 +327,7 @@ export function Composer({ conversationId }: { conversationId: string }) {
       return;
     }
     const isImg = file.type.startsWith("image/");
+    const EXT_VIDEO = [".mp4", ".3gp", ".3gpp", ".mov", ".webm", ".mkv"];
     const isVideo = file.type.startsWith("video/");
     const name = file.name.toLowerCase();
     const isDoc =
@@ -343,14 +350,24 @@ export function Composer({ conversationId }: { conversationId: string }) {
      *
      * Serve de saída prática também: dá para gravar no celular e anexar.
      */
+    /*
+     * ⚠️ **A EXTENSÃO decide antes do mime, e o áudio é testado ANTES do vídeo.**
+     * Um `.m4a` costuma ser tipado pelo navegador como `video/mp4` (é o mesmo
+     * contêiner), e com `isVideo` na frente ele saía como `type: "video"` — a
+     * Meta respondia "No video stream found in given video file" (visto em
+     * 02/09 14:54, arquivo `audio-2s.m4a.mp4`). Áudio-só num contêiner MP4 é
+     * áudio, não vídeo.
+     */
+    const EXT_AUDIO = [".mp3", ".m4a", ".aac", ".ogg", ".opus", ".amr", ".wav"];
     const isAudio =
-      file.type.startsWith("audio/") ||
-      [".mp3", ".m4a", ".aac", ".ogg", ".opus", ".amr"].some((e) => name.endsWith(e));
+      EXT_AUDIO.some((e) => name.endsWith(e)) ||
+      (file.type.startsWith("audio/") && !EXT_VIDEO.some((e) => name.endsWith(e)));
     if (!isImg && !isVideo && !isDoc && !isAudio) {
       toast.error("Aceito imagem, vídeo, áudio, PDF ou DOCX");
       return;
     }
-    const kind = isImg ? "image" : isVideo ? "video" : isAudio ? "audio" : "file";
+    // Áudio ANTES de vídeo — ver o aviso em `isAudio`.
+    const kind = isImg ? "image" : isAudio ? "audio" : isVideo ? "video" : "file";
     setUploading(true);
     const res = await conversationActions.sendMedia(conversationId, {
       file,
@@ -447,8 +464,34 @@ export function Composer({ conversationId }: { conversationId: string }) {
         setRecording(false);
         if (cancelRef.current) return;
         const secs = Math.max(1, Math.round((Date.now() - startedRef.current) / 1000));
-        const blob = new Blob(chunksRef.current, { type: mimeArquivo });
-        const file = new File([blob], `audio-${secs}s.${fmt.ext}`, { type: mimeArquivo });
+        const bruto = new Blob(chunksRef.current, { type: mimeArquivo });
+
+        /*
+         * ⚠️ **A gravação sai em MP3, e isso está PROVADO, não deduzido.** O
+         * `MediaRecorder` emite MP4 FRAGMENTADO; o farejador de mídia da Meta não
+         * identifica o arquivo e devolve #131053. O teste que fechou, em 02/09:
+         * no mesmo número e no mesmo minuto, o MP4 gravado foi recusado e um MP3
+         * anexado do computador foi ENTREGUE E LIDO.
+         *
+         * ⚠️ Transcodifica SEMPRE, qualquer que seja o formato gravado. A primeira
+         * versão disto (42b4580, revertida) convertia só o ramo Ogg, por causa da
+         * hipótese "esta conta recusa todo Ogg" — errada, o Ogg entregou 191 vezes
+         * até 26/08. Deixar o MP4 passar direto manteria o caminho que falha.
+         *
+         * ⚠️ **Import DINÂMICO**: o lamejs só é baixado por quem grava áudio, e
+         * não entra no pacote de quem apenas abre a conversa.
+         *
+         * Falhando a conversão, manda o original — melhor tentar do que travar a
+         * gravação que a pessoa acabou de fazer.
+         */
+        let file: File;
+        try {
+          const { audioParaMp3 } = await import("@/lib/whatsapp/to-mp3");
+          file = await audioParaMp3(bruto, secs);
+        } catch (e) {
+          console.warn("[audio] falha ao converter para MP3, enviando o original:", e);
+          file = new File([bruto], `audio-${secs}s.${fmt.ext}`, { type: mimeArquivo });
+        }
         /*
          * Mesma inspeção que a rota faz nos bytes (`lib/whatsapp/audio.ts`), aqui
          * só para avisar antes da viagem — a decisão de recusar é do servidor,
@@ -460,7 +503,8 @@ export function Composer({ conversationId }: { conversationId: string }) {
          * WebM ou WAV não disparava aviso nenhum. `inspecionarAudio` nomeia esse
          * caso em vez de devolver ausência de resultado.
          */
-        const insp = inspecionarAudio(await blob.arrayBuffer());
+        // Roda no arquivo FINAL (já em MP3 quando a conversão deu certo).
+        const insp = inspecionarAudio(await file.arrayBuffer());
         if (!insp.aceitavel) {
           console.warn(`[audio] ${insp.motivo} — ${resumoDaInspecao(insp)}`);
           toast.warning(insp.motivo);
