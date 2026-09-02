@@ -4282,3 +4282,69 @@ vinculá-lo a Vendas; **(2)** mover os três em Configurações → Departamento
 ⚠️ Os cards **Funil de leads** e **Distribuição de fases** do painel já estão
 configurados apontando para o Comercial e **nascem VAZIOS até o passo 3** — é o
 estado final correto, e refazer o painel depois seria trabalho repetido.
+
+## Editar e apagar mensagem (migração 202609021725)
+
+Pedido: "editar e apagar a mensagem para mim e todos, igual no WhatsApp".
+
+### 🔴 "Apagar para todos" NÃO EXISTE na Cloud API
+
+Conferido na referência oficial de `/messages`: **o endpoint só ENVIA.** Não há
+edit, delete, revoke nem unsend — só reação, indicador de digitação e recibo de
+leitura. O celular do cliente guarda a mensagem original, e **nada que o CRM faça
+muda isso**. Tudo desta seção vale só do lado de cá.
+
+⚠️ **É por isso que o diálogo de edição tem um aviso âmbar obrigatório** dizendo
+que o cliente continua com o texto original. Sem ele, o atendente corrige um
+valor errado, vê o balão atualizado e acredita que o cliente também viu — e passa
+a conversar sobre um texto que só existe do nosso lado. O mesmo aviso está na
+confirmação de apagar.
+
+### Escolhas do Gabriel
+
+Apagar **marca** (não remove), editar vale **também para mensagem enviada, com
+histórico**, e pode o **autor e o admin**, com **log de quem mexeu**.
+
+A alternativa que ele recusou — apagar de vez — teria deixado o SLA (0079), o
+resumo de atendimento (0087) e a Lita lendo um histórico incompleto, sem ninguém
+saber que houve mensagem ali.
+
+### Como está feito
+
+- Colunas `edited_at`/`edited_by`, `deleted_at`/`deleted_by` e
+  **`edit_history jsonb`** — entradas `{at, by, body, acao}`, onde `body` é o
+  texto que ESTAVA ali. JSONB e não tabela nova pelo mesmo motivo de
+  `messages.reactions`: lista pequena, lida sempre junto da mensagem.
+- ⚠️ **`public.editar_mensagem` / `public.apagar_mensagem` são `security
+  definer`, e não `update` do cliente.** A **0040** tornou UPDATE em `messages`
+  admin-only, então o autor seria barrado — e UPDATE recusado pela RLS **não
+  devolve erro**, então a tela diria "editada" com o texto antigo no banco.
+  Checagem de empresa na primeira linha (padrão 0049), com o par
+  `revoke`/`grant`.
+- ⚠️ **Apagar ESVAZIA o `body`**, não só marca. A busca global do inbox procura
+  no CORPO das mensagens e a prévia da conversa É o corpo — marcar sem esvaziar
+  deixaria o texto aparecendo nos dois lugares onde mais incomoda.
+  `private.recalcular_previa` recompõe a prévia a partir da última mensagem
+  visível; sem isso, apagar a última deixaria o texto brilhando na lista, que é
+  onde a pessoa olha primeiro.
+- ⚠️ **O texto apagado é GUARDADO no histórico e a TELA NUNCA o mostra** — nem
+  para admin. Fica fora da vista e da busca, disponível no banco para auditoria,
+  porque mensagem apagada é justamente a que gera disputa depois. É decisão de
+  produto: `tituloDoHistorico` filtra as entradas `acao: "apagada"` de propósito.
+- ⚠️ **Mensagem de ENTRADA nunca é editável, nem por admin.** Editar o que o
+  cliente escreveu é pôr palavra na boca dele, e o resumo, a Lita e o próximo
+  atendente leem justamente esse fio. É a única regra aqui que não é
+  configurável. Editar também só vale para `type = 'text'`.
+- ⚠️ **Os hooks de `MessageBubble` vêm ANTES do `return` antecipado de `event`.**
+  Chamá-los depois de um retorno condicional quebra a regra dos hooks: a ordem
+  passaria a depender do tipo da mensagem.
+- O balão apagado substitui **todo** o conteúdo — texto, mídia, legenda e a faixa
+  de falha. Deixar a onda do áudio ou o nome do arquivo faria o balão dizer
+  "apagada" e mostrar a mensagem ao mesmo tempo.
+- Esconder o botão **não é controle de acesso**: cada condição da tela (saída,
+  texto, autor ou admin, não apagada) é repetida no servidor.
+
+⏳ Fora do escopo: janela de tempo para editar/apagar (o Gabriel escolheu sem
+limite, com log), e uma tela de auditoria que mostre o histórico completo — hoje
+o histórico de EDIÇÕES aparece no `title` do selo "editada", e o texto apagado só
+no banco.

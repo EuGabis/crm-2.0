@@ -71,6 +71,11 @@ const mapMessage = (r: any): Message => ({
   readAt: r.read_at ?? undefined,
   errorDetail: r.error_detail ?? undefined,
   reactions: r.reactions ?? undefined,
+  editedAt: r.edited_at ?? null,
+  editedBy: r.edited_by ?? null,
+  deletedAt: r.deleted_at ?? null,
+  deletedBy: r.deleted_by ?? null,
+  editHistory: r.edit_history ?? undefined,
   automated: r.automated || undefined,
   transcription: r.transcription ?? undefined,
   transcriptionStatus: r.transcription_status ?? undefined,
@@ -1214,6 +1219,63 @@ export const conversationActions = {
     * "excluída" com a nota ainda no banco (o mesmo tropeço que já aconteceu
     * com a exclusão de conversa).
     */
+  /**
+   * Edita o texto de uma mensagem de SAÍDA, guardando a versão anterior.
+   *
+   * ⚠️ Via RPC e não `update`: a 0040 tornou UPDATE em `messages` admin-only, e
+   * UPDATE recusado pela RLS **não devolve erro** — a tela diria "editada" com o
+   * texto antigo no banco. A função `security definer` também concentra a regra
+   * (autor ou admin; entrada nunca; só texto) em um lugar.
+   *
+   * ⚠️ **O cliente continua com o texto original.** A Cloud API não tem editar
+   * nem apagar; isto vale só do lado do CRM.
+   */
+  async editMessage(id: string, body: string): Promise<boolean> {
+    const supabase = createClient();
+    const { data, error } = await supabase.rpc("editar_mensagem", { p_id: id, p_body: body });
+    if (error || data !== true) return false;
+    const s = useConvStore.getState();
+    const agora = new Date().toISOString();
+    s.patch({
+      messages: s.messages.map((m) =>
+        m.id === id
+          ? {
+              ...m,
+              body,
+              editedAt: agora,
+              editHistory: [
+                ...(m.editHistory ?? []),
+                { at: agora, by: null, body: m.body ?? "", acao: "editada" as const },
+              ],
+            }
+          : m
+      ),
+    });
+    return true;
+  },
+
+  /**
+   * Marca a mensagem como apagada — não remove a linha.
+   *
+   * O balão passa a dizer "Esta mensagem foi apagada", e o texto sai da busca
+   * global e da prévia da conversa (a função esvazia `body` e recalcula a
+   * prévia). Escolha do Gabriel: apagar de vez faria o SLA, o resumo e a Lita
+   * lerem um histórico incompleto.
+   */
+  async softDeleteMessage(id: string): Promise<boolean> {
+    const supabase = createClient();
+    const { data, error } = await supabase.rpc("apagar_mensagem", { p_id: id });
+    if (error || data !== true) return false;
+    const s = useConvStore.getState();
+    const agora = new Date().toISOString();
+    s.patch({
+      messages: s.messages.map((m) =>
+        m.id === id ? { ...m, body: "", deletedAt: agora } : m
+      ),
+    });
+    return true;
+  },
+
   async removeMessage(id: string): Promise<boolean> {
     const supabase = createClient();
     const { data, error } = await supabase.from("messages").delete().eq("id", id).select("id");
