@@ -18,7 +18,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -36,10 +35,38 @@ import type { Appointment, Opportunity } from "@/lib/data/types";
 import { cn } from "@/lib/utils";
 
 import { useConfirm } from "@/components/shared/confirm";
+/*
+ * 🗑️ **A aba "Configurações" SAIU** (03/09/2026, a pedido do Gabriel: "só vamos
+ * deixar sem o mock").
+ *
+ * Ela prometia três coisas e não entregava nenhuma:
+ *   * "Calendários conectados" (Google Calendar) — conta inventada com selo
+ *     "Conectado" e botões respondendo `toast.info`. Removida no commit anterior;
+ *   * "Disponibilidade padrão" — tarjas vindas de uma constante no código, não
+ *     editáveis;
+ *   * "Duração padrão da reunião" — select num `useState` que morria ao trocar de
+ *     página;
+ *   * "Lembrete via WhatsApp" (24h e 10min antes) — nada disso existe: não há
+ *     rota, agendamento nem template. O "Salvar" respondia
+ *     `toast.success("salvas")` sem salvar.
+ *
+ * ⚠️ **Tela que promete e não entrega é pior do que tela ausente**: alguém
+ * configura, lê "salvas", e conta com o lembrete que nunca vai sair. Mesma
+ * decisão do Canva, do webphone e do checklist de ativação — o que não funciona
+ * sai, e o histórico do git guarda.
+ *
+ * ⚠️ **O que É real continua onde estava, e não se confunda:**
+ * `appointments.reminder_minutes` (0042) e `tasks.reminder_minutes` (0050) geram
+ * o popup DENTRO do CRM (`components/calendar/reminders.tsx`), escolhido por
+ * compromisso no próprio diálogo. Isso funciona.
+ *
+ * A versão real desta aba (disponibilidade por atendente, com migração e testes)
+ * chegou a ser escrita e foi cancelada a pedido dele — está no commit 480288e se
+ * um dia voltar.
+ */
 const TABS = [
   { label: "Visualização de calendário" },
   { label: "Lista de compromissos" },
-  { label: "Configurações" },
 ];
 
 /* -------------------------- Lista de compromissos ------------------------ */
@@ -217,140 +244,6 @@ function ListaCompromissos({
             )}
           </tbody>
         </table>
-      </div>
-    </>
-  );
-}
-
-/* ------------------------------ Configurações ---------------------------- */
-
-const DIAS = [
-  { dia: "Seg", horario: "09:00–18:00" },
-  { dia: "Ter", horario: "09:00–18:00" },
-  { dia: "Qua", horario: "09:00–18:00" },
-  { dia: "Qui", horario: "09:00–18:00" },
-  { dia: "Sex", horario: "09:00–18:00" },
-  { dia: "Sáb", horario: "Indisponível" },
-  { dia: "Dom", horario: "Indisponível" },
-];
-
-function ConfigCalendarios() {
-  const [duracao, setDuracao] = useState("30");
-  const [lembrete24h, setLembrete24h] = useState(true);
-  const [lembrete10min, setLembrete10min] = useState(true);
-
-  return (
-    <>
-      <div className="mb-4">
-        <h1 className="text-lg font-bold text-slate-900">Configurações de calendário</h1>
-        <p className="text-xs text-slate-500">
-          Conexões, disponibilidade e lembretes automáticos
-        </p>
-      </div>
-      <div className="grid max-w-4xl gap-4 md:grid-cols-2">
-        {/*
-          🗑️ **"Calendários conectados" REMOVIDO** (03/09/2026, a pedido do
-          Gabriel: "remover essa opção de conectar com o google calendar por
-          enquanto").
-
-          Era mock inteiro: o cartão mostrava uma conta inventada
-          (`gustavo@litocrm.com.br`, que vem das fixtures) com o selo verde
-          **"Conectado"** — afirmação falsa —, e os dois botões respondiam
-          `toast.info("chega com o backend")`. Não existe OAuth de Google
-          Calendar no CRM: nenhuma rota, nenhuma tabela, nenhuma env.
-
-          Prometer integração que não existe é pior do que não oferecer: alguém
-          confia que a agenda está sincronizada e para de conferir. Mesma decisão
-          do Canva (código morto sai, o histórico do git guarda) e do interruptor
-          falso de resposta automática nas Conversas.
-
-          Se o Google Calendar entrar um dia, o caminho é OAuth por empresa como
-          o do Google Ads (`google_ads_connections`, migração 0023) — e aí o selo
-          "Conectado" passa a sair do banco, não de um literal.
-        */}
-        <div className="rounded-xl border bg-white p-5">
-          <p className="mb-3 text-xs font-bold text-slate-700">Disponibilidade padrão</p>
-          <div className="flex flex-wrap gap-1.5">
-            {DIAS.map((d) => (
-              <span
-                key={d.dia}
-                className={cn(
-                  "rounded-full px-3 py-1 text-[11px] font-medium",
-                  d.horario === "Indisponível"
-                    ? "bg-slate-100 text-slate-400"
-                    : "bg-indigo-50 text-indigo-700"
-                )}
-              >
-                {d.dia} {d.horario === "Indisponível" ? "—" : d.horario}
-              </span>
-            ))}
-          </div>
-          <div className="mt-4 space-y-1">
-            <Label className="text-xs">Duração padrão da reunião</Label>
-            <Select value={duracao} onValueChange={(v) => v && setDuracao(v)}>
-              <SelectTrigger className="h-8 w-44 text-xs">
-                <SelectValue>{duracao} minutos</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {["30", "45", "60"].map((m) => (
-                  <SelectItem key={m} value={m} className="text-xs">
-                    {m} minutos
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        <div className="rounded-xl border bg-white p-5 md:col-span-2">
-          <p className="mb-3 text-xs font-bold text-slate-700">Lembretes automáticos</p>
-          <div className="space-y-3">
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <div>
-                <p className="text-xs font-semibold text-slate-700">
-                  Lembrete via WhatsApp — 24h antes
-                </p>
-                <p className="text-[11px] text-slate-500">
-                  Envia uma mensagem de confirmação ao contato um dia antes da reunião
-                </p>
-              </div>
-              <Switch checked={lembrete24h} onCheckedChange={(v) => setLembrete24h(!!v)} />
-            </div>
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <div>
-                <p className="text-xs font-semibold text-slate-700">
-                  Lembrete via WhatsApp — 10min antes
-                </p>
-                <p className="text-[11px] text-slate-500">
-                  Envia o link e os detalhes da reunião minutos antes do início
-                </p>
-              </div>
-              <Switch checked={lembrete10min} onCheckedChange={(v) => setLembrete10min(!!v)} />
-            </div>
-          </div>
-          <div className="mt-4 flex justify-end">
-            {/*
-              ⚠️ Era `toast.success("Configurações de calendário salvas")` — e
-              NADA era salvo: os dois interruptores são `useState`, que morre ao
-              trocar de página. Alguém ligava o lembrete de 24h, lia "salvas" e
-              acreditava que o cliente seria avisado; não seria, e o resultado é
-              falta na reunião.
-
-              A convenção do projeto para ação que depende de backend é
-              `toast.info("<ação> chega com o backend")`. O botão fica — é onde a
-              ação vai morar — mas para de afirmar o que não fez.
-            */}
-            <Button
-              size="sm"
-              className="h-8 text-xs"
-              onClick={() =>
-                toast.info("Lembrete automático por WhatsApp chega com o backend")
-              }
-            >
-              Salvar
-            </Button>
-          </div>
-        </div>
       </div>
     </>
   );
@@ -701,7 +594,13 @@ export default function CalendariosPage() {
       slot: {
         date: format(day, "yyyy-MM-dd"),
         startTime: `${String(hour).padStart(2, "0")}:00`,
-        // 45min é a duração padrão sugerida nas Configurações do módulo.
+        /*
+         * ⚠️ 45min é padrão FIXO, e o comentário anterior mentia: dizia "duração
+         * padrão sugerida nas Configurações do módulo" — aba que era mock (o
+         * select não ia a lugar nenhum) e que saiu em 03/09. Não existe
+         * configuração de duração hoje; quem quiser outra troca o horário no
+         * diálogo, que é o comportamento real.
+         */
         endTime: `${String(hour).padStart(2, "0")}:45`,
       },
     });
@@ -756,13 +655,11 @@ export default function CalendariosPage() {
               onEdit={(appointment) => setDraft({ appointment })}
             />
           </>
-        ) : tab === "Lista de compromissos" ? (
+        ) : (
           <ListaCompromissos
             onNew={openNew}
             onEdit={(appointment) => setDraft({ appointment })}
           />
-        ) : (
-          <ConfigCalendarios />
         )}
       </div>
       <AppointmentDialog draft={draft} onOpenChange={(o) => !o && setDraft(null)} />

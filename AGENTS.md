@@ -4423,3 +4423,40 @@ antes de confiar nela: as tarjas de "Disponibilidade padrão" vêm de uma consta
 do CRM** (`components/calendar/reminders.tsx`), escolhido por compromisso no
 próprio diálogo. Isso funciona. O que não existe é mandar **WhatsApp para o
 contato** — que é justamente o que os dois interruptores prometem.
+
+## 🗑️ Aba "Configurações" do Calendários REMOVIDA (2026-09-03)
+
+A pedido do Gabriel: "só vamos deixar sem o mock".
+
+A aba prometia quatro coisas e não entregava nenhuma:
+
+| bloco | o que era |
+|---|---|
+| Calendários conectados | conta inventada (`gustavo@litocrm.com.br`) com selo **"Conectado"** e botões respondendo `toast.info` — já removido no commit anterior |
+| Disponibilidade padrão | tarjas vindas de uma constante `DIAS` no código, **não editáveis** |
+| Duração padrão da reunião | select num `useState` que morria ao trocar de página |
+| Lembrete via WhatsApp (24h / 10min) | não existe: **sem rota, sem agendamento, sem template**. E o "Salvar" respondia `toast.success("salvas")` |
+
+⚠️ **Tela que promete e não entrega é pior do que tela ausente**: alguém
+configura, lê "salvas", e conta com um lembrete que nunca vai sair — e o
+resultado é falta na reunião. Mesma decisão do Canva, do webphone e do checklist
+de ativação: o que não funciona sai, e o histórico do git guarda.
+
+⚠️ **O que É real continua onde estava, e não se confunda:**
+`appointments.reminder_minutes` (0042) e `tasks.reminder_minutes` (0050) geram o
+popup **dentro do CRM** (`components/calendar/reminders.tsx`), escolhido por
+compromisso no próprio diálogo. Isso funciona — o que nunca existiu foi mandar
+WhatsApp para o contato.
+
+⏳ **A versão REAL desta aba foi escrita e cancelada.** Disponibilidade por
+atendente com migração (`202609031224`), função `salvar_agenda_pessoal`, módulo
+de regra testado (58 asserções), sombreado da grade e aviso ao marcar fora do
+horário. O Gabriel desistiu antes de mesclar; está no commit **480288e** se um
+dia voltar. Ao retomar, leia a mensagem daquele commit primeiro: as três
+armadilhas ("não configurei" ≠ "não trabalho", faixa que vira a meia-noite, hora
+parcial na grade) estão resolvidas lá e não são óbvias.
+
+De passagem, dois resíduos que a remoção deixou e foram limpos: o cabeçalho de
+seção órfão, e o comentário do `openSlot` que dizia "45min é a duração padrão
+sugerida nas Configurações do módulo" — apontando para uma aba que não existe
+mais, e que nem quando existia tinha efeito.
