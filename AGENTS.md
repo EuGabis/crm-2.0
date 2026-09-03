@@ -4380,3 +4380,46 @@ de cada uma. ⚠️ Isso muda a CONCLUSÃO de quem lê: dois leads do mesmo cont
 legítimos quando são de formações diferentes. Sem o curso, o aviso empurra para
 "já existe, não crie" mesmo quando criar é o certo — e numa escola que vende
 Célula, Aviônica e GMP separados, isso é o caso comum.
+
+## 🗑️ "Calendários conectados" (Google Calendar) REMOVIDO (2026-09-03)
+
+A pedido do Gabriel: "remover essa opção de conectar com o google calendar por
+enquanto".
+
+Era **mock inteiro**. O cartão mostrava uma conta inventada
+(`gustavo@litocrm.com.br` — vem de `fixtures/users.ts`) com o selo verde
+**"Conectado"**, que é afirmação falsa, e os dois botões respondiam
+`toast.info("chega com o backend")`. Não existe OAuth de Google Calendar no CRM:
+nenhuma rota, nenhuma tabela, nenhuma env.
+
+⚠️ Prometer integração que não existe é **pior do que não oferecer**: alguém
+confia que a agenda está sincronizada e para de conferir. Mesma decisão do Canva
+(código morto sai, o histórico do git guarda) e do interruptor falso de resposta
+automática nas Conversas.
+
+Se o Google Calendar entrar um dia, o caminho é OAuth por empresa como o do
+Google Ads (`google_ads_connections`, 0023) — e aí o selo "Conectado" passa a sair
+do banco, não de um literal.
+
+### E o "Salvar" que mentia, no mesmo cartão de baixo
+
+⚠️ **O botão respondia `toast.success("Configurações de calendário salvas")` e
+NADA era salvo.** Os dois interruptores de "Lembrete via WhatsApp" são `useState`,
+que morre ao trocar de página. Alguém ligava o lembrete de 24h, lia "salvas" e
+acreditava que o cliente seria avisado — não seria, e o resultado é falta na
+reunião. É pior que o cartão do Google Calendar, que ao menos dizia "chega com o
+backend" ao ser clicado.
+
+Passou a usar a convenção do projeto (`toast.info("<ação> chega com o backend")`).
+O botão fica, porque é onde a ação vai morar; só parou de afirmar o que não fez.
+
+⏳ **O resto da aba "Configurações de calendário" continua mock**, e vale saber
+antes de confiar nela: as tarjas de "Disponibilidade padrão" vêm de uma constante
+`DIAS` e não são editáveis, e o select de "Duração padrão da reunião" mexe num
+`useState` que não vai a lugar nenhum.
+
+⚠️ **O que É real é outra coisa, e não se confunda:** `appointments.reminder_minutes`
+(0042) e `appointments.reminder_minutes` de tarefa (0050) geram o **popup dentro
+do CRM** (`components/calendar/reminders.tsx`), escolhido por compromisso no
+próprio diálogo. Isso funciona. O que não existe é mandar **WhatsApp para o
+contato** — que é justamente o que os dois interruptores prometem.
