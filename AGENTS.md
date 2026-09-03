@@ -4542,3 +4542,74 @@ sem executá-la de verdade (a chamada pelo MCP roda como `service_role`, cai na
 guarda de empresa e devolve zero linhas **sem erro** — passou por sucesso);
 a rota escondeu o motivo; e só depois de expor o `code` o conserto ficou óbvio.
 ⚠️ **Zero linhas por guarda de RLS não é prova de que a função funciona.**
+
+## Relatório "Leads do dia" (migração 202609031728)
+
+Pedido: "todos os dias eu preciso saber quantos leads entraram e desses, quantos
+foram qualificados".
+
+A régua é a do Gabriel e vive no fluxo **Triagem Comercial** (`bot_flows.key =
+'triagem'`, nome interno "Triagem Comercial"): o nó `score` soma os pesos de
+`objetivo` e `conhece_lito` e, com **soma ≥ 9**, grava `qualificacao = 'quente'`;
+abaixo, `'frio'`. Máximo possível: 20.
+
+### 🔴 Por que uma TABELA nova e não ler `bot_sessions`
+
+⚠️ **`bot_sessions` é ESTADO ATUAL, não histórico.** Quando uma conversa
+finalizada é reaberta, o webhook faz
+`delete from bot_sessions where conversation_id = ...` ("zera a sessão para o bot
+iniciar de novo"). Medido: **40 conversas voltaram para o bot em 7 dias.**
+
+Um relatório diário lido de lá **mudaria o passado** — o lead qualificado na
+segunda desapareceria da segunda ao ser reaberto na quarta. Número que muda para
+trás é pior do que número nenhum: ninguém descobre que mudou, só estranha que não
+fecha com o que viu ontem.
+
+`public.bot_qualificacoes` é append-only, escrita pelo nó `score`.
+
+⚠️ **A SOMA não era guardada.** O motor fazia
+`vars[node.var] = sum >= threshold ? hot : cold` e descartava `sum`. Sem o número
+não há como decidir se 9 é o limiar certo: um "frio" com 8 pontos e um com 0 são
+coisas completamente diferentes. Agora a tabela guarda `pontos`, o `limiar` em
+vigor (ele muda, e a linha antiga tem de continuar interpretável) e as
+`respostas`.
+
+- ⚠️ `on delete set null` em `conversation_id`/`contact_id`, **não cascade**:
+  excluir uma conversa não pode apagar o número do dia, porque o dia já passou.
+- **Sem policy de INSERT para `authenticated`**: quem grava é o webhook com a
+  service role. É a única coisa nesta tabela que alguém teria interesse em
+  falsear.
+- A escrita é **best-effort** (`try/catch` com `console.warn`): perder uma linha
+  de métrica é ruim, travar a triagem do cliente por causa dela é pior.
+
+### Decisões do relatório
+
+- ⚠️ **"Entraram" sai de `conversations.created_at`**, não de sessões — sessão é
+  apagada, conversa não. E exige mensagem de ENTRADA: conversa aberta pelo CRM
+  ("Nova conversa") não é lead que chegou.
+- ⚠️ **TRÊS colunas, não duas.** "Entraram" menos "qualificados" **não** é
+  "desqualificados": quem abandona a triagem antes das duas perguntas não recebe
+  nota. Somar com os frios inventaria reprovação onde houve desistência — e as
+  condutas são opostas (frio recebe conteúdo; quem desistiu precisa ser
+  retomado).
+- ⚠️ **A taxa é sobre os CLASSIFICADOS**, não sobre quem entrou. Dividir pelos
+  que entraram faria a taxa cair sempre que mais gente desistisse — o que é
+  problema de fluxo, não de qualidade do lead.
+- A série de dias vem de `generate_series` **por fora**: sem ela, dia sem lead
+  nenhum não apareceria e o período encurtaria em vez de mostrar zero.
+- `greatest(..., 0)` em "não concluíram": requalificação pode passar as entradas
+  do dia, e negativo na tela pareceria defeito.
+- A rota **expõe `code` e `message`** do PostgREST em caso de erro — a lição do
+  `42804` da mesma tarde.
+- A tabela é remontada por `key={dias}` ao trocar o período, e não limpando
+  estado dentro do efeito (`setState` síncrono em efeito = cascata, e o lint
+  acusa).
+
+⏳ **O relatório nasce VAZIO, e é o esperado.** A Triagem Comercial **não está
+vinculada a nenhum número**: os três canais rodam `bot-financeiro` e
+`triagem-secretaria`. A tela diz isso em vez de mostrar zeros sem explicação, e
+enche sozinha a partir do primeiro atendimento no número de vendas.
+
+⚠️ **Uma pergunta do fluxo NÃO pontua:** `pergunta_situacao` é feita e não entra
+no `weights`. Pode ser deliberado (contexto, não nota), mas vale confirmar — hoje
+a nota sai só de `objetivo` + `conhece_lito`.
