@@ -4,9 +4,19 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Loader2, MessageSquare, Sparkles } from "lucide-react";
+import { Download, Loader2, MessageSquare, Sparkles } from "lucide-react";
 import { toast } from "sonner";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { SubNav } from "@/components/layout/subnav";
+import { TOOLTIP_STYLE } from "@/components/dashboard/opportunity-widgets";
 import { GoogleAdsReport } from "@/components/reports/google-ads-report";
 import { ServiceSlaReport } from "@/components/reports/service-sla-report";
 import { Button } from "@/components/ui/button";
@@ -397,16 +407,49 @@ interface LinhaDia {
 }
 
 /**
+ * Paleta dos três desfechos, **validada** com o verificador de daltonismo
+ * (`dataviz/scripts/validate_palette.js`), não escolhida a olho.
+ *
+ * Passa as seis checagens no tema claro E no escuro (superfície `#16181f`):
+ * faixa de luminosidade, piso de croma, separação em deuteranopia (ΔE 23,6),
+ * piso de visão normal (ΔE 28,1) e contraste ≥ 3:1.
+ *
+ * ⚠️ **Tritan ΔE 6,6 cai na faixa 6–8**, que é legal SÓ com codificação
+ * secundária. Daí três coisas aqui não serem enfeite: a **legenda com rótulo**,
+ * o **vão de 2px entre as fatias** do empilhado e a **tabela** abaixo. Sem elas
+ * a paleta reprovaria.
+ *
+ * ⚠️ E o primeiro candidato REPROVOU: `#94a3b8` (slate-400) para "frio" lê como
+ * cinza (croma 0,035) e não se sustenta como série num empilhado. Azul é o
+ * mapeamento semântico de "frio" e tem croma de verdade — medido, não achado.
+ */
+const CORES_DESFECHO = {
+  qualificados: "#059669",
+  frios: "#6366f1",
+  semClassificacao: "#d97706",
+} as const;
+
+const SERIES = [
+  { key: "qualificados" as const, rotulo: "Qualificados", cor: CORES_DESFECHO.qualificados },
+  { key: "frios" as const, rotulo: "Frios", cor: CORES_DESFECHO.frios },
+  {
+    key: "semClassificacao" as const,
+    rotulo: "Não concluíram",
+    cor: CORES_DESFECHO.semClassificacao,
+  },
+];
+
+/**
  * Leads que entraram por dia, e quantos o bot qualificou.
  *
  * A régua é a do fluxo **Triagem Comercial**: o nó `score` soma os pesos de
  * `objetivo` e `conhece_lito` e, com **soma ≥ 9**, o lead é `quente`.
  *
- * ⚠️ **Três colunas e não duas.** "Entraram" menos "qualificados" NÃO é
- * "desqualificados": quem abandona a triagem antes de responder as duas
- * perguntas não recebe nota nenhuma. Somar esses com os frios inventaria
- * reprovação onde houve desistência — e são coisas com conduta oposta (frio
- * recebe conteúdo; quem desistiu precisa ser retomado).
+ * ⚠️ **Três desfechos e não dois.** "Entraram" menos "qualificados" NÃO é
+ * "desqualificados": quem abandona a triagem antes das duas perguntas não recebe
+ * nota nenhuma. Somar esses com os frios inventaria reprovação onde houve
+ * desistência — e as condutas são opostas (frio recebe conteúdo; quem desistiu
+ * precisa ser retomado).
  */
 function LeadsDoDiaReport() {
   const [dias, setDias] = useState(30);
@@ -438,14 +481,15 @@ function LeadsDoDiaReport() {
         dentro do efeito: `setState` síncrono no corpo de um `useEffect` causa
         renderização em cascata (o lint acusa). A `key` zera o estado de graça.
       */}
-      <LeadsDoDiaTabela key={dias} dias={dias} />
+      <LeadsDoDiaPainel key={dias} dias={dias} />
     </>
   );
 }
 
-function LeadsDoDiaTabela({ dias }: { dias: number }) {
+function LeadsDoDiaPainel({ dias }: { dias: number }) {
   const [dados, setDados] = useState<{ linhas: LinhaDia[]; total: LinhaDia } | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const [baixando, setBaixando] = useState(false);
 
   useEffect(() => {
     let ativo = true;
@@ -469,112 +513,237 @@ function LeadsDoDiaTabela({ dias }: { dias: number }) {
     };
   }, [dias]);
 
-  const t = dados?.total;
-  const taxa =
-    t && t.qualificados + t.frios > 0
-      ? Math.round((t.qualificados / (t.qualificados + t.frios)) * 100)
-      : null;
+  /*
+   * O gráfico vai do mais ANTIGO para o mais recente; a tabela é o contrário, e
+   * está certo: tabela se lê de cima, linha do tempo se lê da esquerda.
+   */
+  const serie = useMemo(
+    () =>
+      (dados?.linhas ?? [])
+        .slice()
+        .reverse()
+        .map((l) => ({
+          rotulo: format(new Date(`${l.dia}T12:00:00`), "dd/MM", { locale: ptBR }),
+          qualificados: l.qualificados,
+          frios: l.frios,
+          semClassificacao: l.semClassificacao,
+        })),
+    [dados]
+  );
+
+  if (erro) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-700">
+        {erro}
+      </div>
+    );
+  }
+  if (!dados) {
+    return (
+      <div className="rounded-xl border bg-white px-4 py-3 text-xs text-slate-400">
+        Carregando...
+      </div>
+    );
+  }
+
+  const t = dados.total;
+  const classificados = t.qualificados + t.frios;
+  const taxa = classificados > 0 ? Math.round((t.qualificados / classificados) * 100) : null;
+
+  const baixar = async () => {
+    setBaixando(true);
+    try {
+      // Import dinâmico: o exceljs (~940 KB) só é baixado por quem clica.
+      const { baixarRelatorioLeadsXlsx } = await import("@/lib/reports/leads-xlsx");
+      await baixarRelatorioLeadsXlsx({ linhas: dados.linhas, total: t, dias, limiar: 9 });
+    } catch {
+      toast.error("Não foi possível gerar a planilha");
+    } finally {
+      setBaixando(false);
+    }
+  };
 
   return (
     <>
-      {erro && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-700">
-          {erro}
+      {/* ---------- Faixa de números ---------- */}
+      <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-xl border bg-white p-4">
+          <p className="text-[11px] font-medium text-slate-500">Entraram</p>
+          <p className="text-2xl font-bold tabular-nums text-slate-900">{t.entraram}</p>
+          <p className="text-[11px] text-slate-400">nos últimos {dias} dias</p>
         </div>
-      )}
-      {!dados && !erro && (
-        <div className="rounded-xl border bg-white px-4 py-3 text-xs text-slate-400">
-          Carregando...
-        </div>
-      )}
+        {SERIES.map((s) => (
+          <div key={s.key} className="rounded-xl border bg-white p-4">
+            {/*
+              ⚠️ O rótulo usa token de TEXTO, nunca a cor da série — a marca
+              colorida ao lado é que carrega a identidade. Texto na cor da série
+              perde contraste e some no dark.
+            */}
+            <p className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
+              <span aria-hidden className="size-2 rounded-full" style={{ background: s.cor }} />
+              {s.rotulo}
+            </p>
+            <p className="text-2xl font-bold tabular-nums text-slate-900">{t[s.key]}</p>
+            <p className="text-[11px] text-slate-400">
+              {t.entraram > 0
+                ? `${Math.round((t[s.key] / t.entraram) * 100)}% de quem entrou`
+                : "—"}
+            </p>
+          </div>
+        ))}
+      </div>
 
-      {dados && t && (
-        <>
-          <div className="mb-4 grid gap-3 sm:grid-cols-4">
-            {[
-              { rot: "Entraram", val: t.entraram, cor: "text-slate-900" },
-              { rot: "Qualificados", val: t.qualificados, cor: "text-emerald-600" },
-              { rot: "Frios", val: t.frios, cor: "text-slate-500" },
-              {
-                rot: "Não concluíram",
-                val: t.semClassificacao,
-                cor: "text-amber-600",
-              },
-            ].map((k) => (
-              <div key={k.rot} className="rounded-xl border bg-white p-4">
-                <p className="text-[11px] font-medium text-slate-500">{k.rot}</p>
-                <p className={cn("text-2xl font-bold tabular-nums", k.cor)}>{k.val}</p>
-              </div>
+      {/* ---------- Taxa + download ---------- */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-white px-4 py-3">
+        {/*
+          ⚠️ A taxa é sobre os CLASSIFICADOS, não sobre quem entrou. Dividir pelos
+          que entraram faria a taxa cair sempre que mais gente desistisse — o que
+          é problema de fluxo, não de qualidade do lead.
+        */}
+        <p className="text-xs text-slate-500">
+          {taxa != null ? (
+            <>
+              <b className="text-base tabular-nums text-slate-900">{taxa}%</b> dos leads
+              classificados foram qualificados ({t.qualificados} de {classificados}). Os{" "}
+              {t.semClassificacao} que não concluíram a triagem ficam fora dessa conta.
+            </>
+          ) : (
+            "Nenhum lead classificado no período."
+          )}
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 shrink-0 gap-1.5 text-xs"
+          onClick={() => void baixar()}
+          disabled={baixando}
+        >
+          <Download className="size-3.5" />
+          {baixando ? "Gerando..." : "Baixar planilha"}
+        </Button>
+      </div>
+
+      {/* ---------- Gráfico ---------- */}
+      <div className="mb-4 rounded-xl border bg-white p-4">
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+          <p className="text-xs font-bold text-slate-700">Entrada e desfecho por dia</p>
+          {/*
+            Legenda SEMPRE presente com 3 séries — identidade nunca fica só na
+            cor. É também a codificação secundária que a paleta exige (tritan
+            ΔE 6,6 está na faixa 6–8).
+          */}
+          <div className="flex flex-wrap items-center gap-3">
+            {SERIES.map((s) => (
+              <span key={s.key} className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                <span aria-hidden className="size-2 rounded-sm" style={{ background: s.cor }} />
+                {s.rotulo}
+              </span>
             ))}
           </div>
+        </div>
+        <div className="h-64 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={serie} margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
+              {/* Grade recessiva: só horizontal, para as verticais não
+                  competirem com as barras. */}
+              {/* ⚠️ Grade e eixos por TOKEN, não hex fixo: o dark mode do
+                  projeto remapeia CLASSES em globals.css, e `stroke` de SVG é
+                  atributo — um `#eef1f5` viraria linha clara brilhante no fundo
+                  escuro. `--border` e `--muted-foreground` já existem nos dois
+                  temas. */}
+              <CartesianGrid vertical={false} stroke="var(--border)" />
+              <XAxis
+                dataKey="rotulo"
+                tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                axisLine={false}
+                tickLine={false}
+                interval="preserveStartEnd"
+                minTickGap={16}
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                axisLine={false}
+                tickLine={false}
+                allowDecimals={false}
+              />
+              <Tooltip contentStyle={TOOLTIP_STYLE} />
+              {SERIES.map((s, i) => (
+                <Bar
+                  key={s.key}
+                  dataKey={s.key}
+                  name={s.rotulo}
+                  stackId="dia"
+                  fill={s.cor}
+                  /* ⚠️ Vão de 2px entre as fatias — exigência da especificação de
+                     marcas, e aqui também a codificação secundária que sustenta a
+                     paleta. Só a fatia do TOPO arredonda, para o empilhado não
+                     parecer três barras soltas.
 
-          {/*
-            ⚠️ A taxa é sobre os CLASSIFICADOS, não sobre quem entrou. Dividir
-            pelos que entraram misturaria "não qualificou" com "não terminou de
-            responder", e a taxa cairia sempre que mais gente desistisse — o que
-            é problema de fluxo, não de qualidade do lead.
-          */}
-          {taxa != null && (
-            <p className="mb-4 text-xs text-slate-500">
-              <b className="text-slate-800">{taxa}% dos leads classificados foram qualificados</b>{" "}
-              ({t.qualificados} de {t.qualificados + t.frios}). Os {t.semClassificacao} que não
-              concluíram a triagem ficam fora dessa conta.
-            </p>
-          )}
+                     ⚠️ E o vão usa `var(--card)`, não `#ffffff`: no tema escuro
+                     o card é `#16181f`, e um traço branco viraria uma linha
+                     acesa entre as fatias — o defeito clássico de cor definida
+                     para um tema só. */
+                  stroke="var(--card)"
+                  strokeWidth={2}
+                  radius={i === SERIES.length - 1 ? [4, 4, 0, 0] : 0}
+                  maxBarSize={38}
+                />
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
 
-          <div className="overflow-x-auto rounded-xl border bg-white">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b bg-slate-50 text-left text-slate-500">
-                  {["Dia", "Entraram", "Qualificados", "Frios", "Não concluíram", "Pontos (média)"].map(
-                    (h) => (
-                      <th key={h} className="whitespace-nowrap px-4 py-2.5 font-medium">
-                        {h}
-                      </th>
-                    )
+      {/* ---------- Tabela: é a "table view" da checagem de acessibilidade ---------- */}
+      <div className="overflow-x-auto rounded-xl border bg-white">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b bg-slate-50 text-left text-slate-500">
+              {["Dia", "Entraram", "Qualificados", "Frios", "Não concluíram", "Pontos (média)"].map(
+                (h) => (
+                  <th key={h} className="whitespace-nowrap px-4 py-2.5 font-medium">
+                    {h}
+                  </th>
+                )
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {dados.linhas.map((l) => (
+              <tr key={l.dia} className="border-b last:border-0">
+                <td className="whitespace-nowrap px-4 py-2.5 font-medium text-slate-800">
+                  {format(new Date(`${l.dia}T12:00:00`), "EEE, dd/MM", { locale: ptBR })}
+                </td>
+                <td className="px-4 py-2.5 tabular-nums">{l.entraram}</td>
+                <td className="px-4 py-2.5 font-semibold tabular-nums text-emerald-600">
+                  {l.qualificados}
+                </td>
+                <td className="px-4 py-2.5 tabular-nums text-indigo-600">{l.frios}</td>
+                <td
+                  className={cn(
+                    "px-4 py-2.5 tabular-nums",
+                    l.semClassificacao > 0 && "text-amber-600"
                   )}
-                </tr>
-              </thead>
-              <tbody>
-                {dados.linhas.map((l) => (
-                  <tr key={l.dia} className="border-b last:border-0">
-                    <td className="whitespace-nowrap px-4 py-2.5 font-medium text-slate-800">
-                      {format(new Date(`${l.dia}T12:00:00`), "EEE, dd/MM", { locale: ptBR })}
-                    </td>
-                    <td className="px-4 py-2.5 tabular-nums">{l.entraram}</td>
-                    <td className="px-4 py-2.5 font-semibold tabular-nums text-emerald-600">
-                      {l.qualificados}
-                    </td>
-                    <td className="px-4 py-2.5 tabular-nums text-slate-500">{l.frios}</td>
-                    <td
-                      className={cn(
-                        "px-4 py-2.5 tabular-nums",
-                        l.semClassificacao > 0 && "text-amber-600"
-                      )}
-                    >
-                      {l.semClassificacao}
-                    </td>
-                    {/* A média de pontos é o que permite mexer no limiar com dado
-                        na mão: frios com média 8 pedem outra conversa que frios
-                        com média 2. */}
-                    <td className="px-4 py-2.5 tabular-nums text-slate-400">
-                      {l.pontosMedio ?? "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                >
+                  {l.semClassificacao}
+                </td>
+                {/* A média de pontos é o que permite mexer no limiar com dado na
+                    mão: frios com média 8 pedem outra conversa que frios com
+                    média 2. */}
+                <td className="px-4 py-2.5 tabular-nums text-slate-400">{l.pontosMedio ?? "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
-          {t.entraram === 0 && (
-            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-              <b>Nenhum lead no período.</b> A Triagem Comercial ainda não está vinculada a
-              nenhum número — em <span className="font-mono">/whatsapp</span>, o canal precisa
-              ter esse bot para os leads passarem por ela. O relatório enche sozinho a partir do
-              primeiro atendimento.
-            </div>
-          )}
-        </>
+      {t.entraram === 0 && (
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+          <b>Nenhum lead no período.</b> A Triagem Comercial ainda não está vinculada a nenhum
+          número — em <span className="font-mono">/whatsapp</span>, o canal precisa ter esse bot
+          para os leads passarem por ela. O relatório enche sozinho a partir do primeiro
+          atendimento.
+        </div>
       )}
     </>
   );

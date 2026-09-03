@@ -4613,3 +4613,58 @@ enche sozinha a partir do primeiro atendimento no número de vendas.
 ⚠️ **Uma pergunta do fluxo NÃO pontua:** `pergunta_situacao` é feita e não entra
 no `weights`. Pode ser deliberado (contexto, não nota), mas vale confirmar — hoje
 a nota sai só de `objetivo` + `conhece_lito`.
+
+### "Leads do dia" virou painel, com download (2026-09-03)
+
+Pedido: "adicione a opção de baixar esse relatório para análise e melhore o
+layout, deixe estilo dashboard".
+
+**Forma escolhida:** faixa de quatro números + **barra empilhada por dia** +
+tabela. Empilhada porque os três desfechos SOMAM o total que entrou — é parte de
+um todo ao longo do tempo. Sem rosca e sem eixo duplo (os dois maiores erros do
+catálogo).
+
+### ⚠️ A paleta foi VALIDADA, não escolhida a olho
+
+`dataviz/scripts/validate_palette.js`, nos dois temas. O primeiro candidato
+**reprovou**: `#94a3b8` (slate-400) para "frio" tem croma **0,035** — lê como
+cinza e não se sustenta como série num empilhado. Azul é o mapeamento semântico
+de "frio" E tem croma de verdade.
+
+Vencedora: **`#059669` · `#6366f1` · `#d97706`** (o indigo é o primário do
+projeto). Passa as seis checagens no claro E no escuro (superfície `#16181f`):
+faixa de luminosidade, piso de croma, deuteranopia ΔE 23,6, visão normal ΔE 28,1,
+contraste ≥ 3:1.
+
+⚠️ **Tritan ΔE 6,6 cai na faixa 6–8, legal SÓ com codificação secundária.** Então
+três coisas ali não são enfeite e não podem ser removidas: a **legenda com
+rótulo**, o **vão de 2px entre as fatias** e a **tabela**. Tirar qualquer uma
+reprova a paleta.
+
+### ⚠️ O defeito de dark mode que o passo "olhe o resultado" pegou
+
+`stroke="#ffffff"` no vão entre as fatias, e `#eef1f5` na grade. O dark mode
+deste projeto remapeia **classes** em `globals.css`, e `stroke` de SVG é
+**atributo** — nada seria remapeado, e o vão branco viraria uma **linha acesa**
+entre as fatias no card escuro (`#16181f`).
+
+Trocado por `var(--card)`, `var(--border)` e `var(--muted-foreground)`, que já
+existem nos dois temas desde a 0001. ⚠️ **Em gráfico, cor vai por token do tema,
+nunca hex literal** — é a mesma armadilha do bloco da Lita, do outro lado.
+
+### A planilha
+
+`lib/reports/leads-xlsx.ts`, mesmo desenho da de Atendimento: `exceljs` por
+import **dinâmico** (~940 KB não entram no pacote de quem só abre a tela),
+`cfvo` obrigatório na `dataBar` (sem ele TODO download quebra no `writeBuffer`),
+`fracao()` arredondando em 4 casas, e as **mesmas cores validadas do gráfico** —
+a planilha e a tela não podem discordar sobre qual cor é "qualificado".
+
+- **Aba "Por dia" é uma linha por dia**, com filtro automático: é ela que vira
+  tabela dinâmica. Os totais a planilha recalcula das linhas; o contrário, não.
+- ⚠️ **Dia sem nenhum lead classificado fica com a taxa VAZIA, não 0%.** Zero
+  afirmaria que ninguém qualificou, quando ninguém foi medido.
+- **Bloco de metodologia na aba Resumo** com a régua (soma ≥ 9, o que é "não
+  concluiu", e por que a taxa exclui quem desistiu). Este projeto já mediu que
+  métrica sem régua declarada gera discussão sobre o número em vez de sobre a
+  operação.
