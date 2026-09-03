@@ -396,98 +396,210 @@ function AtribuicaoReport() {
   );
 }
 
-/** Abas válidas para o `?tab=` da URL. */
 interface LinhaDia {
   dia: string;
   entraram: number;
-  qualificados: number;
-  frios: number;
-  semClassificacao: number;
+  concluiram: number;
+  /** Mapa desfecho → quantidade. As chaves são as do FLUXO, não do CRM. */
+  desfechos: Record<string, number>;
   pontosMedio: number | null;
 }
 
+interface TotalLeads {
+  entraram: number;
+  concluiram: number;
+  desfechos: Record<string, number>;
+}
+
 /**
- * Paleta dos três desfechos, **validada** com o verificador de daltonismo
- * (`dataviz/scripts/validate_palette.js`), não escolhida a olho.
+ * Paletas dos desfechos, **validadas** com o verificador de daltonismo
+ * (`dataviz/scripts/validate_palette.js`) nos dois temas e em `--pairs all`,
+ * não escolhidas a olho.
  *
- * Passa as seis checagens no tema claro E no escuro (superfície `#16181f`):
- * faixa de luminosidade, piso de croma, separação em deuteranopia (ΔE 23,6),
- * piso de visão normal (ΔE 28,1) e contraste ≥ 3:1.
+ * - Comercial (2 séries): `#059669` × `#6366f1` — deuteranopia ΔE 23,6, visão
+ *   normal ΔE 28,1.
+ * - Secretaria (3 séries): `#0891b2` × `#6366f1` × `#d97706` — pior par
+ *   deuteranopia ΔE 13,0, visão normal ΔE 17,0.
  *
- * ⚠️ **Tritan ΔE 6,6 cai na faixa 6–8**, que é legal SÓ com codificação
+ * ⚠️ **Tritan cai na faixa 6–8 nas duas**, que é legal SÓ com codificação
  * secundária. Daí três coisas aqui não serem enfeite: a **legenda com rótulo**,
  * o **vão de 2px entre as fatias** do empilhado e a **tabela** abaixo. Sem elas
- * a paleta reprovaria.
+ * as paletas reprovariam.
  *
- * ⚠️ E o primeiro candidato REPROVOU: `#94a3b8` (slate-400) para "frio" lê como
- * cinza (croma 0,035) e não se sustenta como série num empilhado. Azul é o
- * mapeamento semântico de "frio" e tem croma de verdade — medido, não achado.
+ * ⚠️ **Duas tentativas REPROVARAM, e as duas por medida:**
+ * 1. `#94a3b8` (slate-400) como série lê como cinza (croma 0,035) e não se
+ *    sustenta num empilhado;
+ * 2. rosa `#db2777` ao lado do verde `#059669` dá **ΔE 1,1 em deuteranopia** —
+ *    indistinguíveis. Passava só enquanto não eram adjacentes no empilhado, e
+ *    `--pairs all` derrubou: num gráfico de 3+ fatias o leitor compara
+ *    QUALQUER par contra a legenda, não só os vizinhos.
+ *
+ * ⚠️ E 4 cores categóricas NÃO passam `--pairs all` — é o limite conhecido da
+ * deuteranopia. É por isso que "não concluíram" é **neutro de tema**
+ * (`var(--muted-foreground)`) e não uma quarta cor: ele não é uma categoria
+ * irmã, é a AUSÊNCIA de desfecho. Neutro também é o que mantém o mesmo
+ * significado nos dois fluxos.
  */
-const CORES_DESFECHO = {
-  qualificados: "#059669",
-  frios: "#6366f1",
-  semClassificacao: "#d97706",
-} as const;
+const VERDE = "#059669";
+const INDIGO = "#6366f1";
+const CIANO = "#0891b2";
+const AMBAR = "#d97706";
+/** "Não concluíram": por TOKEN, para o cinza acompanhar o tema (o dark do
+ *  projeto remapeia CLASSES, e `fill` de SVG é atributo). */
+const NEUTRO = "var(--muted-foreground)";
+/** O mesmo cinza para a planilha, que não tem tema. */
+const NEUTRO_XLSX = "#64748b";
 
-const SERIES = [
-  { key: "qualificados" as const, rotulo: "Qualificados", cor: CORES_DESFECHO.qualificados },
-  { key: "frios" as const, rotulo: "Frios", cor: CORES_DESFECHO.frios },
+interface SerieDesfecho {
+  /** Chave em `desfechos` — o valor que o próprio fluxo grava. */
+  chave: string;
+  rotulo: string;
+  cor: string;
+}
+
+interface Fluxo {
+  /** `bot_flows.key` / `whatsapp_channels.bot_flow`. */
+  key: string;
+  aba: string;
+  nome: string;
+  /** A régua do bot, em uma frase, no subtítulo da tela. */
+  regua: React.ReactNode;
+  series: SerieDesfecho[];
+  /** Só fluxo com nó de pontuação tem média de pontos para mostrar. */
+  mostraPontos: boolean;
+  /** Aviso de histórico parcial, quando o dado antigo veio de backfill. */
+  historicoParcial?: string;
+}
+
+/**
+ * ⚠️ **Os dois bots NÃO têm o mesmo tipo de desfecho, e é por isso que esta
+ * tabela existe** (pedido do Gabriel: "dentro dos moldes do bot deles — a
+ * secretaria não tem qualificado ou perdido").
+ *
+ * A Triagem Comercial classifica em quente/frio pelo nó `score`. A Triagem
+ * Secretaria não classifica nada: o cliente escolhe um ASSUNTO e cada ramo vai
+ * para um atendente. Forçar "qualificado/perdido" na secretaria inventaria uma
+ * régua que o bot dela não tem — e alguém decidiria algo com base nela.
+ *
+ * ⚠️ Os rótulos são os TEXTOS QUE O CLIENTE VÊ na lista do WhatsApp. Se o fluxo
+ * for reescrito e as opções mudarem, é aqui que se acerta — e o histórico
+ * continua correto, porque `bot_desfechos.rotulo` guarda o texto da época.
+ */
+const FLUXOS: Fluxo[] = [
   {
-    key: "semClassificacao" as const,
-    rotulo: "Não concluíram",
-    cor: CORES_DESFECHO.semClassificacao,
+    key: "triagem",
+    aba: "Comercial",
+    nome: "Triagem Comercial",
+    regua: (
+      <>
+        o lead é <b>qualificado quando a soma das respostas chega a 9</b>
+      </>
+    ),
+    series: [
+      { chave: "quente", rotulo: "Qualificados", cor: VERDE },
+      { chave: "frio", rotulo: "Frios", cor: INDIGO },
+    ],
+    mostraPontos: true,
+  },
+  {
+    key: "triagem-secretaria",
+    aba: "Secretaria",
+    nome: "Triagem Secretaria",
+    regua: (
+      <>
+        o cliente <b>escolhe o assunto</b> e cada ramo vai para um atendente — não há nota, nem
+        qualificado, nem perdido
+      </>
+    ),
+    series: [
+      { chave: "docs", rotulo: "Documentos/Prova Sub", cor: CIANO },
+      { chave: "imersao", rotulo: "Imersão Pres. MMA", cor: INDIGO },
+      { chave: "outros", rotulo: "Outros", cor: AMBAR },
+    ],
+    mostraPontos: false,
+    historicoParcial:
+      "O histórico anterior a 03/09 foi recuperado das sessões do bot que ainda existiam — a sessão é apagada quando uma conversa finalizada reabre, então alguns dias antigos aparecem com menos desfechos do que realmente houve. A partir de hoje o registro é permanente.",
   },
 ];
 
+/** Chave do desfecho neutro. Não vem do bot: é o que SOBRA. */
+const NAO_CONCLUIU = "_naoConcluiu";
+
 /**
- * Leads que entraram por dia, e quantos o bot qualificou.
+ * Leads que entraram por dia, e o que o bot fez com eles.
  *
- * A régua é a do fluxo **Triagem Comercial**: o nó `score` soma os pesos de
- * `objetivo` e `conhece_lito` e, com **soma ≥ 9**, o lead é `quente`.
- *
- * ⚠️ **Três desfechos e não dois.** "Entraram" menos "qualificados" NÃO é
- * "desqualificados": quem abandona a triagem antes das duas perguntas não recebe
- * nota nenhuma. Somar esses com os frios inventaria reprovação onde houve
- * desistência — e as condutas são opostas (frio recebe conteúdo; quem desistiu
- * precisa ser retomado).
+ * ⚠️ **Sempre um desfecho A MAIS que os do bot.** "Entraram" menos os
+ * classificados NÃO é reprovação: quem abandona a triagem antes do nó de
+ * decisão não recebe desfecho nenhum. Somar esses com os frios (ou com "Outros")
+ * inventaria uma escolha que a pessoa não fez — e as condutas são opostas: frio
+ * recebe conteúdo, quem desistiu precisa ser retomado.
  */
 function LeadsDoDiaReport() {
   const [dias, setDias] = useState(30);
+  const [fluxoKey, setFluxoKey] = useState(FLUXOS[0].key);
+  const fluxo = FLUXOS.find((f) => f.key === fluxoKey) ?? FLUXOS[0];
+
   return (
     <>
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-lg font-bold text-slate-900">Leads do dia</h1>
           <p className="text-xs text-slate-500">
-            Entrada e qualificação pela Triagem Comercial — o lead é{" "}
-            <b>qualificado quando a soma das respostas chega a 9</b>.
+            Entrada e desfecho pela {fluxo.nome} — {fluxo.regua}.
           </p>
         </div>
-        <Select value={String(dias)} onValueChange={(v) => v && setDias(Number(v))}>
-          <SelectTrigger className="h-8 w-[150px] text-xs">
-            <SelectValue>{dias} dias</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            {[7, 15, 30, 60, 90].map((d) => (
-              <SelectItem key={d} value={String(d)} className="text-xs">
-                {d} dias
-              </SelectItem>
+        <div className="flex flex-wrap items-center gap-2">
+          {/*
+            Seletor de fluxo em botões e não num `Select`: são dois (três com o
+            financeiro, um dia), a troca é comparativa e um menu esconderia que a
+            outra visão existe — que é justamente o que o pedido apontou.
+          */}
+          <div className="flex rounded-lg border bg-white p-0.5">
+            {FLUXOS.map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => setFluxoKey(f.key)}
+                aria-pressed={f.key === fluxo.key}
+                className={cn(
+                  "h-7 rounded-md px-3 text-xs font-medium transition-colors",
+                  f.key === fluxo.key
+                    ? "bg-indigo-500 text-white"
+                    : "text-slate-500 hover:bg-slate-50"
+                )}
+              >
+                {f.aba}
+              </button>
             ))}
-          </SelectContent>
-        </Select>
+          </div>
+          <Select value={String(dias)} onValueChange={(v) => v && setDias(Number(v))}>
+            <SelectTrigger className="h-8 w-[130px] text-xs">
+              <SelectValue>{dias} dias</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {[7, 15, 30, 60, 90].map((d) => (
+                <SelectItem key={d} value={String(d)} className="text-xs">
+                  {d} dias
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
       {/*
-        ⚠️ Remontado por `key` ao trocar o período, e não limpando o estado
-        dentro do efeito: `setState` síncrono no corpo de um `useEffect` causa
-        renderização em cascata (o lint acusa). A `key` zera o estado de graça.
+        ⚠️ Remontado por `key` ao trocar período OU fluxo, e não limpando o
+        estado dentro do efeito: `setState` síncrono no corpo de um `useEffect`
+        causa renderização em cascata (o lint acusa). A `key` zera de graça — e
+        sem ela a tela mostraria por um instante os números do fluxo anterior
+        sob os rótulos do novo, que é pior que um "Carregando...".
       */}
-      <LeadsDoDiaPainel key={dias} dias={dias} />
+      <LeadsDoDiaPainel key={`${fluxo.key}-${dias}`} dias={dias} fluxo={fluxo} />
     </>
   );
 }
 
-function LeadsDoDiaPainel({ dias }: { dias: number }) {
-  const [dados, setDados] = useState<{ linhas: LinhaDia[]; total: LinhaDia } | null>(null);
+function LeadsDoDiaPainel({ dias, fluxo }: { dias: number; fluxo: Fluxo }) {
+  const [dados, setDados] = useState<{ linhas: LinhaDia[]; total: TotalLeads } | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [baixando, setBaixando] = useState(false);
 
@@ -495,8 +607,9 @@ function LeadsDoDiaPainel({ dias }: { dias: number }) {
     let ativo = true;
     void (async () => {
       try {
-        // `flow=triagem` é a Triagem Comercial — é ela que tem nó de pontuação.
-        const res = await fetch(`/api/relatorios/leads-diarios?dias=${dias}&flow=triagem`);
+        const res = await fetch(
+          `/api/relatorios/leads-diarios?dias=${dias}&flow=${encodeURIComponent(fluxo.key)}`
+        );
         const json = await res.json().catch(() => ({}));
         if (!ativo) return;
         if (!res.ok) {
@@ -511,7 +624,17 @@ function LeadsDoDiaPainel({ dias }: { dias: number }) {
     return () => {
       ativo = false;
     };
-  }, [dias]);
+  }, [dias, fluxo.key]);
+
+  /*
+   * As séries do gráfico = as do bot + "não concluíram" no TOPO da pilha.
+   * O neutro fica por último de propósito: é o que sobra, e no topo ele mostra a
+   * folga entre quem entrou e quem foi triado sem quebrar a leitura das outras.
+   */
+  const series = useMemo(
+    () => [...fluxo.series, { chave: NAO_CONCLUIU, rotulo: "Não concluíram", cor: NEUTRO }],
+    [fluxo]
+  );
 
   /*
    * O gráfico vai do mais ANTIGO para o mais recente; a tabela é o contrário, e
@@ -522,13 +645,15 @@ function LeadsDoDiaPainel({ dias }: { dias: number }) {
       (dados?.linhas ?? [])
         .slice()
         .reverse()
-        .map((l) => ({
-          rotulo: format(new Date(`${l.dia}T12:00:00`), "dd/MM", { locale: ptBR }),
-          qualificados: l.qualificados,
-          frios: l.frios,
-          semClassificacao: l.semClassificacao,
-        })),
-    [dados]
+        .map((l) => {
+          const ponto: Record<string, string | number> = {
+            rotulo: format(new Date(`${l.dia}T12:00:00`), "dd/MM", { locale: ptBR }),
+          };
+          for (const s of fluxo.series) ponto[s.chave] = l.desfechos[s.chave] ?? 0;
+          ponto[NAO_CONCLUIU] = naoConcluiu(l);
+          return ponto;
+        }),
+    [dados, fluxo]
   );
 
   if (erro) {
@@ -547,15 +672,23 @@ function LeadsDoDiaPainel({ dias }: { dias: number }) {
   }
 
   const t = dados.total;
-  const classificados = t.qualificados + t.frios;
-  const taxa = classificados > 0 ? Math.round((t.qualificados / classificados) * 100) : null;
+  const semDesfecho = Math.max(t.entraram - t.concluiram, 0);
 
   const baixar = async () => {
     setBaixando(true);
     try {
       // Import dinâmico: o exceljs (~940 KB) só é baixado por quem clica.
       const { baixarRelatorioLeadsXlsx } = await import("@/lib/reports/leads-xlsx");
-      await baixarRelatorioLeadsXlsx({ linhas: dados.linhas, total: t, dias, limiar: 9 });
+      await baixarRelatorioLeadsXlsx({
+        linhas: dados.linhas,
+        total: t,
+        dias,
+        fluxoKey: fluxo.key,
+        fluxoNome: fluxo.nome,
+        mostraPontos: fluxo.mostraPontos,
+        series: fluxo.series.map((s) => ({ chave: s.chave, rotulo: s.rotulo, cor: s.cor })),
+        naoConcluiuCor: NEUTRO_XLSX,
+      });
     } catch {
       toast.error("Não foi possível gerar a planilha");
     } finally {
@@ -566,50 +699,43 @@ function LeadsDoDiaPainel({ dias }: { dias: number }) {
   return (
     <>
       {/* ---------- Faixa de números ---------- */}
-      <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div
+        className={cn(
+          "mb-3 grid gap-3 sm:grid-cols-2",
+          series.length === 3 ? "lg:grid-cols-4" : "lg:grid-cols-5"
+        )}
+      >
         <div className="rounded-xl border bg-white p-4">
           <p className="text-[11px] font-medium text-slate-500">Entraram</p>
           <p className="text-2xl font-bold tabular-nums text-slate-900">{t.entraram}</p>
           <p className="text-[11px] text-slate-400">nos últimos {dias} dias</p>
         </div>
-        {SERIES.map((s) => (
-          <div key={s.key} className="rounded-xl border bg-white p-4">
-            {/*
-              ⚠️ O rótulo usa token de TEXTO, nunca a cor da série — a marca
-              colorida ao lado é que carrega a identidade. Texto na cor da série
-              perde contraste e some no dark.
-            */}
-            <p className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
-              <span aria-hidden className="size-2 rounded-full" style={{ background: s.cor }} />
-              {s.rotulo}
-            </p>
-            <p className="text-2xl font-bold tabular-nums text-slate-900">{t[s.key]}</p>
-            <p className="text-[11px] text-slate-400">
-              {t.entraram > 0
-                ? `${Math.round((t[s.key] / t.entraram) * 100)}% de quem entrou`
-                : "—"}
-            </p>
-          </div>
-        ))}
+        {series.map((s) => {
+          const n = s.chave === NAO_CONCLUIU ? semDesfecho : (t.desfechos[s.chave] ?? 0);
+          return (
+            <div key={s.chave} className="rounded-xl border bg-white p-4">
+              {/*
+                ⚠️ O rótulo usa token de TEXTO, nunca a cor da série — a marca
+                colorida ao lado é que carrega a identidade. Texto na cor da
+                série perde contraste e some no dark.
+              */}
+              <p className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
+                <span aria-hidden className="size-2 rounded-full" style={{ background: s.cor }} />
+                {s.rotulo}
+              </p>
+              <p className="text-2xl font-bold tabular-nums text-slate-900">{n}</p>
+              <p className="text-[11px] text-slate-400">
+                {t.entraram > 0 ? `${Math.round((n / t.entraram) * 100)}% de quem entrou` : "—"}
+              </p>
+            </div>
+          );
+        })}
       </div>
 
-      {/* ---------- Taxa + download ---------- */}
+      {/* ---------- Manchete + download ---------- */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-white px-4 py-3">
-        {/*
-          ⚠️ A taxa é sobre os CLASSIFICADOS, não sobre quem entrou. Dividir pelos
-          que entraram faria a taxa cair sempre que mais gente desistisse — o que
-          é problema de fluxo, não de qualidade do lead.
-        */}
         <p className="text-xs text-slate-500">
-          {taxa != null ? (
-            <>
-              <b className="text-base tabular-nums text-slate-900">{taxa}%</b> dos leads
-              classificados foram qualificados ({t.qualificados} de {classificados}). Os{" "}
-              {t.semClassificacao} que não concluíram a triagem ficam fora dessa conta.
-            </>
-          ) : (
-            "Nenhum lead classificado no período."
-          )}
+          <Manchete fluxo={fluxo} total={t} semDesfecho={semDesfecho} />
         </p>
         <Button
           variant="outline"
@@ -628,13 +754,12 @@ function LeadsDoDiaPainel({ dias }: { dias: number }) {
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
           <p className="text-xs font-bold text-slate-700">Entrada e desfecho por dia</p>
           {/*
-            Legenda SEMPRE presente com 3 séries — identidade nunca fica só na
-            cor. É também a codificação secundária que a paleta exige (tritan
-            ΔE 6,6 está na faixa 6–8).
+            Legenda SEMPRE presente — identidade nunca fica só na cor. É também a
+            codificação secundária que as paletas exigem (tritan na faixa 6–8).
           */}
           <div className="flex flex-wrap items-center gap-3">
-            {SERIES.map((s) => (
-              <span key={s.key} className="flex items-center gap-1.5 text-[11px] text-slate-500">
+            {series.map((s) => (
+              <span key={s.chave} className="flex items-center gap-1.5 text-[11px] text-slate-500">
                 <span aria-hidden className="size-2 rounded-sm" style={{ background: s.cor }} />
                 {s.rotulo}
               </span>
@@ -667,17 +792,17 @@ function LeadsDoDiaPainel({ dias }: { dias: number }) {
                 allowDecimals={false}
               />
               <Tooltip contentStyle={TOOLTIP_STYLE} />
-              {SERIES.map((s, i) => (
+              {series.map((s, i) => (
                 <Bar
-                  key={s.key}
-                  dataKey={s.key}
+                  key={s.chave}
+                  dataKey={s.chave}
                   name={s.rotulo}
                   stackId="dia"
                   fill={s.cor}
                   /* ⚠️ Vão de 2px entre as fatias — exigência da especificação de
-                     marcas, e aqui também a codificação secundária que sustenta a
-                     paleta. Só a fatia do TOPO arredonda, para o empilhado não
-                     parecer três barras soltas.
+                     marcas, e aqui também a codificação secundária que sustenta
+                     as paletas. Só a fatia do TOPO arredonda, para o empilhado
+                     não parecer barras soltas.
 
                      ⚠️ E o vão usa `var(--card)`, não `#ffffff`: no tema escuro
                      o card é `#16181f`, e um traço branco viraria uma linha
@@ -685,7 +810,7 @@ function LeadsDoDiaPainel({ dias }: { dias: number }) {
                      para um tema só. */
                   stroke="var(--card)"
                   strokeWidth={2}
-                  radius={i === SERIES.length - 1 ? [4, 4, 0, 0] : 0}
+                  radius={i === series.length - 1 ? [4, 4, 0, 0] : 0}
                   maxBarSize={38}
                 />
               ))}
@@ -699,13 +824,13 @@ function LeadsDoDiaPainel({ dias }: { dias: number }) {
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b bg-slate-50 text-left text-slate-500">
-              {["Dia", "Entraram", "Qualificados", "Frios", "Não concluíram", "Pontos (média)"].map(
-                (h) => (
+              {["Dia", "Entraram", ...series.map((s) => s.rotulo)]
+                .concat(fluxo.mostraPontos ? ["Pontos (média)"] : [])
+                .map((h) => (
                   <th key={h} className="whitespace-nowrap px-4 py-2.5 font-medium">
                     {h}
                   </th>
-                )
-              )}
+                ))}
             </tr>
           </thead>
           <tbody>
@@ -715,40 +840,127 @@ function LeadsDoDiaPainel({ dias }: { dias: number }) {
                   {format(new Date(`${l.dia}T12:00:00`), "EEE, dd/MM", { locale: ptBR })}
                 </td>
                 <td className="px-4 py-2.5 tabular-nums">{l.entraram}</td>
-                <td className="px-4 py-2.5 font-semibold tabular-nums text-emerald-600">
-                  {l.qualificados}
-                </td>
-                <td className="px-4 py-2.5 tabular-nums text-indigo-600">{l.frios}</td>
-                <td
-                  className={cn(
-                    "px-4 py-2.5 tabular-nums",
-                    l.semClassificacao > 0 && "text-amber-600"
-                  )}
-                >
-                  {l.semClassificacao}
-                </td>
-                {/* A média de pontos é o que permite mexer no limiar com dado na
-                    mão: frios com média 8 pedem outra conversa que frios com
-                    média 2. */}
-                <td className="px-4 py-2.5 tabular-nums text-slate-400">{l.pontosMedio ?? "—"}</td>
+                {series.map((s) => {
+                  const n = s.chave === NAO_CONCLUIU ? naoConcluiu(l) : (l.desfechos[s.chave] ?? 0);
+                  return (
+                    <td
+                      key={s.chave}
+                      className={cn(
+                        "px-4 py-2.5 tabular-nums",
+                        // ⚠️ Cor só na MARCA de cor da coluna, nunca no número:
+                        // o valor é texto e usa token de texto. O cinza do "não
+                        // concluíram" é a única exceção, e é para recuar, não
+                        // para destacar.
+                        s.chave === NAO_CONCLUIU && "text-slate-400"
+                      )}
+                    >
+                      {n}
+                    </td>
+                  );
+                })}
+                {fluxo.mostraPontos && (
+                  // A média de pontos é o que permite mexer no limiar com dado
+                  // na mão: frios com média 8 pedem outra conversa que frios com
+                  // média 2.
+                  <td className="px-4 py-2.5 tabular-nums text-slate-400">
+                    {l.pontosMedio ?? "—"}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
-      {t.entraram === 0 && (
-        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-          <b>Nenhum lead no período.</b> A Triagem Comercial ainda não está vinculada a nenhum
-          número — em <span className="font-mono">/whatsapp</span>, o canal precisa ter esse bot
-          para os leads passarem por ela. O relatório enche sozinho a partir do primeiro
-          atendimento.
-        </div>
+      {fluxo.historicoParcial && t.entraram > 0 && (
+        <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
+          {/* ⚠️ Backfill parcial ANUNCIADO. Silencioso, alguém compararia agosto
+              com setembro e concluiria que a triagem melhorou. */}
+          {fluxo.historicoParcial}
+        </p>
       )}
+
+      {t.entraram === 0 && <SemLeads fluxo={fluxo} />}
     </>
   );
 }
 
+/** Quem entrou e não recebeu desfecho nenhum. Nunca negativo. */
+function naoConcluiu(l: LinhaDia): number {
+  return Math.max(l.entraram - l.concluiram, 0);
+}
+
+/**
+ * A frase que resume o período — e ela é **diferente por fluxo de propósito**.
+ *
+ * ⚠️ A taxa de qualificação do comercial é sobre os CLASSIFICADOS, não sobre quem
+ * entrou: dividir pelos que entraram faria a taxa cair sempre que mais gente
+ * desistisse, o que é problema de fluxo e não de qualidade do lead.
+ *
+ * ⚠️ Na secretaria essa taxa **não existe** — não há o que qualificar. O número
+ * que importa lá é quanta gente CHEGOU a escolher o assunto (ou seja, chegou ao
+ * atendente) e qual assunto domina a fila, que é o que decide onde reforçar a
+ * equipe.
+ */
+function Manchete({
+  fluxo,
+  total,
+  semDesfecho,
+}: {
+  fluxo: Fluxo;
+  total: TotalLeads;
+  semDesfecho: number;
+}) {
+  if (total.entraram === 0) return <>Nenhum lead no período.</>;
+
+  if (fluxo.mostraPontos) {
+    const quente = total.desfechos.quente ?? 0;
+    const classificados = total.concluiram;
+    if (classificados === 0) return <>Nenhum lead classificado no período.</>;
+    return (
+      <>
+        <b className="text-base tabular-nums text-slate-900">
+          {Math.round((quente / classificados) * 100)}%
+        </b>{" "}
+        dos leads classificados foram qualificados ({quente} de {classificados}). Os {semDesfecho}{" "}
+        que não concluíram a triagem ficam fora dessa conta.
+      </>
+    );
+  }
+
+  const maior = fluxo.series
+    .map((s) => ({ rotulo: s.rotulo, n: total.desfechos[s.chave] ?? 0 }))
+    .sort((a, b) => b.n - a.n)[0];
+  return (
+    <>
+      <b className="text-base tabular-nums text-slate-900">
+        {Math.round((total.concluiram / total.entraram) * 100)}%
+      </b>{" "}
+      de quem entrou escolheu o assunto e chegou ao atendente ({total.concluiram} de{" "}
+      {total.entraram}).
+      {maior && maior.n > 0 && (
+        <>
+          {" "}
+          O assunto mais pedido é <b>{maior.rotulo}</b> ({maior.n}).
+        </>
+      )}{" "}
+      Os {semDesfecho} que pararam antes não escolheram nada.
+    </>
+  );
+}
+
+/** Vazio que EXPLICA, em vez de mostrar zeros sem motivo. */
+function SemLeads({ fluxo }: { fluxo: Fluxo }) {
+  return (
+    <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+      <b>Nenhum lead no período.</b> A {fluxo.nome} não está vinculada a nenhum número — em{" "}
+      <span className="font-mono">/whatsapp</span>, o canal precisa ter esse bot para os leads
+      passarem por ela. O relatório enche sozinho a partir do primeiro atendimento.
+    </div>
+  );
+}
+
+/** Abas válidas para o `?tab=` da URL. */
 const TODAS_AS_ABAS = [
   "Análise IA",
   "Leads do dia",

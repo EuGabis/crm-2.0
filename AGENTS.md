@@ -4668,3 +4668,149 @@ a planilha e a tela não podem discordar sobre qual cor é "qualificado".
   concluiu", e por que a taxa exclui quem desistiu). Este projeto já mediu que
   métrica sem régua declarada gera discussão sobre o número em vez de sobre a
   operação.
+
+### "Leads do dia" serve os DOIS bots (migração 202609031955)
+
+Pedido: "colocar nessa tela a opção de ver o fluxo da secretaria também, mas
+dentro dos moldes do bot deles — **a secretaria não tem qualificado ou perdido**
+por exemplo". Ele está certo, e a diferença é estrutural:
+
+| bot | nó que decide | desfechos |
+|---|---|---|
+| Triagem Comercial (`triagem`) | `score` | quente · frio (soma ≥ 9) |
+| Triagem Secretaria (`triagem-secretaria`) | `pede_assunto` | Documentos/Prova Sub · Imersão Pres. MMA · Outros |
+
+⚠️ **`bot_qualificacoes` (202609031728) estava estreita demais**, e o problema não
+era o nome: `pontos`/`limiar` eram NOT NULL. Encaixar "docs" ali com
+`pontos = 0` inventado seria mentira gravada — em um mês ninguém saberia se
+aquele zero é "não pontuou" ou "pontuou zero". A tabela virou
+**`bot_desfechos`**, `pontos`/`limiar` ficaram opcionais e entrou `rotulo` (o
+texto que o cliente VIU, guardado pelo mesmo motivo de `limiar`: o fluxo é
+editável e renomear a opção amanhã reescreveria a leitura de ontem).
+
+Renomear custou zero porque a tabela tinha **0 linhas** — a Triagem Comercial
+ainda não está ligada a nenhum número. Era a última hora em que sairia de graça.
+
+- ⚠️ **Quem registra é o nó que DECIDE**, marcado com `registraDesfecho` no
+  `ask`. Não é o nó de handoff nem um `default`: cada bot decide num lugar
+  diferente, e sem a marca o relatório teria de adivinhar qual variável do fluxo
+  é "o resultado". Mesma razão de o nó `score` já gravar sozinho.
+- ⚠️ **A flag entra por MIGRAÇÃO, não só no TypeScript** — `getFlow` lê
+  `bot_flows.definition` e o fluxo embutido em código é só reserva. É a lição da
+  202609011230 (validação de e-mail), que teria sido inócua sem o `update`.
+- ⚠️ Só grava quando a opção **CASOU**. Resposta fora da lista cai no ramo de
+  repergunta e não chega ali, então o relatório nunca recebe texto livre do
+  cliente como se fosse desfecho — o defeito que a 202609011230 fechou nos
+  campos do contato.
+- `registrarDesfecho()` é UMA função para os dois fluxos: duas cópias do insert
+  divergiriam na primeira coluna nova, e aí um bot apareceria no relatório e o
+  outro não. Best-effort — perder uma linha de métrica é ruim, travar a triagem
+  do cliente é pior.
+- **Backfill de 214 linhas** do que ainda restava em `bot_sessions` (desde
+  18/08): sem ele a tela da secretaria nasceria vazia num fluxo que roda há
+  semanas. ⚠️ É **reconhecidamente incompleto** — a sessão é apagada quando a
+  conversa finalizada reabre — e a tela DIZ isso num rodapé. Backfill parcial
+  anunciado é melhor que tela vazia; silencioso seria pior que as duas, porque
+  alguém compararia agosto com setembro e concluiria que a triagem melhorou.
+
+### 🔴 O defeito que só apareceu ao rodar com dado real: o empilhado não fechava
+
+Primeiro teste da função em produção: **"03/09 — entraram 21, concluíram 24"**.
+Fatia negativa é gráfico quebrado.
+
+⚠️ **A causa: o desfecho era contado no dia do EVENTO.** O cliente escreve num
+dia e é triado no outro; e a conversa que reabre passa pelo bot de novo semanas
+depois. Agora o desfecho é atribuído ao dia em que a **conversa ENTROU**, o que
+faz as fatias particionarem quem entrou **por construção** — e muda a pergunta
+da tela para a certa: "dos leads que chegaram naquele dia, o que aconteceu com
+eles?".
+
+⚠️ Junto disso, `distinct on (conversation_id)` pelo primeiro desfecho: **uma
+conversa = um lead = UM desfecho**. `entraram` conta a conversa uma vez só
+(porque ela foi criada uma vez), então contar duas triagens quebraria a soma.
+
+⚠️ **E o método:** eu tinha aplicado a função e conferido pelo MCP, que roda como
+`service_role` — cai na guarda de empresa e devolve **zero linhas sem erro**.
+Isso já tinha me custado o `42804` na mesma tarde. A conferência que vale é
+executar `set_config('request.jwt.claims', ...)` com um usuário real; foi ela que
+mostrou os 24 contra 21. **Zero linhas por guarda de RLS nunca é prova de que a
+função funciona.**
+
+### O relatório é agnóstico de fluxo
+
+`relatorio_triagem_diaria` substitui `relatorio_leads_diario`, que devolvia
+**colunas fixas** (`qualificados`, `frios`) — e coluna fixa só serve a um bot. O
+desfecho volta em **jsonb** (`{"docs": 4, "outros": 9}`) e quem rotula é a tela,
+que é onde o vocabulário de cada bot já mora. A antiga foi REMOVIDA: duas funções
+com o mesmo propósito divergiriam na primeira mudança.
+
+Na tela, `FLUXOS` é a única tabela de configuração: rótulos, cores, se mostra
+média de pontos e a manchete. **A manchete é diferente por fluxo de propósito** —
+no comercial é a taxa de qualificação (sobre os CLASSIFICADOS, senão cairia
+sempre que mais gente desistisse); na secretaria é **quanta gente chegou a
+escolher o assunto** e qual assunto domina a fila, que é o que decide onde
+reforçar a equipe. Forçar "qualificado/perdido" na secretaria inventaria uma
+régua que o bot dela não tem — e alguém decidiria algo com base nela.
+
+Seletor de fluxo em **botões, não `Select`**: são dois, a troca é comparativa, e
+um menu esconderia que a outra visão existe — exatamente o que o pedido apontou.
+
+### 🔴 Correção da paleta da seção anterior
+
+A seção acima diz que a vencedora é `#059669 · #6366f1 · #d97706` com o **âmbar
+sendo "não concluíram"**. Com a secretaria entrando, isso mudou, e por medida:
+
+⚠️ **Quatro cores categóricas NÃO passam `--pairs all`** — é o limite conhecido da
+deuteranopia, e o validador manda "cut series or facet". Então "não concluíram"
+deixou de ser uma cor categórica e virou **neutro de tema**
+(`var(--muted-foreground)`): ele não é uma categoria irmã, é a **ausência** de
+desfecho. De quebra o significado passa a ser o mesmo nos dois fluxos, e o âmbar
+fica livre para ser o assunto "Outros".
+
+Paletas de hoje, as duas validadas em `--pairs all` e nos dois temas:
+
+| fluxo | cores | pior par (deutan / normal) |
+|---|---|---|
+| Comercial | `#059669` · `#6366f1` | ΔE 23,6 / 28,1 |
+| Secretaria | `#0891b2` · `#6366f1` · `#d97706` | ΔE 13,0 / 17,0 |
+
+⚠️ **Uma tentativa REPROVOU de um jeito que só `--pairs all` pega:** rosa
+`#db2777` ao lado do verde `#059669` dá **ΔE 1,1 em deuteranopia** —
+indistinguíveis. Ela passava enquanto as duas não eram **adjacentes** no
+empilhado, que é o que a checagem padrão mede. Num gráfico de 3+ fatias o leitor
+compara QUALQUER par contra a legenda, não só os vizinhos: **em empilhado com 3
+ou mais séries, valide `--pairs all`.**
+
+Tritan segue na faixa 6–8 nas duas, então a legenda com rótulo, o vão de 2px
+entre as fatias e a tabela continuam sendo **exigência**, não enfeite.
+
+### `npm run test:leads-xlsx` — 25 asserções, e duas coisas que só ele pegou
+
+A planilha ficou genérica (colunas dinâmicas, letra de coluna calculada), e com
+o comercial tendo 2 séries e a secretaria 3 um erro de índice pintaria a barra de
+dados na coluna errada em um dos dois sem ninguém ver no outro. Gera e RELÊ os
+dois fluxos.
+
+1. ⚠️ **`await import("exceljs")` sem `.default`** — divergia de `sla-xlsx.ts`, que
+   é o padrão comprovado. O `exceljs` é CJS: fora do bundler
+   `ExcelJS.Workbook` não é construtor. `tsc` não acusa.
+2. ⚠️ **KPI de porcentagem sem dado gravava `""`** numa coluna numérica. Agora é
+   célula VAZIA — `0%` afirmaria que ninguém qualificou, quando ninguém foi
+   medido.
+
+⚠️ E uma armadilha do próprio teste, que custou 5 asserções lendo a célula
+errada: **`eachRow` PULA linhas vazias**, então a posição no array não é o número
+da linha (o teste lia "6" onde esperava "0,625"). Use o `n` que o `eachRow`
+entrega. Outra: o ExcelJS **não reconstrói `autoFilter` ao ler** o arquivo — essa
+asserção tem de ser sobre o workbook montado, e "não foi gravado" × "não é
+relido" parecem a mesma coisa pedindo correções opostas.
+
+O nome do arquivo carrega o FLUXO: sem isso, baixar a visão da secretaria depois
+da do comercial sobrescreveria a anterior — e as duas têm colunas diferentes,
+então o leitor abriria a errada achando que é a outra.
+
+⏳ **A visão da secretaria nasce com dado real** (58 leads em 7 dias, ~28% sem
+concluir); a do comercial nasce vazia até a Triagem Comercial ser ligada a um
+número. ⚠️ Fica de fora, por não haver como aferir: o nó `pergunta_situacao` do
+comercial é feito e **não entra no `weights`** — a nota sai só de `objetivo` +
+`conhece_lito`. Vale confirmar se é deliberado.

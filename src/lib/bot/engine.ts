@@ -56,6 +56,55 @@ interface Ctx {
   flowKey: string;
 }
 
+/**
+ * Grava o DESFECHO da triagem — a linha permanente que alimenta o relatório
+ * diário (Relatórios → Leads do dia).
+ *
+ * ⚠️ **Registro PERMANENTE, e não `bot_sessions`.** A sessão é estado ATUAL: o
+ * webhook a apaga quando uma conversa finalizada reabre ("zera a sessão para o
+ * bot iniciar de novo"), e foram 40 casos em 7 dias. Um relatório lido de lá
+ * encolheria o passado — o lead classificado na segunda sumiria da segunda ao
+ * ser reaberto na quarta, e número que muda para trás é pior do que número
+ * nenhum, porque ninguém descobre que mudou.
+ *
+ * ⚠️ **Uma função só para os dois fluxos.** Cada bot decide o desfecho num nó
+ * diferente (`score` no comercial, `pede_assunto` na secretaria) e são chamadas
+ * separadas; duas cópias do insert divergiriam na primeira coluna nova, e aí um
+ * fluxo apareceria no relatório e o outro não.
+ *
+ * ⚠️ **Best-effort de propósito**: falhar aqui não pode derrubar a triagem.
+ * Perder uma linha de métrica é ruim; travar o atendimento do cliente por causa
+ * dela é pior.
+ */
+async function registrarDesfecho(
+  ctx: Ctx,
+  d: {
+    resultado: string;
+    /** O texto que o CLIENTE viu, quando o desfecho vem de uma opção. */
+    rotulo?: string;
+    /** Só fluxo com nó de pontuação tem número; NULL não é zero. */
+    pontos?: number | null;
+    limiar?: number | null;
+    respostas?: Record<string, string>;
+  },
+): Promise<void> {
+  try {
+    await ctx.db.from("bot_desfechos").insert({
+      location_id: ctx.channel.location_id,
+      conversation_id: ctx.conversationId,
+      contact_id: ctx.contact.id,
+      flow_key: ctx.flowKey,
+      resultado: d.resultado,
+      rotulo: d.rotulo ?? null,
+      pontos: d.pontos ?? null,
+      limiar: d.limiar ?? null,
+      respostas: d.respostas ?? {},
+    });
+  } catch (e) {
+    console.warn("[bot] não deu para registrar o desfecho da triagem:", e);
+  }
+}
+
 function render(text: string, vars: Record<string, any>): string {
   // first_name é o único nome opcional. Quando vazio (a pessoa recusou/não deu o
   // nome), remove o placeholder E a pontuação órfã ao redor pra não sair
@@ -543,22 +592,16 @@ async function advance(
        * triagem. Perder uma linha de métrica é ruim; travar o atendimento do
        * cliente por causa dela é pior.
        */
-      try {
-        await ctx.db.from("bot_qualificacoes").insert({
-          location_id: ctx.channel.location_id,
-          conversation_id: ctx.conversationId,
-          contact_id: ctx.contact.id,
-          flow_key: flow.key,
-          pontos: sum,
-          // O limiar é gravado junto: ele muda com o tempo, e a linha antiga
-          // precisa continuar interpretável sem consultar o fluxo de hoje.
-          limiar: node.threshold,
-          resultado,
-          respostas,
-        });
-      } catch (e) {
-        console.warn("[bot] não deu para registrar a qualificação:", e);
-      }
+      await registrarDesfecho(ctx, {
+        resultado,
+        // Fluxo com pontuação é o único que tem número para gravar; na
+        // secretaria as duas colunas ficam NULL de propósito.
+        pontos: sum,
+        // O limiar é gravado junto: ele muda com o tempo, e a linha antiga
+        // precisa continuar interpretável sem consultar o fluxo de hoje.
+        limiar: node.threshold,
+        respostas,
+      });
       nodeId = node.next;
     } else if (node.type === "ensure_card") {
       await ensureCard(ctx, node, vars);
@@ -772,6 +815,26 @@ export async function maybeRunBot(
           return true;
         }
         vars[node.var] = opt.value ?? opt.title;
+        /*
+         * Nó marcado como desfecho (`registraDesfecho`) → a escolha vira a linha
+         * permanente do relatório diário. É o análogo do nó `score`: em cada
+         * fluxo, quem DECIDE o desfecho é quem registra.
+         *
+         * ⚠️ Só grava quando a opção CASOU. Resposta fora da lista cai no ramo
+         * acima (repergunta) e não chega aqui — então o relatório nunca recebe
+         * texto livre do cliente como se fosse um desfecho, que é o defeito que
+         * a 202609011230 corrigiu nos campos do contato.
+         *
+         * ⚠️ Sem `pontos`/`limiar`: a secretaria não tem nota. NULL diz "não
+         * pontuou"; um zero diria "pontuou zero", que é outra coisa.
+         */
+        if (node.registraDesfecho) {
+          await registrarDesfecho(ctx, {
+            resultado: String(vars[node.var]),
+            rotulo: opt.title,
+            respostas: { [node.var]: String(vars[node.var]) },
+          });
+        }
         // Ramifica por opção: se a opção tem destino próprio, vai por ele.
         if (opt.next) optNext = opt.next;
       } else if (node.validate === "name") {

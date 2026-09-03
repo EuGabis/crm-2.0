@@ -46,6 +46,22 @@ export type BotNode =
        * novamente Beatriz").
        */
       validate?: "name" | "email" | "email_ou_doc";
+      /**
+       * Marca ESTE nó como o desfecho da triagem: a opção escolhida é gravada em
+       * `bot_desfechos` e vira a coluna do relatório diário.
+       *
+       * ⚠️ Existe porque **cada bot decide o desfecho num nó diferente**. A
+       * Triagem Comercial decide no nó `score` (quente/frio, que já grava
+       * sozinho); a Triagem Secretaria decide em `pede_assunto` — o cliente
+       * escolhe entre "Documentos/Prova Sub", "Imersão Pres. MMA" e "Outros", e
+       * ali não existe nota, nem qualificado, nem perdido. Sem a marca, o
+       * relatório teria de adivinhar qual variável do fluxo é "o resultado".
+       *
+       * ⚠️ **O fluxo que VALE é o do banco** (`bot_flows.definition`): marcar
+       * aqui, no fluxo embutido em código, não tem efeito em produção — a flag
+       * precisa entrar por migração (foi a lição da 202609011230).
+       */
+      registraDesfecho?: boolean;
       next: string | null;
     }
   // Grava a resposta num campo do contato (ex.: first_name a partir de "name").

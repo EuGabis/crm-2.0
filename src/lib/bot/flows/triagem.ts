@@ -96,6 +96,15 @@ export const triagemFlow: BotFlow = {
       text: "Clique em uma das opções sobre o assunto que deseja tratar:",
       var: "assunto",
       listButton: "Ver opções",
+      /*
+       * Este é o nó que DECIDE o desfecho neste fluxo: o assunto escolhido é o
+       * que o relatório diário mostra. Não há nota aqui — a triagem por assunto
+       * não tem qualificado nem perdido.
+       *
+       * ⚠️ A flag também está no fluxo do BANCO (migração 202609031955), que é o
+       * que roda em produção. Marcar só aqui não teria efeito nenhum.
+       */
+      registraDesfecho: true,
       options: [
         { id: "docs", title: "Documentos/Prova Sub", value: "docs", next: "ajuda_docs" },
         { id: "imersao", title: "Imersão Pres. MMA", value: "imersao", next: "ajuda_imersao" },

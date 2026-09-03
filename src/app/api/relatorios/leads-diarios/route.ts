@@ -6,18 +6,21 @@ import { canAccess } from "@/lib/auth/module-access";
 export const dynamic = "force-dynamic";
 
 /**
- * Leads que entraram por dia, e quantos o bot qualificou.
+ * Leads que entraram por dia e o que o bot fez com eles.
  *
- * A régua é a do fluxo: o nó `score` soma os pesos das respostas e, a partir do
- * limiar (**9** na Triagem Comercial), marca o lead como `quente`. Quem fica
- * abaixo é `frio`; quem abandonou a triagem antes do nó não tem classificação.
+ * ⚠️ **Serve QUALQUER fluxo, porque os bots não têm o mesmo tipo de desfecho.**
+ * A Triagem Comercial classifica em quente/frio pelo nó `score` (soma ≥ 9); a
+ * Triagem Secretaria não tem nota nenhuma — o cliente escolhe um ASSUNTO
+ * ("Documentos/Prova Sub", "Imersão Pres. MMA", "Outros") e cada ramo vai para
+ * um atendente. Por isso o desfecho volta em **mapa** (`{"docs": 4}`) e não em
+ * colunas fixas: coluna fixa só serve a um bot.
  *
- * ⚠️ **Lê `bot_qualificacoes`, não `bot_sessions`** — ver a migração
- * 202609031728. Sessão é apagada quando a conversa finalizada reabre, e um
- * relatório diário lido de lá encolheria o passado.
+ * ⚠️ **Lê `bot_desfechos`, não `bot_sessions`** — ver a migração 202609031955.
+ * Sessão é apagada quando a conversa finalizada reabre, e um relatório diário
+ * lido de lá encolheria o passado.
  *
- * ⚠️ **Não é admin-only**: vale a permissão do módulo `relatorios`, como a aba
- * de Atendimento. E a checagem que importa é ESTA, no servidor — a função é
+ * ⚠️ **Não é admin-only**: vale a permissão do módulo `relatorios`, como a aba de
+ * Atendimento. E a checagem que importa é ESTA, no servidor — a função é
  * `security definer`, então esconder a aba na tela não seria proteção.
  */
 export async function GET(request: Request) {
@@ -45,7 +48,7 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const dias = Math.min(180, Math.max(1, Number(url.searchParams.get("dias")) || 30));
-  // `flow` vazio = todos os fluxos. A tela manda "triagem" (Triagem Comercial).
+  // `flow` vazio = todos os fluxos. A tela sempre manda um (o seletor de fluxo).
   const flow = url.searchParams.get("flow") || null;
 
   const hoje = new Date();
@@ -53,7 +56,7 @@ export async function GET(request: Request) {
   de.setDate(de.getDate() - (dias - 1));
   const iso = (d: Date) => d.toISOString().slice(0, 10);
 
-  const { data, error } = await supabase.rpc("relatorio_leads_diario", {
+  const { data, error } = await supabase.rpc("relatorio_triagem_diaria", {
     p_location: membership.location_id,
     p_de: iso(de),
     p_ate: iso(hoje),
@@ -74,22 +77,27 @@ export async function GET(request: Request) {
   const linhas = (data ?? []).map((r: any) => ({
     dia: r.dia as string,
     entraram: Number(r.entraram ?? 0),
-    qualificados: Number(r.qualificados ?? 0),
-    frios: Number(r.frios ?? 0),
-    semClassificacao: Number(r.sem_classificacao ?? 0),
-    // numeric do PostgREST chega como string.
+    concluiram: Number(r.concluiram ?? 0),
+    /** Mapa desfecho → quantidade. As chaves são as do fluxo, não do CRM. */
+    desfechos: (r.desfechos ?? {}) as Record<string, number>,
+    // numeric do PostgREST chega como string; sem o Number() a média viraria
+    // concatenação na tela.
     pontosMedio: r.pontos_medio == null ? null : Number(r.pontos_medio),
   }));
 
-  const total = linhas.reduce(
-    (a: any, l: any) => ({
-      entraram: a.entraram + l.entraram,
-      qualificados: a.qualificados + l.qualificados,
-      frios: a.frios + l.frios,
-      semClassificacao: a.semClassificacao + l.semClassificacao,
-    }),
-    { entraram: 0, qualificados: 0, frios: 0, semClassificacao: 0 },
-  );
+  /*
+   * Os totais são somados AQUI e não no SQL: a chave de desfecho é dinâmica (o
+   * fluxo decide quais existem), e um segundo `group by` na função só para o
+   * total repetiria a regra em dois lugares para divergirem.
+   */
+  const desfechos: Record<string, number> = {};
+  let entraram = 0;
+  let concluiram = 0;
+  for (const l of linhas as { entraram: number; concluiram: number; desfechos: Record<string, number> }[]) {
+    entraram += l.entraram;
+    concluiram += l.concluiram;
+    for (const [k, v] of Object.entries(l.desfechos)) desfechos[k] = (desfechos[k] ?? 0) + v;
+  }
 
-  return Response.json({ linhas, total, dias, flow });
+  return Response.json({ linhas, total: { entraram, concluiram, desfechos }, dias, flow });
 }

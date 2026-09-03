@@ -12,6 +12,7 @@
     "db:apply": "node scripts/apply-migration.mjs",
     "test:audio": "node scripts/test-audio.mjs",
     "test:bot": "node scripts/test-bot-campos.mjs",
+    "test:leads-xlsx": "node scripts/test-leads-xlsx.mjs",
     "test:phone": "node scripts/test-phone.mjs"
   },
   "dependencies": {
