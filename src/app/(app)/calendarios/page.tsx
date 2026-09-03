@@ -248,40 +248,26 @@ function ConfigCalendarios() {
         </p>
       </div>
       <div className="grid max-w-4xl gap-4 md:grid-cols-2">
-        <div className="rounded-xl border bg-white p-5">
-          <p className="mb-3 text-xs font-bold text-slate-700">Calendários conectados</p>
-          <div className="flex items-center justify-between rounded-lg border p-3">
-            <div className="flex items-center gap-3">
-              <span className="flex size-9 items-center justify-center rounded-lg bg-slate-100 text-sm font-black text-slate-600">
-                G
-              </span>
-              <div>
-                <p className="text-xs font-semibold text-slate-800">Google Calendar</p>
-                <p className="text-[11px] text-slate-500">gustavo@litocrm.com.br</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Badge className="bg-emerald-100 text-emerald-700">Conectado</Badge>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => toast.info("Gerenciamento da conexão chega com o backend")}
-              >
-                Gerenciar
-              </Button>
-            </div>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="mt-3 h-7 text-xs"
-            onClick={() => toast.info("Conexão de novos calendários chega com o backend")}
-          >
-            + Conectar outro calendário
-          </Button>
-        </div>
+        {/*
+          🗑️ **"Calendários conectados" REMOVIDO** (03/09/2026, a pedido do
+          Gabriel: "remover essa opção de conectar com o google calendar por
+          enquanto").
 
+          Era mock inteiro: o cartão mostrava uma conta inventada
+          (`gustavo@litocrm.com.br`, que vem das fixtures) com o selo verde
+          **"Conectado"** — afirmação falsa —, e os dois botões respondiam
+          `toast.info("chega com o backend")`. Não existe OAuth de Google
+          Calendar no CRM: nenhuma rota, nenhuma tabela, nenhuma env.
+
+          Prometer integração que não existe é pior do que não oferecer: alguém
+          confia que a agenda está sincronizada e para de conferir. Mesma decisão
+          do Canva (código morto sai, o histórico do git guarda) e do interruptor
+          falso de resposta automática nas Conversas.
+
+          Se o Google Calendar entrar um dia, o caminho é OAuth por empresa como
+          o do Google Ads (`google_ads_connections`, migração 0023) — e aí o selo
+          "Conectado" passa a sair do banco, não de um literal.
+        */}
         <div className="rounded-xl border bg-white p-5">
           <p className="mb-3 text-xs font-bold text-slate-700">Disponibilidade padrão</p>
           <div className="flex flex-wrap gap-1.5">
@@ -343,10 +329,23 @@ function ConfigCalendarios() {
             </div>
           </div>
           <div className="mt-4 flex justify-end">
+            {/*
+              ⚠️ Era `toast.success("Configurações de calendário salvas")` — e
+              NADA era salvo: os dois interruptores são `useState`, que morre ao
+              trocar de página. Alguém ligava o lembrete de 24h, lia "salvas" e
+              acreditava que o cliente seria avisado; não seria, e o resultado é
+              falta na reunião.
+
+              A convenção do projeto para ação que depende de backend é
+              `toast.info("<ação> chega com o backend")`. O botão fica — é onde a
+              ação vai morar — mas para de afirmar o que não fez.
+            */}
             <Button
               size="sm"
               className="h-8 text-xs"
-              onClick={() => toast.success("Configurações de calendário salvas")}
+              onClick={() =>
+                toast.info("Lembrete automático por WhatsApp chega com o backend")
+              }
             >
               Salvar
             </Button>
