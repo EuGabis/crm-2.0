@@ -187,7 +187,19 @@ interface AgenteRow {
   userId: string;
   nome: string;
   conversas_atribuidas: number;
-  tempo_medio_resposta: string;
+  /**
+   * MEDIANA da espera útil até a primeira resposta HUMANA, já formatada.
+   *
+   * ⚠️ Trocou de `tempo_medio_resposta` para `resposta_tipica` de propósito: o
+   * campo antigo era média de tempo CORRIDO, descartava tudo acima de 24h e não
+   * contava quem nunca foi respondido — o AGENTS.md chama isso de "ficção em
+   * quatro camadas". Manter o nome antigo com o cálculo novo faria o próximo
+   * leitor achar que é média.
+   */
+  resposta_tipica: string;
+  respostas_medidas: number;
+  /** Conversas dele em que o cliente NUNCA recebeu resposta humana. */
+  nao_respondidas: number;
   templates_enviados_30d: number;
   ganhos: number;
   perdidos: number;
@@ -224,7 +236,9 @@ function AgentesReport() {
     <>
       <h1 className="mb-1 text-lg font-bold text-slate-900">Desempenho por agente</h1>
       <p className="mb-4 text-xs text-slate-500">
-        Dados reais dos últimos 30 dias — conversas, tempo de resposta e resultados.
+        Conversas, resposta e templates dos últimos 30 dias. ⚠️ Ganhos, perdidos e receita são
+        o ACUMULADO do atendente — recortar em 30 dias mostraria zero para quem fechou no mês
+        passado.
       </p>
       {error && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-700">
@@ -241,7 +255,19 @@ function AgentesReport() {
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b text-[11px] text-slate-400">
-                {["Atendente", "Conversas", "Tempo médio de resposta", "Templates (30d)", "Ganhos", "Perdidos", "Receita ganha"].map((h) => (
+                {[
+                  "Atendente",
+                  "Conversas",
+                  // ⚠️ "Resposta típica" e não "Tempo médio": agora é MEDIANA de
+                  // minutos ÚTEIS. Neste banco a média era 675 min contra
+                  // mediana de 14 — o rótulo errado faria a coluna mentir.
+                  "Resposta típica",
+                  "Sem resposta",
+                  "Templates (30d)",
+                  "Ganhos",
+                  "Perdidos",
+                  "Receita ganha",
+                ].map((h) => (
                   <th key={h} className="whitespace-nowrap px-4 py-2.5 font-medium">{h}</th>
                 ))}
               </tr>
@@ -251,7 +277,18 @@ function AgentesReport() {
                 <tr key={a.userId} className="border-b last:border-0">
                   <td className="px-4 py-2.5 font-medium text-slate-800">{a.nome}</td>
                   <td className="px-4 py-2.5">{a.conversas_atribuidas}</td>
-                  <td className="px-4 py-2.5">{a.tempo_medio_resposta}</td>
+                  <td className="px-4 py-2.5" title={`Mediana de ${a.respostas_medidas} respostas, em minutos de expediente`}>
+                    {a.resposta_tipica}
+                  </td>
+                  {/*
+                    ⚠️ Conversa sem NENHUMA resposta humana fica em vermelho
+                    quando existe. Sem esta coluna, a mediana premia quem abandona
+                    o atendimento: quem nunca respondeu não entra no cálculo, e o
+                    pior caso fica invisível.
+                  */}
+                  <td className={cn("px-4 py-2.5", a.nao_respondidas > 0 && "font-semibold text-red-600")}>
+                    {a.nao_respondidas}
+                  </td>
                   <td className="px-4 py-2.5">{a.templates_enviados_30d}</td>
                   <td className="px-4 py-2.5 text-emerald-600">{a.ganhos}</td>
                   <td className="px-4 py-2.5 text-slate-500">{a.perdidos}</td>
@@ -260,7 +297,7 @@ function AgentesReport() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-6 text-center text-slate-400">
+                  <td colSpan={8} className="px-4 py-6 text-center text-slate-400">
                     Sem dados de equipe ainda.
                   </td>
                 </tr>

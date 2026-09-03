@@ -4423,3 +4423,64 @@ antes de confiar nela: as tarjas de "Disponibilidade padrão" vêm de uma consta
 do CRM** (`components/calendar/reminders.tsx`), escolhido por compromisso no
 próprio diálogo. Isso funciona. O que não existe é mandar **WhatsApp para o
 contato** — que é justamente o que os dois interruptores prometem.
+
+## "Desempenho por agente" demorava segundos (migração 202609031359)
+
+Relato: "a tela de desempenho por agente está demorando muito pra carregar".
+
+⚠️ **A causa: a rota baixava a empresa inteira para preencher 8 colunas.**
+`/api/relatorios/agentes` chamava `buildReportSnapshot` — o mesmo retrato completo
+da Análise IA —, e o `fetchAll` dele é um **laço SEQUENCIAL** de páginas de 1000
+linhas (`await` dentro de `for`). Medido neste banco:
+
+| tabela | linhas | idas e voltas |
+|---|---|---|
+| mensagens (30 dias) | **17.449** | **18, em série** |
+| conversas | 945 | 1 |
+| oportunidades | 596 | 1 |
+
+A 200–400 ms por salto, só as mensagens custam **4–7 segundos de espera de rede**.
+E a tela consome **8 campos** — os outros 12 do `AtendenteStat` eram calculados e
+descartados.
+
+`public.agentes_desempenho` faz tudo em UMA consulta: **13,7 ms** na parte
+agregada, medido com `explain analyze` (o `sla_conversations` acrescenta os 14–26
+ms que a 0079 documenta).
+
+⚠️ **`buildReportSnapshot` FICA onde está** — a Análise IA precisa do retrato
+inteiro para montar o prompt. O que mudou é esta aba parar de pagar por ele.
+
+### ⚠️ A métrica de resposta mudou, e tinha de mudar
+
+O `tempo_medio_resposta` desta aba é o que este arquivo já chamava de **"ficção em
+quatro camadas"**. Reescrevê-la em SQL seria codificar a mentira de novo. Agora a
+coluna vem de `sla_conversations` (0079), que resolve as quatro:
+
+1. não descarta mais o que passa de 24h (escondia as piores respostas);
+2. **mediana**, não média — neste banco a média era 675 min contra mediana de 14;
+3. conta quem **nunca** foi respondido, em coluna própria ("Sem resposta", em
+   vermelho quando existe). Sem ela a mediana premia quem abandona a conversa;
+4. mede minutos **úteis** — o p90 caía de 45h para 2h33 com o expediente.
+
+⚠️ **Reusar em vez de recalcular é o que faz a aba Agentes e a aba Atendimento
+CONCORDAREM.** Antes elas mostravam números diferentes para a mesma pessoa.
+
+⚠️ **O campo foi RENOMEADO** de `tempo_medio_resposta` para `resposta_tipica`, e o
+cabeçalho de "Tempo médio de resposta" para **"Resposta típica"**. Manter o nome
+antigo com o cálculo novo faria o próximo leitor achar que é média — e a diferença
+entre 14 min e 11h é exatamente essa.
+
+### Outras decisões da função
+
+- ⚠️ **Oportunidade NÃO é filtrada por data.** Ganho e receita do vendedor são o
+  acumulado dele; recortar em 30 dias mostraria "0 ganhos" para quem fechou no mês
+  passado e ninguém entenderia o zero. O subtítulo da tela passou a dizer o que é
+  do período e o que é acumulado.
+- **`LEFT JOIN` em todas as fontes**: atendente sem conversa, sem mensagem ou sem
+  lead continua na lista com zero. Sumir da tela é pior — "não aparece" e "não
+  atendeu" ficariam indistinguíveis.
+- Checagem de empresa na primeira linha (padrão 0049) mesmo com
+  `sla_conversations` tendo a sua: depender só dela deixaria as outras CTEs
+  abertas.
+- `numeric` do PostgREST chega como **string**; a rota faz `Number()` antes de
+  formatar. Sem isso a mediana viraria concatenação.
