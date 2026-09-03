@@ -56,7 +56,33 @@ export async function GET(request: Request) {
     p_meta_min: 15,
   });
   if (error) {
-    return Response.json({ error: "não foi possível carregar" }, { status: 500 });
+    /*
+     * ⚠️ **O motivo VAI para a tela, não para o lixo.** A primeira versão
+     * respondia só "não foi possível carregar", e foi exatamente isso que
+     * aconteceu em 03/09: a função existia, a assinatura batia, `authenticated`
+     * tinha EXECUTE — e eu não tinha como saber o que falhou, porque a única
+     * informação foi descartada aqui.
+     *
+     * É o mesmo defeito que custou rodadas no áudio recusado pela Meta (o motivo
+     * da falha não era gravado) e o "tente novamente" do contato duplicado.
+     * Regra que sai daqui: **erro de RPC sempre carrega o `code` e a `message`
+     * do PostgREST.**
+     *
+     * Os dois mais prováveis, e a conduta de cada um:
+     *   - `PGRST202` — a função existe no banco mas não no cache de esquema do
+     *     PostgREST. Acontece logo depois de criar a função e some sozinho; um
+     *     `notify pgrst, 'reload schema'` força.
+     *   - `42501` — falta `grant execute ... to authenticated` (o par da 0080).
+     */
+    const detalhe = [error.code, error.message].filter(Boolean).join(" · ");
+    console.error(
+      `[relatorios/agentes] rpc agentes_desempenho falhou: ${detalhe} ` +
+        `commit=${(process.env.VERCEL_GIT_COMMIT_SHA ?? "local").slice(0, 7)}`
+    );
+    return Response.json(
+      { error: `Não foi possível carregar: ${detalhe || "erro desconhecido"}` },
+      { status: 500 }
+    );
   }
 
   const agentes = (data ?? [])
