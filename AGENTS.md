@@ -4509,3 +4509,36 @@ Os dois códigos prováveis, e a conduta de cada um:
 |---|---|---|
 | `PGRST202` | a função existe no banco mas **não no cache de esquema do PostgREST** — comum logo depois de criar função | `notify pgrst, 'reload schema';` |
 | `42501` | falta `grant execute ... to authenticated` | o par `revoke`/`grant` da 0080 |
+
+### 🔴 A 202609031359 subiu com erro de TIPO — corrigida pela 202609031412
+
+Com o motivo finalmente aparecendo na tela (ver a seção acima), o erro foi
+**`42804 · structure of query does not match function result type`**.
+
+⚠️ **`percentile_cont` sobre `numeric` devolve `double precision`.** Não existe
+variante numérica: o `order by numeric` é convertido implicitamente e o resultado
+sai em ponto flutuante. Eu declarei `mediana_resposta_min numeric` no
+`returns table`, e o Postgres recusou a linha inteira. Medido antes de corrigir:
+
+```sql
+select pg_typeof(percentile_cont(0.5) within group (order by x))
+  from (values (1::numeric)) t(x);   -->  double precision
+```
+
+⚠️ **E o erro não diz QUAL coluna divergiu** — só que a estrutura não bate. Numa
+função de 13 colunas isso é procurar no escuro. Daí a regra:
+
+**Em `returns table`, converta TODAS as colunas explicitamente.** Custa nada, e
+transforma um erro de execução opaco num acerto de leitura. O contrato continua
+`numeric` (é o tipo certo para quem consome); quem converte é o corpo — declarar
+`double precision` vazaria um detalhe do `percentile_cont` para dentro da API.
+
+⚠️ A migração termina com `notify pgrst, 'reload schema'`: o PostgREST cacheia a
+assinatura das funções, e trocar o tipo de retorno sem avisar deixa o cache
+descrevendo a versão antiga.
+
+**Sequência do incidente, que é a lição inteira em três passos:** subi a função
+sem executá-la de verdade (a chamada pelo MCP roda como `service_role`, cai na
+guarda de empresa e devolve zero linhas **sem erro** — passou por sucesso);
+a rota escondeu o motivo; e só depois de expor o `code` o conserto ficou óbvio.
+⚠️ **Zero linhas por guarda de RLS não é prova de que a função funciona.**
