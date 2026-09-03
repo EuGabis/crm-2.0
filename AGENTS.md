@@ -4484,3 +4484,28 @@ entre 14 min e 11h é exatamente essa.
   abertas.
 - `numeric` do PostgREST chega como **string**; a rota faz `Number()` antes de
   formatar. Sem isso a mediana viraria concatenação.
+
+### ⚠️ E o erro que eu mesmo tinha escondido
+
+Logo depois de aplicar a 202609031359, a aba respondeu **"não foi possível
+carregar"** — e não havia como saber o motivo, porque a rota fazia
+`if (error) return { error: "não foi possível carregar" }` e **descartava o
+`error` do PostgREST**.
+
+Conferido no banco: a função existia, a assinatura batia
+(`p_location uuid, p_dias integer, p_meta_min integer`), `authenticated` tinha
+EXECUTE e `anon` não. Ou seja, tudo o que eu podia verificar estava certo — e a
+única informação capaz de fechar o diagnóstico tinha sido jogada fora pelo meu
+próprio código.
+
+⚠️ **Regra que sai daqui: erro de RPC sempre carrega o `code` e a `message`.** É o
+mesmo defeito que custou rodadas no áudio recusado pela Meta (o motivo não era
+gravado) e no "tente novamente" do contato duplicado. A rota agora devolve
+`Não foi possível carregar: <code> · <message>` e registra no log com o commit.
+
+Os dois códigos prováveis, e a conduta de cada um:
+
+| código | o que é | conduta |
+|---|---|---|
+| `PGRST202` | a função existe no banco mas **não no cache de esquema do PostgREST** — comum logo depois de criar função | `notify pgrst, 'reload schema';` |
+| `42501` | falta `grant execute ... to authenticated` | o par `revoke`/`grant` da 0080 |
