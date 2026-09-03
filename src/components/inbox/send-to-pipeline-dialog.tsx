@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { oppActions, usePipelineDb } from "@/lib/data/repos/db/pipeline";
+import { CURSOS } from "@/lib/data/cursos";
 import { useConversation } from "@/lib/data/repos/db/conversations";
 import { formatBRL } from "@/lib/data/repos/opportunities";
 
@@ -51,6 +52,7 @@ export function SendToPipelineDialog({
   const [pipelineId, setPipelineId] = useState("");
   const [stageId, setStageId] = useState("");
   const [value, setValue] = useState("");
+  const [course, setCourse] = useState("");
   const [saving, setSaving] = useState(false);
 
   const pipeline = pipelines.find((p) => p.id === pipelineId) ?? null;
@@ -66,6 +68,7 @@ export function SendToPipelineDialog({
     const first = pipelines[0];
     setPipelineId((cur) => cur || first?.id || "");
     setValue("");
+    setCourse("");
   }, [open, pipelines]);
 
   useEffect(() => {
@@ -85,6 +88,7 @@ export function SendToPipelineDialog({
       pipelineId,
       stageId,
       value: Number(value.replace(",", ".")) || 0,
+      course,
       source: "Conversas",
       // Vindo da conversa: o card é do RESPONSÁVEL dela (null = grupo, se estiver
       // no bot/sem dono). Fora de uma conversa, mantém o padrão (quem criou).
@@ -96,7 +100,10 @@ export function SendToPipelineDialog({
       return;
     }
     const stageName = pipeline?.stages.find((s) => s.id === stageId)?.name ?? "";
-    toast.success(`${contactName} enviado para ${pipeline?.name} · ${stageName}`);
+    toast.success(
+      `${contactName} enviado para ${pipeline?.name} · ${stageName}` +
+        (course ? ` · ${course}` : "")
+    );
     onOpenChange(false);
   };
 
@@ -124,6 +131,13 @@ export function SendToPipelineDialog({
                   return (
                     <li key={o.id} className="text-[11px] text-amber-700">
                       {p?.name} &gt; {s?.name} · {formatBRL(o.value)}
+                      {/*
+                        ⚠️ O curso entra no aviso porque muda a conclusão: dois
+                        leads do MESMO contato são legítimos quando são de
+                        formações diferentes. Sem o curso, o aviso empurra para
+                        "já existe, não crie" mesmo quando criar é o certo.
+                      */}
+                      {o.course ? ` · ${o.course}` : ""}
                     </li>
                   );
                 })}
@@ -167,6 +181,38 @@ export function SendToPipelineDialog({
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              {/*
+                Curso da formação (coluna `opportunities.course`, migração 0093).
+                A lista é a MESMA de `lib/data/cursos.ts` que o card do funil já
+                usa — duas listas divergiriam na primeira formação nova.
+
+                ⚠️ **`<select>` nativo, e não o `Select` do shadcn** que os
+                campos acima usam: são 45 cursos com nomes longos ("Mecânico de
+                Aeronaves Básico + Célula + Aviônica + GMP"), e o nativo dá busca
+                por digitação e a rolagem do sistema de graça. É a mesma escolha
+                que o card do funil fez, pelo mesmo motivo.
+
+                ⚠️ Aparece em QUALQUER pipeline, não só no Comercial. Casar por
+                nome de pipeline é frágil (este projeto já tropeçou nisso), o
+                campo é opcional, e o card do funil já oferece o seletor em
+                qualquer funil — esconder aqui criaria a incoerência de dar para
+                escolher depois e não na criação.
+              */}
+              <div className="space-y-1">
+                <Label className="text-xs">Curso (opcional)</Label>
+                <select
+                  value={course}
+                  onChange={(e) => setCourse(e.target.value)}
+                  className="h-8 w-full rounded-md border bg-white px-2 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                >
+                  <option value="">Curso: selecionar…</option>
+                  {CURSOS.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Valor (opcional)</Label>

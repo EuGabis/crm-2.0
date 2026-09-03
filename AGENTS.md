@@ -4348,3 +4348,35 @@ saber que houve mensagem ali.
 limite, com log), e uma tela de auditoria que mostre o histórico completo — hoje
 o histórico de EDIÇÕES aparece no `title` do selo "editada", e o texto apagado só
 no banco.
+
+## Curso no "Enviar para pipeline" das Conversas
+
+Pedido: ao mandar um lead da conversa para o funil, escolher o **Curso**.
+
+⚠️ **Nada de banco novo.** A coluna `opportunities.course` existe desde a
+**0093**, a lista de 45 formações mora em `lib/data/cursos.ts`, e o card do funil
+já tinha o seletor. O que faltava era o campo na criação — quem mandava o lead
+pela conversa tinha de abrir o card depois para preencher.
+
+- ⚠️ **A lista é a MESMA de `lib/data/cursos.ts`.** Duas listas divergiriam na
+  primeira formação nova, e a do card do funil é a que já existia.
+- ⚠️ **`<select>` nativo, e não o `Select` do shadcn** que os campos de pipeline
+  e fase usam no mesmo diálogo. São 45 opções com nomes longos ("Mecânico de
+  Aeronaves Básico + Célula + Aviônica + GMP"); o nativo dá busca por digitação e
+  a rolagem do sistema de graça. Mesma escolha do card do funil, pelo mesmo
+  motivo.
+- ⚠️ **Aparece em QUALQUER pipeline, não só no Comercial.** O pedido citava o
+  comercial, mas casar por NOME de pipeline é frágil — este projeto já tropeçou
+  nisso mais de uma vez. O campo é opcional, e o card do funil já oferece o
+  seletor em qualquer funil: esconder na criação criaria a incoerência de dar
+  para escolher depois e não antes.
+- `oppActions.add` grava com `input.course || null`, **não `?? null`**: a string
+  vazia do "Curso: selecionar…" é ausência de curso, não um curso chamado `""`.
+
+### O curso entrou também no aviso de duplicado
+
+O bloco âmbar "Este contato já está em N oportunidades" passou a mostrar o curso
+de cada uma. ⚠️ Isso muda a CONCLUSÃO de quem lê: dois leads do mesmo contato são
+legítimos quando são de formações diferentes. Sem o curso, o aviso empurra para
+"já existe, não crie" mesmo quando criar é o certo — e numa escola que vende
+Célula, Aviônica e GMP separados, isso é o caso comum.
