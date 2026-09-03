@@ -228,6 +228,11 @@ export const oppActions = {
     // clicou): um admin criando o card na conversa do Paulo cria PARA o Paulo.
     // `null` = grupo (sem dono). Ausente = padrão (quem criou, via `uid()`).
     ownerId?: string | null;
+    /**
+     * Curso da formação (0093). Opcional: o card do funil já permite escolher
+     * depois, e obrigar aqui travaria quem só quer jogar o lead no funil.
+     */
+    course?: string | null;
   }): Promise<boolean> {
     const location = loc();
     if (!location) return false;
@@ -243,6 +248,9 @@ export const oppActions = {
         source: input.source,
         value: input.value,
         owner_id: input.ownerId !== undefined ? input.ownerId : uid(),
+        // `|| null` e não `?? null`: string vazia do seletor ("selecionar…") é
+        // ausência de curso, não um curso chamado "".
+        course: input.course || null,
       })
       .select()
       .single();
