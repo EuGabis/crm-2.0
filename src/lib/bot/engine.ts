@@ -515,10 +515,50 @@ async function advance(
       nodeId = node.next;
     } else if (node.type === "score") {
       let sum = 0;
+      const respostas: Record<string, string> = {};
       for (const [v, table] of Object.entries(node.weights)) {
         sum += table[normalize(vars[v])] ?? 0;
+        // Guarda a resposta que gerou o peso — sem isso, auditar um número
+        // exigiria a sessão, que é apagada quando a conversa reabre.
+        respostas[v] = String(vars[v] ?? "");
       }
-      vars[node.var] = sum >= node.threshold ? node.hotValue : node.coldValue;
+      const resultado = sum >= node.threshold ? node.hotValue : node.coldValue;
+      vars[node.var] = resultado;
+      /*
+       * ⚠️ **A soma também vai para as vars** (`<var>_pontos`). O motor
+       * descartava `sum` e guardava só o rótulo, e sem o número não há como
+       * decidir se o limiar está no lugar: um "frio" com 8 pontos e um com 0 são
+       * coisas completamente diferentes.
+       */
+      vars[`${node.var}_pontos`] = String(sum);
+
+      /*
+       * ⚠️ **Registro PERMANENTE** (202609031728). `bot_sessions` é estado
+       * atual: o webhook apaga a sessão quando uma conversa finalizada reabre
+       * ("zera a sessão para o bot iniciar de novo"), e foram 40 casos em 7 dias.
+       * Um relatório diário lido de lá encolheria o passado — o lead qualificado
+       * na segunda sumiria da segunda.
+       *
+       * ⚠️ **Best-effort de propósito**: falhar aqui não pode derrubar a
+       * triagem. Perder uma linha de métrica é ruim; travar o atendimento do
+       * cliente por causa dela é pior.
+       */
+      try {
+        await ctx.db.from("bot_qualificacoes").insert({
+          location_id: ctx.channel.location_id,
+          conversation_id: ctx.conversationId,
+          contact_id: ctx.contact.id,
+          flow_key: flow.key,
+          pontos: sum,
+          // O limiar é gravado junto: ele muda com o tempo, e a linha antiga
+          // precisa continuar interpretável sem consultar o fluxo de hoje.
+          limiar: node.threshold,
+          resultado,
+          respostas,
+        });
+      } catch (e) {
+        console.warn("[bot] não deu para registrar a qualificação:", e);
+      }
       nodeId = node.next;
     } else if (node.type === "ensure_card") {
       await ensureCard(ctx, node, vars);

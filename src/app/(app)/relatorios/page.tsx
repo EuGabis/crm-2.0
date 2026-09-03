@@ -10,6 +10,13 @@ import { SubNav } from "@/components/layout/subnav";
 import { GoogleAdsReport } from "@/components/reports/google-ads-report";
 import { ServiceSlaReport } from "@/components/reports/service-sla-report";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { formatBRL } from "@/lib/data/repos/opportunities";
 import { usePipelineDb } from "@/lib/data/repos/db/pipeline";
 import { useMyMembership } from "@/lib/data/repos/db/team";
@@ -380,8 +387,202 @@ function AtribuicaoReport() {
 }
 
 /** Abas válidas para o `?tab=` da URL. */
+interface LinhaDia {
+  dia: string;
+  entraram: number;
+  qualificados: number;
+  frios: number;
+  semClassificacao: number;
+  pontosMedio: number | null;
+}
+
+/**
+ * Leads que entraram por dia, e quantos o bot qualificou.
+ *
+ * A régua é a do fluxo **Triagem Comercial**: o nó `score` soma os pesos de
+ * `objetivo` e `conhece_lito` e, com **soma ≥ 9**, o lead é `quente`.
+ *
+ * ⚠️ **Três colunas e não duas.** "Entraram" menos "qualificados" NÃO é
+ * "desqualificados": quem abandona a triagem antes de responder as duas
+ * perguntas não recebe nota nenhuma. Somar esses com os frios inventaria
+ * reprovação onde houve desistência — e são coisas com conduta oposta (frio
+ * recebe conteúdo; quem desistiu precisa ser retomado).
+ */
+function LeadsDoDiaReport() {
+  const [dias, setDias] = useState(30);
+  return (
+    <>
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-bold text-slate-900">Leads do dia</h1>
+          <p className="text-xs text-slate-500">
+            Entrada e qualificação pela Triagem Comercial — o lead é{" "}
+            <b>qualificado quando a soma das respostas chega a 9</b>.
+          </p>
+        </div>
+        <Select value={String(dias)} onValueChange={(v) => v && setDias(Number(v))}>
+          <SelectTrigger className="h-8 w-[150px] text-xs">
+            <SelectValue>{dias} dias</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {[7, 15, 30, 60, 90].map((d) => (
+              <SelectItem key={d} value={String(d)} className="text-xs">
+                {d} dias
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      {/*
+        ⚠️ Remontado por `key` ao trocar o período, e não limpando o estado
+        dentro do efeito: `setState` síncrono no corpo de um `useEffect` causa
+        renderização em cascata (o lint acusa). A `key` zera o estado de graça.
+      */}
+      <LeadsDoDiaTabela key={dias} dias={dias} />
+    </>
+  );
+}
+
+function LeadsDoDiaTabela({ dias }: { dias: number }) {
+  const [dados, setDados] = useState<{ linhas: LinhaDia[]; total: LinhaDia } | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
+
+  useEffect(() => {
+    let ativo = true;
+    void (async () => {
+      try {
+        // `flow=triagem` é a Triagem Comercial — é ela que tem nó de pontuação.
+        const res = await fetch(`/api/relatorios/leads-diarios?dias=${dias}&flow=triagem`);
+        const json = await res.json().catch(() => ({}));
+        if (!ativo) return;
+        if (!res.ok) {
+          setErro(json?.error ?? "Não foi possível carregar");
+          return;
+        }
+        setDados(json);
+      } catch {
+        if (ativo) setErro("Falha de conexão");
+      }
+    })();
+    return () => {
+      ativo = false;
+    };
+  }, [dias]);
+
+  const t = dados?.total;
+  const taxa =
+    t && t.qualificados + t.frios > 0
+      ? Math.round((t.qualificados / (t.qualificados + t.frios)) * 100)
+      : null;
+
+  return (
+    <>
+      {erro && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-700">
+          {erro}
+        </div>
+      )}
+      {!dados && !erro && (
+        <div className="rounded-xl border bg-white px-4 py-3 text-xs text-slate-400">
+          Carregando...
+        </div>
+      )}
+
+      {dados && t && (
+        <>
+          <div className="mb-4 grid gap-3 sm:grid-cols-4">
+            {[
+              { rot: "Entraram", val: t.entraram, cor: "text-slate-900" },
+              { rot: "Qualificados", val: t.qualificados, cor: "text-emerald-600" },
+              { rot: "Frios", val: t.frios, cor: "text-slate-500" },
+              {
+                rot: "Não concluíram",
+                val: t.semClassificacao,
+                cor: "text-amber-600",
+              },
+            ].map((k) => (
+              <div key={k.rot} className="rounded-xl border bg-white p-4">
+                <p className="text-[11px] font-medium text-slate-500">{k.rot}</p>
+                <p className={cn("text-2xl font-bold tabular-nums", k.cor)}>{k.val}</p>
+              </div>
+            ))}
+          </div>
+
+          {/*
+            ⚠️ A taxa é sobre os CLASSIFICADOS, não sobre quem entrou. Dividir
+            pelos que entraram misturaria "não qualificou" com "não terminou de
+            responder", e a taxa cairia sempre que mais gente desistisse — o que
+            é problema de fluxo, não de qualidade do lead.
+          */}
+          {taxa != null && (
+            <p className="mb-4 text-xs text-slate-500">
+              <b className="text-slate-800">{taxa}% dos leads classificados foram qualificados</b>{" "}
+              ({t.qualificados} de {t.qualificados + t.frios}). Os {t.semClassificacao} que não
+              concluíram a triagem ficam fora dessa conta.
+            </p>
+          )}
+
+          <div className="overflow-x-auto rounded-xl border bg-white">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b bg-slate-50 text-left text-slate-500">
+                  {["Dia", "Entraram", "Qualificados", "Frios", "Não concluíram", "Pontos (média)"].map(
+                    (h) => (
+                      <th key={h} className="whitespace-nowrap px-4 py-2.5 font-medium">
+                        {h}
+                      </th>
+                    )
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {dados.linhas.map((l) => (
+                  <tr key={l.dia} className="border-b last:border-0">
+                    <td className="whitespace-nowrap px-4 py-2.5 font-medium text-slate-800">
+                      {format(new Date(`${l.dia}T12:00:00`), "EEE, dd/MM", { locale: ptBR })}
+                    </td>
+                    <td className="px-4 py-2.5 tabular-nums">{l.entraram}</td>
+                    <td className="px-4 py-2.5 font-semibold tabular-nums text-emerald-600">
+                      {l.qualificados}
+                    </td>
+                    <td className="px-4 py-2.5 tabular-nums text-slate-500">{l.frios}</td>
+                    <td
+                      className={cn(
+                        "px-4 py-2.5 tabular-nums",
+                        l.semClassificacao > 0 && "text-amber-600"
+                      )}
+                    >
+                      {l.semClassificacao}
+                    </td>
+                    {/* A média de pontos é o que permite mexer no limiar com dado
+                        na mão: frios com média 8 pedem outra conversa que frios
+                        com média 2. */}
+                    <td className="px-4 py-2.5 tabular-nums text-slate-400">
+                      {l.pontosMedio ?? "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {t.entraram === 0 && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+              <b>Nenhum lead no período.</b> A Triagem Comercial ainda não está vinculada a
+              nenhum número — em <span className="font-mono">/whatsapp</span>, o canal precisa
+              ter esse bot para os leads passarem por ela. O relatório enche sozinho a partir do
+              primeiro atendimento.
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
 const TODAS_AS_ABAS = [
   "Análise IA",
+  "Leads do dia",
   "Atendimento",
   "Conversas do setor",
   "Agentes",
@@ -414,6 +615,7 @@ function RelatoriosPageInner() {
   const tabs = isAdmin
     ? [
         { label: "Análise IA" },
+        { label: "Leads do dia" },
         { label: "Atendimento" },
         { label: "Conversas do setor" },
         { label: "Agentes" },
@@ -421,6 +623,9 @@ function RelatoriosPageInner() {
         { label: "Google Ads" },
       ]
     : [
+        // Vale a permissão do módulo `relatorios`, como Atendimento — a rota
+        // confere de novo no servidor, que é o que decide.
+        { label: "Leads do dia" },
         { label: "Atendimento" },
         ...(isSupervisor ? [{ label: "Conversas do setor" }] : []),
         { label: "Atribuição" },
@@ -438,6 +643,7 @@ function RelatoriosPageInner() {
       <div className="p-6">
         {activeTab === "Análise IA" && isAdmin && <AnaliseIA />}
         {activeTab === "Atendimento" && <ServiceSlaReport />}
+        {activeTab === "Leads do dia" && <LeadsDoDiaReport />}
         {activeTab === "Conversas do setor" && isSupervisor && <SectorReport />}
         {activeTab === "Agentes" && isAdmin && <AgentesReport />}
         {activeTab === "Atribuição" && <AtribuicaoReport />}
