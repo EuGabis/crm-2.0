@@ -5142,3 +5142,133 @@ que este repo já aprendeu vale aqui: *quando há mais de um motivo de falha e e
 pedem condutas diferentes, o retorno tem de dizer QUAL*. Não foi trocado agora
 porque mudar o tipo de retorno pede cuidado com os `if (!ok)` do chamador — o
 compilador não avisa.
+
+## Template #131049: o LIMITE DE MARKETING por destinatário (2026-09-04)
+
+Terceiro código diferente em quatro dias, e os três são de naturezas distintas —
+vale não confundir:
+
+| código | o que é | onde se resolve |
+|---|---|---|
+| `#131042` | cobrança da NOSSA conta na Meta | painel de faturamento |
+| `#131026` | número inexistente (era o `55` que colávamos em número internacional) | corrigido no CRM (202609021021) |
+| **`#131049`** | **a Meta descartou porque o DESTINATÁRIO já atingiu o limite de marketing** | categoria do template |
+
+A Meta limita quantas mensagens de **MARKETING** cada pessoa recebe num período
+— de todas as empresas, não só da nossa — e **descarta** o que passa. Só
+MARKETING é limitada; UTILITY e AUTHENTICATION não.
+
+### Medido antes de concluir
+
+Dos **230 envios de template em 10 dias**, o #131049 apareceu em **2** — as duas
+do MESMO template (`urg_ncias`) e para o MESMO contato, com **um minuto de
+diferença** (14:44 e 14:45). Ou seja: o atendente reenviou.
+
+E o perfil do destinatário é o que fecha o diagnóstico: **0 mensagens de
+entrada** — ele nunca escreveu para nós —, conversa criada **2 minutos antes** do
+envio. Abordagem fria, que é exatamente o que esse limite existe para conter.
+
+⚠️ **Reenviar é o pior movimento possível**: não pode funcionar, e insistir com
+template de MARKETING em quem está no teto **derruba a nota de qualidade do
+número**. O texto original da Meta ("to maintain healthy ecosystem engagement")
+não diz nada a ninguém e convida justamente a isso — daí a tradução.
+
+### A corroboração estava na própria conta
+
+Os templates de melhor entrega têm o sufixo `_util` no nome:
+
+| template | entregues |
+|---|---|
+| `lembrete_pagamento_util` | 68 / 74 |
+| `cobranca_util` | 26 / 29 |
+
+Alguém já havia aprendido essa lição à mão e criado versões UTILITY para escapar
+do limite. O que faltava era o CRM parar de empurrar para o lado errado.
+
+### ⚠️ A causa de fundo: o padrão do formulário era MARKETING
+
+`create-template-dialog.tsx` nascia com `useState<TemplateCategory>("MARKETING")`.
+Como os templates desta conta são majoritariamente **transacionais** (lembrete de
+pagamento, cobrança, reabertura de atendimento, urgências), o padrão produzia
+falha silenciosa: template criado na categoria limitada, descartado meses depois
+para o contato errado, com uma mensagem de erro que ninguém entende.
+
+O padrão passou a ser **UTILITY**, e cada opção do seletor agora diz a
+consequência embaixo — MARKETING avisa que a Meta descarta e cita o `#131049`.
+Escolher marketing continua possível: o que mudou é a escolha deixar de ser um
+enum sem significado para quem preenche.
+
+⚠️ **Categoria também é preço**: marketing é a faixa mais cara da Cloud API. O
+padrão errado custava dinheiro além de entrega.
+
+### O que ficou de fora
+
+⏳ **Não confirmei a categoria do `urg_ncias`** — ela vive na Meta, não no nosso
+banco (não há tabela local de templates; a Meta é a fonte da verdade). O CRM já a
+mostra: **Canais → Templates**, coluna de categoria, e também no seletor do
+composer (`idioma · categoria`). Se estiver MARKETING e o conteúdo for
+transacional, recategorizar no WhatsApp Manager (ou recriar como UTILITY,
+seguindo o padrão `_util` que a conta já usa) resolve.
+
+⏳ O seletor de template do composer **mostra** a categoria mas não avisa que
+MARKETING pode ser descartado em contato frio. Seria o próximo lugar a avisar —
+antes do envio, não depois.
+
+⏳ `thread.tsx` já tinha **1 erro de lint** (`react-hooks/immutability`, ~linha
+1651) na `main`, anterior a esta mudança. O build compila; fica anotado.
+
+### ✅ A prova por CONTRASTE: o mesmo template entregou um minuto depois
+
+O Gabriel mandou o print do MESMO `urg_ncias` chegando a outro contato às 14:46 —
+um minuto depois das duas falhas. Isso fecha o diagnóstico, e a correlação nos 10
+envios do template é perfeita:
+
+| mensagens do cliente | envios | resultado |
+|---|---|---|
+| 2 a 18 (engajado) | 7 | ✅ **7 entregues** (5 lidas) |
+| **0 (nunca escreveu)** | 3 | ❌ **3 falharam** — 2× #131049, 1× #131026 |
+
+⚠️ **O template está BOM**: aprovado, entregando, sendo lido. Não é categoria
+bloqueada, não é o número, não é a conta. **A variável é o destinatário** —
+especificamente se ele já interagiu, que é literalmente o que o #131049 mede.
+
+Isso muda a prioridade do conserto: recategorizar para UTILITY **só importa se o
+template for usado em abordagem FRIA**. Para quem já conversou ele já funciona, e
+mexer no que entrega é risco sem ganho.
+
+A regra que sai daqui, e é operacional: **template de MARKETING para quem nunca
+escreveu tem chance real de ser descartado.** Para reativar contato frio, o
+caminho é UTILITY quando o conteúdo justifica.
+
+⏳ O terceiro caso ruim (#131026, "Message undeliverable") é o MESMO perfil de
+contato frio, por outro motivo: `5511977712812` tem forma brasileira válida, então
+o número provavelmente não tem WhatsApp.
+
+### 🔴 O falso alarme que só a MEDIÇÃO desarmou
+
+Investigando isso, achei **104 contatos com `+` num número brasileiro sem o 55**
+(`+11952734528`, `+24992524123`). O `+` faz `toWhatsAppNumber` tratar como
+internacional — e `+249` é Sudão. Parecia defeito grave, e vinha de uma premissa
+minha na 202609021021:
+
+> *"se o contato escreveu, o telefone veio do `from` da Meta e é completo"*
+
+⚠️ **A premissa é FALSA** para registro criado por importação/cadastro à mão que
+depois casou por dedupe com uma conversa. O `where` da migração pedia
+`left(dígitos,2) <> '55'` e `length between 10 and 15`, o que inclui justamente o
+número brasileiro de 11 dígitos sem o 55.
+
+**E o efeito prático é NENHUM.** Medido nos envios desde a migração:
+
+| grupo | saídas | entregues | falharam |
+|---|---|---|---|
+| os 104 "suspeitos" | 233 | 232 (**99,6%**) | **0** |
+| demais contatos | 1.611 | 1.596 (99,1%) | 10 |
+
+Os suspeitos entregam MELHOR que o resto. A Cloud API tolera aquela forma
+(resolve o número relativo ao país da conta). **Não há nada a consertar, e
+consertar seria pior**: reescrever 104 telefones que funcionam.
+
+⚠️ Fica registrado para ninguém "corrigir" isso depois. Era o mesmo erro do
+estéreo na novela do áudio — anomalia plausível tratada como causa antes de ser
+medida. **O que dá para medir não se deduz.**
