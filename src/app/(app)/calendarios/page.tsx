@@ -27,7 +27,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { appointmentActions, useDbAppointments } from "@/lib/data/repos/db/appointments";
-import { useDbContacts } from "@/lib/data/repos/db/contacts";
+import { ContactPicker } from "@/components/contacts/contact-picker";
+import { useContactsByIds } from "@/lib/data/repos/db/contacts-search";
 import { useDbOpportunities, useDbPipelines } from "@/lib/data/repos/db/pipeline";
 import { useDbTeam } from "@/lib/data/repos/db/contacts";
 import { useMyMembership } from "@/lib/data/repos/db/team";
@@ -53,7 +54,14 @@ function ListaCompromissos({
 }) {
   const confirm = useConfirm();
   const { appointments } = useDbAppointments();
-  const { contacts } = useDbContacts();
+  /*
+   * ⚠️ **Era `useDbContacts()` — os 41.583 contatos da empresa baixados para
+   * escrever o nome em ~59 linhas.** É o mesmo defeito que a 0078 corrigiu na
+   * tela de Contatos, e o `AGENTS.md` já listava Calendários como pendência
+   * dele. `useContactsByIds` busca só os contatos que os compromissos citam,
+   * em lotes de 200.
+   */
+  const contatosPorId = useContactsByIds(appointments.map((a) => a.contactId));
   const opportunities = useDbOpportunities();
   const team = useDbTeam();
   const { isAdmin } = useMyMembership();
@@ -70,13 +78,19 @@ function ListaCompromissos({
   };
 
   const rows = useMemo(() => {
-    const byId = new Map(contacts.map((c) => [c.id, contactName(c)]));
     const now = Date.now();
     return appointments
       .map((a) => ({
         ...a,
         startDate: new Date(a.start),
-        contato: a.contactId ? byId.get(a.contactId) ?? "—" : "—",
+        contato: (() => {
+          if (!a.contactId) return "—";
+          const c = contatosPorId.get(a.contactId);
+          // "Carregando..." e "—" são coisas diferentes: sem isso, o compromisso
+          // COM contato aparece como se não tivesse nenhum enquanto a busca não
+          // volta — que é exatamente a confusão que este PR conserta.
+          return c ? contactName(c) : "Carregando...";
+        })(),
         lead: a.opportunityId
           ? opportunities.find((o) => o.id === a.opportunityId)?.name ?? "—"
           : "—",
@@ -91,7 +105,7 @@ function ListaCompromissos({
           ? a.startDate.getTime() - b.startDate.getTime()
           : b.startDate.getTime() - a.startDate.getTime()
       );
-  }, [appointments, contacts, opportunities, team, filtro, owner]);
+  }, [appointments, contatosPorId, opportunities, team, filtro, owner]);
 
   return (
     <>
@@ -395,7 +409,11 @@ function AppointmentDialog({
   onOpenChange: (o: boolean) => void;
 }) {
   const confirm = useConfirm();
-  const { contacts } = useDbContacts();
+  /*
+   * ⚠️ **`useDbContacts()` saiu daqui**: o diálogo baixava os 41.583 contatos da
+   * empresa para preencher um seletor que mostrava 100. Quem resolve o nome do
+   * contato vinculado agora é o próprio `ContactPicker` (por id, no servidor).
+   */
   const opportunities = useDbOpportunities();
   const pipelines = useDbPipelines();
   const team = useDbTeam();
@@ -405,6 +423,23 @@ function AppointmentDialog({
   const [title, setTitle] = useState("");
   const [contactId, setContactId] = useState("");
   const [opportunityId, setOpportunityId] = useState("");
+  /*
+   * Leads DO contato escolhido.
+   *
+   * ⚠️ O lead já vinculado entra na lista mesmo que não pertença ao contato
+   * atual — sem isso, abrir para editar um compromisso e salvar APAGARIA o lead
+   * em silêncio, porque o `SelectItem` do valor corrente não existiria. É a
+   * armadilha clássica de filtrar a lista de um campo controlado.
+   */
+  const leadsDoContato = useMemo(() => {
+    const doContato = contactId ? opportunities.filter((o) => o.contactId === contactId) : [];
+    if (opportunityId && !doContato.some((o) => o.id === opportunityId)) {
+      const atual = opportunities.find((o) => o.id === opportunityId);
+      if (atual) return [atual, ...doContato];
+    }
+    return doContato;
+  }, [opportunities, contactId, opportunityId]);
+
   const [date, setDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [startTime, setStartTime] = useState("10:00");
   const [endTime, setEndTime] = useState("10:45");
@@ -511,47 +546,49 @@ function AppointmentDialog({
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Contato (opcional)</Label>
-            {/* Sentinela "none" em vez de "": um SelectItem de valor vazio não
-                é um caso que o Base UI trate — o item nem fica selecionável. */}
-            <Select
-              value={contactId || NONE}
-              onValueChange={(v) => setContactId(!v || v === NONE ? "" : v)}
-            >
-              <SelectTrigger className="h-8 w-full text-xs">
-                <SelectValue>
-                  {contactId
-                    ? (() => {
-                        const c = contacts.find((x) => x.id === contactId);
-                        return c ? contactName(c) : "Sem contato vinculado";
-                      })()
-                    : "Sem contato vinculado"}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE} className="text-xs">
-                  Sem contato vinculado
-                </SelectItem>
-                {contacts.slice(0, 100).map((c) => (
-                  <SelectItem key={c.id} value={c.id} className="text-xs">
-                    {contactName(c)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {/*
+              ⚠️ **Era um `Select` com `contacts.slice(0, 100)` — 100 opções de
+              41.583 contatos, sem busca.** E a lista vem ordenada por criação,
+              então as 100 eram as mais recentes: o contato que a pessoa quer
+              quase nunca está lá.
+
+              O efeito medido: dos 59 compromissos, os 2 sem contato vinculado
+              foram criados justamente aqui, e nos dois o atendente digitou o
+              NOME DO CONTATO no campo Título — a única coisa que sobrava para
+              registrar de quem era a reunião. Foi essa a queixa que chegou
+              ("não fica registrado qual é o contato").
+
+              O `ContactPicker` busca no servidor (`search_contacts`, 0078) e
+              já existia no repo exatamente para isto. Ele resolve o nome do
+              contato já vinculado por id, então editar um compromisso antigo
+              mostra o nome certo sem depender de nenhuma lista carregada.
+            */}
+            <ContactPicker
+              value={contactId}
+              onChange={(id) => setContactId(id)}
+              placeholder="Sem contato vinculado"
+            />
+            {contactId && (
+              <button
+                type="button"
+                className="text-[10px] text-slate-400 underline hover:text-slate-600"
+                onClick={() => {
+                  setContactId("");
+                  // Desvincular o contato tem de soltar o lead junto: lead
+                  // pertence a um contato, e deixar o lead de outra pessoa
+                  // pendurado seria pior do que não ter nenhum.
+                  setOpportunityId("");
+                }}
+              >
+                Desvincular contato
+              </button>
+            )}
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Lead (opcional)</Label>
             <Select
               value={opportunityId || NONE}
-              onValueChange={(v) => {
-                const id = !v || v === NONE ? "" : v;
-                setOpportunityId(id);
-                // Escolher o lead já traz o contato dele quando não havia
-                // nenhum — é sempre o mesmo contato, e digitar de novo só
-                // criaria chance de vincular a pessoa errada.
-                const opp = opportunities.find((o) => o.id === id);
-                if (opp && !contactId) setContactId(opp.contactId);
-              }}
+              onValueChange={(v) => setOpportunityId(!v || v === NONE ? "" : v)}
             >
               <SelectTrigger className="h-8 w-full text-xs">
                 <SelectValue>
@@ -567,18 +604,33 @@ function AppointmentDialog({
                 <SelectItem value={NONE} className="text-xs">
                   Sem lead vinculado
                 </SelectItem>
-                {opportunities.slice(0, 100).map((o) => (
+                {leadsDoContato.map((o) => (
                   <SelectItem key={o.id} value={o.id} className="text-xs">
                     {opportunityLabel(o)}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            {opportunities.length === 0 && (
+            {/*
+              ⚠️ **`opportunity_id` era 0 de 59 compromissos** — o campo nunca
+              foi usado uma vez. A causa é a mesma do contato: `slice(0, 100)`
+              sobre 596 leads, sem busca e sem relação com o contato da reunião.
+
+              Agora a lista é a dos leads DAQUELE contato (no máximo 3 neste
+              banco, medido), que é a única leitura que faz sentido: lead
+              pertence a um contato. Sem contato escolhido não há o que
+              oferecer, e a tela DIZ isso em vez de mostrar cem leads de outras
+              pessoas.
+            */}
+            {!contactId ? (
               <p className="text-[10px] text-slate-400">
-                Nenhum lead no funil ainda — crie em Leads.
+                Escolha o contato acima para ver os leads dele.
               </p>
-            )}
+            ) : leadsDoContato.length === 0 ? (
+              <p className="text-[10px] text-slate-400">
+                Este contato não tem lead no funil — crie em Leads.
+              </p>
+            ) : null}
           </div>
           {isAdmin && (
             <div className="space-y-1">

@@ -5272,3 +5272,89 @@ consertar seria pior**: reescrever 104 telefones que funcionam.
 ⚠️ Fica registrado para ninguém "corrigir" isso depois. Era o mesmo erro do
 estéreo na novela do áudio — anomalia plausível tratada como causa antes de ser
 medida. **O que dá para medir não se deduz.**
+
+## Compromisso "sem contato vinculado": era um seletor de 100 em 41.583
+
+Queixa da Cibelle (04/09/2026): "ao criar um compromisso através da conversa com
+um contato, não fica registrado no evento qual é o contato".
+
+⚠️ **A queixa é legítima e o lugar é outro** — e foi a medição que mostrou:
+
+| duração | quantos | caminho | contato vinculado |
+|---|---|---|---|
+| **60 min** | **56** | conversa / card do funil (1h fixa no código) | **56 de 56** ✅ |
+| 885, 165, 420 min | 3 | calendário (só ele deixa escolher o término) | 1 de 3 |
+
+Criar pela conversa **funciona**: 57 dos 59 compromissos têm `contact_id`. Os
+**2 sem contato** têm durações de 885 e 165 minutos, ou seja foram criados
+**direto no calendário** — e nos dois o atendente digitou o NOME DO CONTATO no
+campo Título, que era a única coisa que sobrava para registrar de quem era a
+reunião. O da Cibelle é o de 165 min.
+
+### A causa
+
+```tsx
+{contacts.slice(0, 100).map((c) => (
+```
+
+**100 opções de 41.583 contatos, sem busca** — e a lista vem ordenada por
+criação, então as 100 eram as mais recentes. O contato que a pessoa quer quase
+nunca está lá.
+
+⚠️ **Isso é o oposto de um detalhe de UI: é a diferença entre o compromisso
+existir no histórico do contato ou não.** Sem `contact_id`, ele não aparece no
+detalhe do contato, não aparece no detalhe do lead e não é achável por quem
+atende aquela pessoa depois.
+
+Trocado pelo **`ContactPicker`** (busca no servidor via `search_contacts`, 0078),
+que já existia no repo exatamente para isto e **já é usado dentro de um `Dialog`**
+(a "Nova tarefa" em Contatos) — a combinação Popover-dentro-de-Dialog está
+provada. Ele resolve o nome por id, então editar compromisso antigo mostra o nome
+certo sem depender de lista carregada.
+
+### ⚠️ O mesmo defeito escondia um campo que NUNCA funcionou
+
+**`opportunity_id` era 0 de 59.** O seletor "Lead (opcional)" nunca produziu um
+valor em toda a vida do CRM — mesma causa: `slice(0, 100)` sobre 596 leads, sem
+busca e **sem relação com o contato da reunião**.
+
+Agora a lista é a dos leads DAQUELE contato (no máximo 3 neste banco, medido), que
+é a única leitura que faz sentido — lead pertence a um contato. Sem contato
+escolhido não há o que oferecer, e a tela **diz isso** em vez de mostrar cem leads
+de outras pessoas.
+
+⚠️ **O lead já vinculado entra na lista mesmo que não pertença ao contato atual.**
+Sem isso, abrir para editar e salvar APAGARIA o lead em silêncio, porque o
+`SelectItem` do valor corrente não existiria — é a armadilha clássica de filtrar a
+lista de um campo controlado.
+
+De passagem saiu o "escolher o lead preenche o contato": agora o contato vem
+PRIMEIRO e é ele que filtra. O caminho invertido só funcionava se o lead
+estivesse por acaso entre os 100 primeiros, que é por isso que era 0 de 59.
+
+### E Calendários parou de baixar os 41 mil contatos
+
+⚠️ `useDbContacts()` saiu das DUAS partes da tela: o diálogo baixava a empresa
+inteira para preencher um seletor que mostrava 100, e a **lista** baixava para
+escrever o nome em ~59 linhas. É o mesmo defeito que a 0078 corrigiu em Contatos,
+e este arquivo já listava Calendários como pendência dele.
+
+Agora é `useContactsByIds(...)` com os contatos que os compromissos citam, em
+lotes de 200.
+
+⚠️ Na lista, contato ainda não carregado mostra **"Carregando..."**, não `—`: os
+dois são coisas diferentes, e usar o mesmo texto faria o compromisso COM contato
+parecer sem nenhum enquanto a busca não volta — exatamente a confusão que este PR
+conserta.
+
+### ⏳ Os 2 órfãos NÃO foram consertados por migração, de propósito
+
+Os títulos são nomes de contatos que existem na base, mas **parecidos, não
+iguais**: o da Cibelle diz "Matheus Alvarenga Coelho" e a base tem "Matheus
+Augusto de Alvarenga". Casar por semelhança de nome é a chave fraca que este
+projeto já documenta como risco de homônimo (é por isso que o cruzamento com a
+Guru não grava documento em casamento por nome). Vincular à mão agora é possível,
+e é de quem sabe quem era a reunião.
+
+⏳ `calendarios/page.tsx` já tinha **1 erro de lint** (`react-hooks/purity`,
+`Date.now()` dentro do `useMemo`) na `main`, anterior a esta mudança.
