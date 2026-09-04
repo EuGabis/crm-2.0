@@ -5216,3 +5216,59 @@ antes do envio, não depois.
 
 ⏳ `thread.tsx` já tinha **1 erro de lint** (`react-hooks/immutability`, ~linha
 1651) na `main`, anterior a esta mudança. O build compila; fica anotado.
+
+### ✅ A prova por CONTRASTE: o mesmo template entregou um minuto depois
+
+O Gabriel mandou o print do MESMO `urg_ncias` chegando a outro contato às 14:46 —
+um minuto depois das duas falhas. Isso fecha o diagnóstico, e a correlação nos 10
+envios do template é perfeita:
+
+| mensagens do cliente | envios | resultado |
+|---|---|---|
+| 2 a 18 (engajado) | 7 | ✅ **7 entregues** (5 lidas) |
+| **0 (nunca escreveu)** | 3 | ❌ **3 falharam** — 2× #131049, 1× #131026 |
+
+⚠️ **O template está BOM**: aprovado, entregando, sendo lido. Não é categoria
+bloqueada, não é o número, não é a conta. **A variável é o destinatário** —
+especificamente se ele já interagiu, que é literalmente o que o #131049 mede.
+
+Isso muda a prioridade do conserto: recategorizar para UTILITY **só importa se o
+template for usado em abordagem FRIA**. Para quem já conversou ele já funciona, e
+mexer no que entrega é risco sem ganho.
+
+A regra que sai daqui, e é operacional: **template de MARKETING para quem nunca
+escreveu tem chance real de ser descartado.** Para reativar contato frio, o
+caminho é UTILITY quando o conteúdo justifica.
+
+⏳ O terceiro caso ruim (#131026, "Message undeliverable") é o MESMO perfil de
+contato frio, por outro motivo: `5511977712812` tem forma brasileira válida, então
+o número provavelmente não tem WhatsApp.
+
+### 🔴 O falso alarme que só a MEDIÇÃO desarmou
+
+Investigando isso, achei **104 contatos com `+` num número brasileiro sem o 55**
+(`+11952734528`, `+24992524123`). O `+` faz `toWhatsAppNumber` tratar como
+internacional — e `+249` é Sudão. Parecia defeito grave, e vinha de uma premissa
+minha na 202609021021:
+
+> *"se o contato escreveu, o telefone veio do `from` da Meta e é completo"*
+
+⚠️ **A premissa é FALSA** para registro criado por importação/cadastro à mão que
+depois casou por dedupe com uma conversa. O `where` da migração pedia
+`left(dígitos,2) <> '55'` e `length between 10 and 15`, o que inclui justamente o
+número brasileiro de 11 dígitos sem o 55.
+
+**E o efeito prático é NENHUM.** Medido nos envios desde a migração:
+
+| grupo | saídas | entregues | falharam |
+|---|---|---|---|
+| os 104 "suspeitos" | 233 | 232 (**99,6%**) | **0** |
+| demais contatos | 1.611 | 1.596 (99,1%) | 10 |
+
+Os suspeitos entregam MELHOR que o resto. A Cloud API tolera aquela forma
+(resolve o número relativo ao país da conta). **Não há nada a consertar, e
+consertar seria pior**: reescrever 104 telefones que funcionam.
+
+⚠️ Fica registrado para ninguém "corrigir" isso depois. Era o mesmo erro do
+estéreo na novela do áudio — anomalia plausível tratada como causa antes de ser
+medida. **O que dá para medir não se deduz.**
