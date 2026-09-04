@@ -13,7 +13,8 @@
     "test:audio": "node scripts/test-audio.mjs",
     "test:bot": "node scripts/test-bot-campos.mjs",
     "test:leads-xlsx": "node scripts/test-leads-xlsx.mjs",
-    "test:phone": "node scripts/test-phone.mjs"
+    "test:phone": "node scripts/test-phone.mjs",
+    "test:webhook": "node --import ./scripts/lib/alias-register.mjs scripts/test-webhook-reenvio.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
