@@ -37,6 +37,69 @@ function validSignature(raw: string, header: string | null): boolean {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+/** Commit no ar, para o log dizer se a correção já subiu (padrão do send-media). */
+const COMMIT = (process.env.VERCEL_GIT_COMMIT_SHA ?? "local").slice(0, 7);
+
+/**
+ * ⚠️ **`catch {}` puro era o defeito.** Este arquivo engolia toda falha sem
+ * registrar nada — o mesmo problema que custou quinze rodadas na investigação do
+ * áudio recusado pela Meta ("o motivo nunca era gravado"). Sem log, "a mensagem
+ * do cliente não chegou" não tem como ser distinguido de "o cliente não
+ * escreveu".
+ */
+function logFalha(onde: string, e: unknown): void {
+  console.error(`[whatsapp/webhook] ${onde} falhou (commit ${COMMIT}): ${motivoDe(e)}`);
+}
+
+/**
+ * Texto legível de um erro, venha ele de onde vier.
+ *
+ * ⚠️ **`e instanceof Error ? e.message : String(e)` NÃO serve aqui**, e o teste
+ * pegou: erro do PostgREST/supabase-js é objeto SIMPLES (`{message, code,
+ * details, hint}`), não instância de `Error`, então o `String(e)` virava
+ * **`[object Object]`** — um log inútil, que é justamente o defeito que este
+ * helper existe para não repetir. O `code` entra junto porque é ele que separa
+ * violação de constraint de queda de conexão quando alguém for ler o log.
+ */
+function motivoDe(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (e && typeof e === "object") {
+    const o = e as { message?: unknown; code?: unknown; details?: unknown };
+    const partes = [o.message, o.details, o.code ? `#${String(o.code)}` : null]
+      .filter((p) => p != null && p !== "")
+      .map(String);
+    if (partes.length) return partes.join(" · ");
+  }
+  return String(e);
+}
+
+/**
+ * O banco ainda responde?
+ *
+ * ⚠️ É a peça que separa as duas falhas que este webhook tratava como UMA:
+ * "esta mensagem eu não sei tratar" (reenviar dá o mesmo erro para sempre → 200)
+ * e "não consigo gravar agora" (transitório → 503, a Meta reenvia).
+ *
+ * Sondar em vez de farejar código de erro é decisão consciente: a lista de
+ * códigos que significam "infraestrutura" mudaria com a versão do PostgREST, do
+ * undici e do Supabase, e um código novo cairia no ramo errado em silêncio. A
+ * pergunta "o banco responde AGORA?" não depende de nenhuma dessas listas.
+ *
+ * Roda SÓ no caminho de erro — no fluxo normal não custa nada. E é `head`, então
+ * o Postgres não devolve linha nenhuma.
+ */
+async function bancoRespondendo(db: any): Promise<boolean> {
+  try {
+    const { error } = await db
+      .from("whatsapp_channels")
+      .select("id", { head: true, count: "exact" })
+      .limit(1);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
 export async function POST(request: Request) {
   const raw = await request.text();
   if (!validSignature(raw, request.headers.get("x-hub-signature-256"))) {
@@ -57,40 +120,125 @@ export async function POST(request: Request) {
     return Response.json({ error: "webhook sem credenciais no servidor" }, { status: 503 });
   }
 
+  const { indisponivel } = await processarLote(db, body);
+
+  if (indisponivel) {
+    /*
+     * 503 e não 500: é indisponibilidade temporária, e é o mesmo código que este
+     * arquivo já usa quando falta credencial no servidor. Qualquer resposta
+     * fora da faixa 2xx faz a Meta reenviar.
+     */
+    return Response.json(
+      { error: "banco indisponível — reenvie", commit: COMMIT },
+      { status: 503 },
+    );
+  }
+
+  return Response.json({ ok: true });
+}
+
+/**
+ * Processa um lote de eventos da Meta e diz se o banco ficou indisponível no
+ * meio — quem traduz isso em 200 ou 503 é o `POST`.
+ *
+ * ⚠️ **Está exportada SÓ para poder ser testada**, como `mesclarMensagens` em
+ * `db/conversations.ts`. A decisão "200 ou 503" é curta e o defeito que ela
+ * corrige é invisível em revisão de código: o caminho de erro nunca roda em
+ * desenvolvimento, e em produção ele significa mensagem de cliente perdida em
+ * silêncio. Sem injetar o `db`, não há como exercitá-lo.
+ */
+export async function processarLote(db: any, body: any): Promise<{ indisponivel: boolean }> {
+  /*
+   * ⚠️ **Responder 200 sem ter gravado PERDE a mensagem do cliente para
+   * sempre.** Para a Meta, 200 significa "recebi, não reenvie" — e não existe
+   * fila nossa onde ela ficaria esperando. Era o que acontecia numa
+   * indisponibilidade do banco (reinício por troca de compute, por exemplo):
+   * a busca do canal voltava vazia, `if (!channel) continue` pulava a mensagem,
+   * e o `return ok: true` no fim afirmava que estava tudo certo.
+   *
+   * Marcando indisponibilidade e respondendo 503, a Meta reenvia com backoff
+   * por dias.
+   *
+   * ⚠️ **O reenvio só é seguro porque a idempotência está no BANCO**, não na
+   * checagem de duplicata em TypeScript: `messages_wa_message_id_key` é índice
+   * único parcial em `wa_message_id` (conferido em produção). Reprocessar o
+   * lote inteiro, incluindo as mensagens que já entraram, não duplica nada.
+   */
+  let indisponivel = false;
+
   for (const entry of body.entry ?? []) {
     for (const change of entry.changes ?? []) {
+      if (indisponivel) break; // banco morto: parar de insistir
       const value = change.value ?? {};
       const phoneNumberId = value?.metadata?.phone_number_id;
       if (!phoneNumberId) continue;
 
-      const { data: channel } = await db
+      /*
+       * ⚠️ **Esta leitura já era o teste de saúde, e o `error` dela era jogado
+       * fora.** Com só `if (!channel)`, "o banco está fora" e "este número não é
+       * deste CRM" eram a MESMA coisa — e as respostas certas são opostas: a
+       * primeira pede reenvio, a segunda não pode pedir (seria laço infinito, a
+       * Meta reenviando para sempre um número que nunca vai ser nosso).
+       */
+      const { data: channel, error: erroCanal } = await db
         .from("whatsapp_channels")
         .select("id, location_id, daily_limit, phone_number_id, bot_flow")
         .eq("phone_number_id", phoneNumberId)
         .maybeSingle();
+      if (erroCanal) {
+        logFalha("busca do canal", erroCanal);
+        indisponivel = true;
+        break;
+      }
       if (!channel) continue; // número não cadastrado aqui — ignora
 
       for (const m of value.messages ?? []) {
+        if (indisponivel) break;
         try {
           await handleIncoming(db, channel, value, m);
-        } catch {
-          // best-effort: uma mensagem malformada/sem suporte nunca derruba o webhook.
+        } catch (e) {
+          /*
+           * Aqui estão as duas falhas juntas, e a sonda as separa. Mensagem
+           * malformada/sem suporte segue com 200 — é o comportamento original
+           * deste `catch`, e está certo: reenviar daria o mesmo erro para
+           * sempre. Banco fora vira 503.
+           */
+          if (await bancoRespondendo(db)) {
+            logFalha("mensagem recebida (o banco respondeu — problema na mensagem)", e);
+          } else {
+            logFalha("mensagem recebida (banco indisponível — pedindo reenvio)", e);
+            indisponivel = true;
+          }
         }
       }
       for (const st of value.statuses ?? []) {
+        if (indisponivel) break;
         if (st?.id && st?.status) {
           try {
             await applyStatus(db, st);
-          } catch {
-            // best-effort: idem para status.
+          } catch (e) {
+            /*
+             * Mesmo tratamento, e não porque status seja tão grave quanto
+             * mensagem de cliente (perder um tique de entrega é pequeno), mas
+             * porque a sonda já está aqui: dois critérios diferentes para a
+             * mesma pergunta divergiriam na primeira mudança.
+             */
+            if (await bancoRespondendo(db)) {
+              logFalha("evento de status (o banco respondeu — problema no evento)", e);
+            } else {
+              logFalha("evento de status (banco indisponível — pedindo reenvio)", e);
+              indisponivel = true;
+            }
           }
         }
       }
     }
   }
 
-  return Response.json({ ok: true });
+  return { indisponivel };
 }
+
+
 
 /**
  * Prévia da conversa para mídia recebida.
@@ -124,12 +272,26 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
   const waId = m.id;
   if (!waId) return;
 
-  // idempotência: mesma mensagem chega mais de uma vez
-  const { data: dup } = await db
+  /*
+   * Idempotência: a mesma mensagem chega mais de uma vez (e passa a chegar mais,
+   * agora que o 503 pede reenvio de propósito).
+   *
+   * ⚠️ **O `error` daqui era descartado, e o efeito era pior que o da busca do
+   * canal.** Com o banco fora, `dup` vem `null`, o código conclui que a mensagem
+   * é NOVA, o insert seguinte falha e o `catch` de cima engolia tudo com 200 —
+   * mensagem de cliente perdida. Lançando, a decisão sobe para a sonda, que
+   * distingue "problema nesta mensagem" de "banco fora".
+   *
+   * ⚠️ E esta checagem é OTIMIZAÇÃO, não a garantia: quem garante é o índice
+   * único parcial `messages_wa_message_id_key`. É justamente por isso que o
+   * reenvio do lote é seguro mesmo quando esta consulta é a que falhou.
+   */
+  const { data: dup, error: erroDup } = await db
     .from("messages")
     .select("id")
     .eq("wa_message_id", waId)
     .maybeSingle();
+  if (erroDup) throw new Error(`não deu para checar duplicata: ${erroDup.message ?? erroDup}`);
   if (dup) return;
 
   const phone: string = m.from ?? "";

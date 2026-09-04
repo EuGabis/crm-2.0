@@ -4909,3 +4909,120 @@ seguinte) o `toISOString().slice(0,10)` de antes devolvia **o dia seguinte** —
 período pedia um dia à frente e perdia o dia corrente. Agora é
 `Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" })`, e o passo de
 24h é dado ao meio-dia UTC para nunca cair em cima de uma virada de dia.
+
+## 🔴 O webhook do WhatsApp perdia mensagem em silêncio (2026-09-04)
+
+Descoberto ao responder "trocar o compute do Supabase afeta o projeto?". O
+upgrade não exige mudança nenhuma de código — mas **reinicia o banco**, e foi ao
+verificar o que acontece nessa janela que o defeito apareceu.
+
+⚠️ **O webhook respondia 200 mesmo sem ter gravado.** Para a Meta, 200 significa
+"recebi, não reenvie" — e não existe fila nossa onde a mensagem ficaria
+esperando. Ela simplesmente deixava de existir. Bastavam os dois minutos de um
+reinício para perder todas as mensagens de cliente da janela.
+
+Eram **dois** pontos, e o segundo é pior:
+
+```ts
+const { data: channel } = await db.from("whatsapp_channels")...   // error IGNORADO
+if (!channel) continue;   // "banco fora" e "número não é nosso" = a MESMA coisa
+
+const { data: dup } = await db.from("messages").select("id")...   // error IGNORADO
+if (dup) return;          // banco fora -> dup null -> "é nova" -> insert falha
+```
+
+No segundo, o `catch` de cima engolia o insert falhado e o `return ok: true`
+afirmava que estava tudo certo.
+
+### A distinção que faltava
+
+| falha | resposta | por quê |
+|---|---|---|
+| "esta mensagem eu não sei tratar" | **200** | reenviar dá o mesmo erro para sempre, e a Meta pode suspender a inscrição do webhook |
+| "não consigo gravar agora" | **503** | é transitório; a Meta reenvia com backoff por dias |
+
+O `catch {}` original **não estava errado** — ele foi escrito para o primeiro
+caso e está certo nele. Faltava o segundo.
+
+### Como as duas são separadas: SONDA, não código de erro
+
+`bancoRespondendo(db)` faz uma consulta `head` barata, **só no caminho de erro**.
+Banco responde → o problema é a mensagem (200 + log). Não responde → 503.
+
+⚠️ **Farejar código de erro foi rejeitado de propósito.** A lista de códigos que
+significam "infraestrutura" muda com a versão do PostgREST, do undici e do
+supabase-js, e um código novo cairia no ramo errado **em silêncio**. A pergunta
+"o banco responde AGORA?" não depende de lista nenhuma.
+
+E a busca do canal **já era** o teste de saúde: bastava honrar o `error` dela.
+Erro → 503. Sem erro e sem linha → o número realmente não é deste CRM → 200 e
+pula (aí pedir reenvio seria laço infinito).
+
+### ⚠️ O reenvio só é seguro por causa do ÍNDICE
+
+Conferido em produção antes de escrever qualquer linha:
+
+```
+CREATE UNIQUE INDEX messages_wa_message_id_key
+  ON public.messages (wa_message_id) WHERE (wa_message_id IS NOT NULL)
+```
+
+A idempotência está no BANCO, não na checagem de duplicata em TypeScript — que é
+mera otimização, e é justamente a que a queda derruba. Por isso a Meta
+reprocessar o lote inteiro, incluindo as mensagens que já entraram, não duplica
+nada. **Sem esse índice, este PR seria perigoso.**
+
+### `catch {}` sem log era o outro defeito
+
+O arquivo engolia toda falha sem registrar nada — o mesmo problema que custou
+quinze rodadas na investigação do áudio ("o motivo nunca era gravado"). Sem log,
+"a mensagem do cliente não chegou" é indistinguível de "o cliente não escreveu".
+Agora há `logFalha`, com o motivo e o commit (`VERCEL_GIT_COMMIT_SHA`).
+
+⚠️ **E o teste pegou um defeito no próprio helper:**
+`e instanceof Error ? e.message : String(e)` gravava **`[object Object]`** —
+erro do PostgREST é objeto SIMPLES (`{message, code, details, hint}`), não
+instância de `Error`. Um log inútil, exatamente o que o helper existe para
+evitar. `motivoDe()` extrai `message · details · #code`.
+
+### `processarLote` foi exportada só para poder ser testada
+
+Mesmo motivo de `mesclarMensagens` em `db/conversations.ts`. ⚠️ Este é o caminho
+que **nunca roda em desenvolvimento**: em produção ele só aparece quando o banco
+cai, e aí não há como reproduzir. Sem injetar o `db`, a correção seria fé.
+
+`npm run test:webhook` — **22 asserções**, e metade vigia o lado oposto (não
+pedir reenvio quando o problema é a mensagem), que é onde um excesso de zelo faz
+mais dano que o defeito: a Meta reenviando o mesmo lote para sempre.
+
+Casos: queda na busca do canal · queda na checagem de duplicata (o canal é achado
+e a sonda falha depois) · status com banco fora · gravação falhando com banco
+VIVO · número não cadastrado · mensagem sem `id` · duplicata encontrada · lote
+vazio · e "uma vez indisponível, consulta o banco UMA vez só" (não fica
+martelando um banco morto).
+
+### `scripts/lib/alias-loader.mjs` — o que destravou testar a rota
+
+Os testes deste repo rodam direto no Node 24 (que executa TypeScript
+nativamente), sem runner e sem bundler — é isso que os torna baratos. O preço é
+que **o `@/*` do `tsconfig.json` não existe para o Node**: é invenção do
+TypeScript e do bundler. Sem resolvedor, só dá para testar módulo que não importa
+nada por alias, o que exclui quase todo o `src/`.
+
+⚠️ Duas portas, não uma: além do alias, no TypeScript o import **relativo**
+também dispensa extensão (`./templates`), e o Node exige o caminho exato. O
+resolvedor atravessava a primeira e batia na segunda.
+
+Ligado por `node --import ./scripts/lib/alias-register.mjs <teste>`. ⚠️ Ele não
+substitui o `tsconfig.json` — quem manda no build continua sendo o `paths` de
+lá; se aquele alias mudar, este arquivo acompanha. É duplicação assumida, de uma
+linha.
+
+### ⏳ O que continua valendo para a troca de compute
+
+Fora do webhook, o resto se recupera sozinho por desenho: o Realtime reinscreve
+em 5 s, a fila de `automation_runs` persiste, mensagem agendada e transcrição
+ficam `pendente`, e o sync da Guru é incremental por `last_synced_at`.
+
+E, ainda assim, a **janela mais silenciosa é 4h da manhã**: medido em 14 dias,
+0,6 mensagem de entrada por hora, contra ~9 no pico das 12h.
