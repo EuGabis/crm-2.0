@@ -5026,3 +5026,119 @@ ficam `pendente`, e o sync da Guru é incremental por `last_synced_at`.
 
 E, ainda assim, a **janela mais silenciosa é 4h da manhã**: medido em 14 dias,
 0,6 mensagem de entrada por hora, contra ~9 no pico das 12h.
+
+## Transferir conversa: qualquer atendente, para qualquer colega (202609041530)
+
+Regra do Gabriel (04/09/2026): **"qualquer usuário poder transferir para o outro,
+mesmo que esteja em número diferente ou setor diferente"**.
+
+O caso: o Paulo (departamento "Secretaria Backup", vinculado só ao número Backup
+Secretaria) tentou encaminhar uma conversa do número **Secretaria Principal** e
+recebeu "Não foi possível alterar o responsável". O portão era este:
+
+```sql
+-- Quem pode transferir: o dono atual, admin, ou quem vê tudo do setor.
+if not (cur = auth.uid() or private.is_admin(loc) or private.sees_all(loc))
+```
+
+⚠️ **`private.sees_all(loc)` é FALSO para quem tem `only_assigned = true`** — e
+são exatamente os três do time de vendas (Paulo, Alberto, Rogério), os **únicos**
+da empresa nessa condição. Para eles, transferir só funcionava na conversa que já
+era deles. Que é o oposto do que a operação precisa: **quem recebe algo que não é
+do seu setor é justamente quem precisa poder ROTEAR.**
+
+O portão passou a ser só **ser membro da empresa**. Continua `security definer`
+(sem isso o UPDATE bate no WITH CHECK da RLS de `conversations`, que recusa a
+linha nova com outro dono), continua com a checagem de empresa na primeira coisa
+que roda, e continua exigindo que o ALVO seja da mesma empresa — o que abriu é
+entre setores e números, não entre empresas.
+
+⚠️ **Ver e ROTEAR são coisas diferentes**, e é a distinção que faltava. O
+`sees_all` existe para dizer "esta pessoa vê os dados dos outros"; encaminhar
+para o colega certo é a ação que menos deveria depender de privilégio.
+
+### 🔴 Eu ia consertar o CONTRÁRIO — e teria sido pior
+
+Diagnosticado o caso, minha proposta foi **apertar** `contact_conversation`: ela
+é `security definer` e confere só a empresa (não `channel_allowed`, não
+`sees_all`), então entrega o id de uma conversa que o atendente não pode ver, a
+tela abre e toda ação falha. Parecia incoerência a fechar.
+
+Era o oposto da regra. **É essa permissividade que faz o roteamento
+cross-setor funcionar**: é por ela que o botão "Abrir conversa" alcança a
+conversa de outro número, e é de lá que a transferência parte. Apertar teria
+fechado a porta que a regra precisa aberta.
+
+Fica como lição de método: quando o achado é "a permissão está solta demais",
+confirme a REGRA DE NEGÓCIO antes de apertar. O código não diz qual dos dois
+lados está errado.
+
+### O que continua restrito de propósito
+
+A regra é sobre TRANSFERIR. Ler e escrever seguem como estavam:
+
+| ação | Paulo, na conversa de outro setor |
+|---|---|
+| abrir pelo contato (`contact_conversation`) | ✅ já funcionava |
+| **transferir** | ✅ **passou a funcionar** |
+| gravar resumo do atendimento (`save_handoff_summary`) | ✅ definer, confere só empresa |
+| ler o fio de mensagens | ❌ RLS de `messages` (mostra o estado vazio) |
+| enviar mensagem | ❌ RLS de `messages` |
+
+⚠️ **Consequência prática de aceitar isso:** quem transfere de outro setor vê o
+fio VAZIO e o rascunho de IA do resumo não sai (a rota lê as mensagens com a
+sessão do usuário, então volta sem conteúdo). O botão **"Transferir sem resumo"**
+é o caminho, e existe desde a 0087. Se um dia a leitura também tiver de abrir, é
+outra decisão — e aí o que muda é a policy de SELECT, não esta função.
+
+### ⚠️ A cascata não mudou, mas o portão aberto a torna alcançável por todos
+
+Transferir a conversa **também** reatribui, para o alvo, tudo do contato:
+
+```sql
+update public.opportunities set owner_id    = to_user where contact_id = cid;
+update public.appointments  set owner_id    = to_user where contact_id = cid;
+update public.tasks         set assignee_id = to_user where contact_id = cid;
+update public.contacts      set owner_id    = to_user where id = cid;
+```
+
+Medido antes de abrir: no máximo **3 oportunidades por contato** neste banco. O
+alcance de UMA transferência é pequeno e reversível (transferir de volta desfaz).
+Foi isso que fez a cascata ficar como está em vez de ser recortada junto —
+recortar mudaria o comportamento de todo mundo para resolver um problema que a
+medição diz não existir.
+
+⚠️ **`contacts.owner_id` tem efeito de SEGUNDA ORDEM:** o webhook usa o dono do
+contato para mandar o cliente direto a quem já o atendeu (quando esse dono é
+`role = 'user'`). Ou seja, **transferir decide também onde a PRÓXIMA mensagem
+daquele cliente vai cair.** Aqui é desejável e coerente com a regra nova — mas é
+efeito, não acaso, e responde a pendência que este arquivo tinha deixado em
+aberto ("vale confirmar com o Gabriel antes de mexer").
+
+### Conferido como o próprio Paulo, em transação revertida
+
+```
+transfere para o Daniel = true   (outro setor, outro número, only_assigned)
+devolve para a fila     = true
+alvo de fora da empresa = false  (recusado)
+```
+
+⚠️ E um cuidado de leitura que quase virou falso alarme: logo depois de
+transferir, `select assigned_to` **como o Paulo** devolve NULL — não porque a
+transferência falhou, mas porque a RLS não deixa ele ver a conversa. O dono real
+foi conferido por fora. **Não confunda "a RLS filtrou a minha leitura" com "a
+escrita não aconteceu".**
+
+A UI não precisou mudar: o seletor de responsável em `thread.tsx` nunca foi
+restrito a admin (o que é admin-only é o dono da OPORTUNIDADE, em
+`contact-panel.tsx` — outra coisa).
+
+### ⏳ O que sobrou
+
+`transfer_conversation` devolve **boolean**, então "não existe", "não sou da
+empresa" e "alvo de fora" chegam na tela como o mesmo "Não foi possível alterar o
+responsável". Foi essa opacidade que fez este caso começar como mistério. A regra
+que este repo já aprendeu vale aqui: *quando há mais de um motivo de falha e eles
+pedem condutas diferentes, o retorno tem de dizer QUAL*. Não foi trocado agora
+porque mudar o tipo de retorno pede cuidado com os `if (!ok)` do chamador — o
+compilador não avisa.
