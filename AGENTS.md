@@ -5142,3 +5142,77 @@ que este repo já aprendeu vale aqui: *quando há mais de um motivo de falha e e
 pedem condutas diferentes, o retorno tem de dizer QUAL*. Não foi trocado agora
 porque mudar o tipo de retorno pede cuidado com os `if (!ok)` do chamador — o
 compilador não avisa.
+
+## Template #131049: o LIMITE DE MARKETING por destinatário (2026-09-04)
+
+Terceiro código diferente em quatro dias, e os três são de naturezas distintas —
+vale não confundir:
+
+| código | o que é | onde se resolve |
+|---|---|---|
+| `#131042` | cobrança da NOSSA conta na Meta | painel de faturamento |
+| `#131026` | número inexistente (era o `55` que colávamos em número internacional) | corrigido no CRM (202609021021) |
+| **`#131049`** | **a Meta descartou porque o DESTINATÁRIO já atingiu o limite de marketing** | categoria do template |
+
+A Meta limita quantas mensagens de **MARKETING** cada pessoa recebe num período
+— de todas as empresas, não só da nossa — e **descarta** o que passa. Só
+MARKETING é limitada; UTILITY e AUTHENTICATION não.
+
+### Medido antes de concluir
+
+Dos **230 envios de template em 10 dias**, o #131049 apareceu em **2** — as duas
+do MESMO template (`urg_ncias`) e para o MESMO contato, com **um minuto de
+diferença** (14:44 e 14:45). Ou seja: o atendente reenviou.
+
+E o perfil do destinatário é o que fecha o diagnóstico: **0 mensagens de
+entrada** — ele nunca escreveu para nós —, conversa criada **2 minutos antes** do
+envio. Abordagem fria, que é exatamente o que esse limite existe para conter.
+
+⚠️ **Reenviar é o pior movimento possível**: não pode funcionar, e insistir com
+template de MARKETING em quem está no teto **derruba a nota de qualidade do
+número**. O texto original da Meta ("to maintain healthy ecosystem engagement")
+não diz nada a ninguém e convida justamente a isso — daí a tradução.
+
+### A corroboração estava na própria conta
+
+Os templates de melhor entrega têm o sufixo `_util` no nome:
+
+| template | entregues |
+|---|---|
+| `lembrete_pagamento_util` | 68 / 74 |
+| `cobranca_util` | 26 / 29 |
+
+Alguém já havia aprendido essa lição à mão e criado versões UTILITY para escapar
+do limite. O que faltava era o CRM parar de empurrar para o lado errado.
+
+### ⚠️ A causa de fundo: o padrão do formulário era MARKETING
+
+`create-template-dialog.tsx` nascia com `useState<TemplateCategory>("MARKETING")`.
+Como os templates desta conta são majoritariamente **transacionais** (lembrete de
+pagamento, cobrança, reabertura de atendimento, urgências), o padrão produzia
+falha silenciosa: template criado na categoria limitada, descartado meses depois
+para o contato errado, com uma mensagem de erro que ninguém entende.
+
+O padrão passou a ser **UTILITY**, e cada opção do seletor agora diz a
+consequência embaixo — MARKETING avisa que a Meta descarta e cita o `#131049`.
+Escolher marketing continua possível: o que mudou é a escolha deixar de ser um
+enum sem significado para quem preenche.
+
+⚠️ **Categoria também é preço**: marketing é a faixa mais cara da Cloud API. O
+padrão errado custava dinheiro além de entrega.
+
+### O que ficou de fora
+
+⏳ **Não confirmei a categoria do `urg_ncias`** — ela vive na Meta, não no nosso
+banco (não há tabela local de templates; a Meta é a fonte da verdade). O CRM já a
+mostra: **Canais → Templates**, coluna de categoria, e também no seletor do
+composer (`idioma · categoria`). Se estiver MARKETING e o conteúdo for
+transacional, recategorizar no WhatsApp Manager (ou recriar como UTILITY,
+seguindo o padrão `_util` que a conta já usa) resolve.
+
+⏳ O seletor de template do composer **mostra** a categoria mas não avisa que
+MARKETING pode ser descartado em contato frio. Seria o próximo lugar a avisar —
+antes do envio, não depois.
+
+⏳ `thread.tsx` já tinha **1 erro de lint** (`react-hooks/immutability`, ~linha
+1651) na `main`, anterior a esta mudança. O build compila; fica anotado.

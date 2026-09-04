@@ -28,7 +28,23 @@ export function CreateTemplateDialog({
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState("");
-  const [category, setCategory] = useState<TemplateCategory>("MARKETING");
+  /*
+   * ⚠️ **O padrão era MARKETING, e isso produzia falha silenciosa.** Só a
+   * categoria MARKETING está sujeita ao limite por destinatário da Meta
+   * (#131049): ela DESCARTA a mensagem de quem já recebeu marketing demais no
+   * período, e o atendente lê "to maintain healthy ecosystem engagement" sem
+   * entender nada — e reenvia, o que piora a nota do número.
+   *
+   * Os templates desta conta são majoritariamente transacionais (lembrete de
+   * pagamento, cobrança, reabertura de atendimento, urgências), e alguém já
+   * havia aprendido isso à mão: existem versões `..._util` justamente para
+   * escapar do limite, e são as de melhor entrega (68/74 e 26/29 medidos em 10
+   * dias). O padrão passa a ser UTILITY, que é o que o uso real pede.
+   *
+   * Quem faz divulgação continua escolhendo MARKETING — é uma opção do seletor,
+   * agora com o custo escrito ao lado.
+   */
+  const [category, setCategory] = useState<TemplateCategory>("UTILITY");
   const [language, setLanguage] = useState("pt_BR");
   const [bodyText, setBodyText] = useState("");
   const [examples, setExamples] = useState<string[]>([]);
@@ -90,6 +106,13 @@ export function CreateTemplateDialog({
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-[11px] leading-snug text-slate-500">
+                {category === "MARKETING"
+                  ? "⚠️ A Meta limita quantas mensagens de marketing cada pessoa recebe e DESCARTA o que passa (erro #131049). Use só para divulgação."
+                  : category === "UTILITY"
+                    ? "Para conteúdo transacional: cobrança, documento, atendimento em andamento. Não tem limite por destinatário."
+                    : "Só para código de verificação/login."}
+              </p>
             </div>
             <div className="grid gap-1">
               <Label className="text-xs">Idioma</Label>

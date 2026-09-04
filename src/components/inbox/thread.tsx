@@ -249,6 +249,40 @@ function textoDeFalha(m: Message): string {
       "avise um administrador. Resposta dentro da janela de 24h continua funcionando."
     );
   }
+  /*
+   * ⚠️ **#131049 é o LIMITE DE MARKETING POR DESTINATÁRIO da Meta** — e é o erro
+   * cujo texto original mais convida ao erro de conduta.
+   *
+   * A Meta escreve "to maintain healthy ecosystem engagement", que não diz nada
+   * a ninguém. O atendente conclui que foi falha momentânea e **reenvia** — foi
+   * exatamente o que aconteceu em 04/09/2026 (14:44 e 14:45, o mesmo template
+   * para o mesmo contato). Reenviar é o pior movimento possível: não pode
+   * funcionar, e insistir com template de MARKETING em quem está no teto derruba
+   * a nota de qualidade do número.
+   *
+   * O que a Meta faz: ela LIMITA quantas mensagens de marketing cada pessoa
+   * recebe num período (de todas as empresas, não só da nossa) e descarta o que
+   * passa. Só a categoria MARKETING é limitada — UTILITY e AUTHENTICATION não.
+   *
+   * Medido neste banco: das 230 tentativas de template em 10 dias, o #131049
+   * apareceu em 2, as duas do MESMO template (`urg_ncias`) para um contato que
+   * **nunca escreveu para nós** (0 mensagens de entrada, conversa criada 2
+   * minutos antes do envio) — o perfil exato que o limite existe para conter.
+   *
+   * Por isso a mensagem diz as três coisas que mudam a conduta: não insista, o
+   * problema é a CATEGORIA, e a saída é UTILITY quando o conteúdo é de verdade
+   * transacional (é o que os templates `..._util` desta conta já fazem, com
+   * entrega de 68/74 e 26/29).
+   */
+  if (/131049/.test(d) || /healthy ecosystem engagement/i.test(d)) {
+    return (
+      "Não foi entregue: a Meta bloqueou porque este contato já atingiu o limite de " +
+      "mensagens de MARKETING que ela permite por pessoa. Reenviar não resolve e " +
+      "prejudica a qualidade do número. Se o conteúdo é transacional (cobrança, " +
+      "documento, atendimento em andamento), o template precisa estar na categoria " +
+      "Utilidade — confira em Canais → Templates."
+    );
+  }
   // Demais erros: só a 1ª frase, sem a cauda de diagnóstico.
   const limpo = d.split("·")[0].split("[diag]")[0].trim();
   return limpo ? `Não foi entregue: ${limpo}` : "Não foi entregue.";
