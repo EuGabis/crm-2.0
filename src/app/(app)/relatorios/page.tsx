@@ -10,6 +10,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -599,7 +600,11 @@ function LeadsDoDiaReport() {
 }
 
 function LeadsDoDiaPainel({ dias, fluxo }: { dias: number; fluxo: Fluxo }) {
-  const [dados, setDados] = useState<{ linhas: LinhaDia[]; total: TotalLeads } | null>(null);
+  const [dados, setDados] = useState<{
+    linhas: LinhaDia[];
+    horas: LinhaHora[];
+    total: TotalLeads;
+  } | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [baixando, setBaixando] = useState(false);
 
@@ -681,6 +686,7 @@ function LeadsDoDiaPainel({ dias, fluxo }: { dias: number; fluxo: Fluxo }) {
       const { baixarRelatorioLeadsXlsx } = await import("@/lib/reports/leads-xlsx");
       await baixarRelatorioLeadsXlsx({
         linhas: dados.linhas,
+        horas: dados.horas ?? [],
         total: t,
         dias,
         fluxoKey: fluxo.key,
@@ -872,6 +878,13 @@ function LeadsDoDiaPainel({ dias, fluxo }: { dias: number; fluxo: Fluxo }) {
         </table>
       </div>
 
+      {/* A visão por HORA vem depois da tabela do diário: cada gráfico junto
+          dos próprios números. Entre o gráfico e a tabela dele, este card
+          separava um do outro. */}
+      <div className="mt-4">
+        <LeadsPorHora horas={dados.horas ?? []} dias={dias} />
+      </div>
+
       {fluxo.historicoParcial && t.entraram > 0 && (
         <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
           {/* ⚠️ Backfill parcial ANUNCIADO. Silencioso, alguém compararia agosto
@@ -882,6 +895,175 @@ function LeadsDoDiaPainel({ dias, fluxo }: { dias: number; fluxo: Fluxo }) {
 
       {t.entraram === 0 && <SemLeads fluxo={fluxo} />}
     </>
+  );
+}
+
+interface LinhaHora {
+  hora: number;
+  entraram: number;
+  concluiram: number;
+  desfechos: Record<string, number>;
+  pontosMedio: number | null;
+}
+
+/** Início e fim (inclusivo) do expediente, a MESMA janela do SLA (0079). */
+const EXPEDIENTE_DE = 8;
+const EXPEDIENTE_ATE = 18; // 19h exclusivo, como na 0079
+
+function noExpediente(hora: number): boolean {
+  return hora >= EXPEDIENTE_DE && hora <= EXPEDIENTE_ATE;
+}
+
+/**
+ * Faixas do dia. Existem para dar os NÚMEROS em texto: com 24 barras não cabe
+ * rótulo direto em nenhuma, e uma tabela de 24 linhas ninguém lê. Quatro faixas
+ * é também como se pensa escala de equipe.
+ */
+const FAIXAS: { rotulo: string; de: number; ate: number }[] = [
+  { rotulo: "Madrugada", de: 0, ate: 5 },
+  { rotulo: "Manhã", de: 6, ate: 11 },
+  { rotulo: "Tarde", de: 12, ate: 17 },
+  { rotulo: "Noite", de: 18, ate: 23 },
+];
+
+/**
+ * Em que HORÁRIO os leads chegam.
+ *
+ * ⚠️ **Barra simples, e NÃO empilhada por desfecho** — decidido por medida, não
+ * por gosto. Foi medido antes de desenhar (secretaria, 30 dias): o mix de
+ * desfecho é praticamente o MESMO dentro e fora do expediente (33,5% × 34,5% de
+ * abandono), então o empilhado não acrescentaria informação. E as porcentagens
+ * por hora fora do expediente estão sobre **n de 1 a 9** — empilhar faria "às
+ * 21h só 11% abandonam" (9 leads) parecer padrão. A pergunta aqui é de VOLUME:
+ * a barra simples responde direto e o pico salta.
+ *
+ * ⚠️ **Uma série só, então NÃO leva caixa de legenda** — o título nomeia o que é.
+ * Os dois tons são realce (expediente × fora), não categorias: a frase acima do
+ * gráfico é o que carrega esse significado, e é ela que faz o tom apagado ser
+ * legível como "ninguém está aqui" em vez de "outra coisa".
+ */
+function LeadsPorHora({ horas, dias }: { horas: LinhaHora[]; dias: number }) {
+  const serie = useMemo(
+    () =>
+      horas.map((h) => ({
+        // "00h".."23h": mais legível que "0" e ordena igual.
+        rotulo: `${String(h.hora).padStart(2, "0")}h`,
+        hora: h.hora,
+        entraram: h.entraram,
+      })),
+    [horas]
+  );
+
+  const total = horas.reduce((a, h) => a + h.entraram, 0);
+  const dentro = horas.filter((h) => noExpediente(h.hora)).reduce((a, h) => a + h.entraram, 0);
+  const fora = total - dentro;
+  const pico = horas.reduce((a, h) => (h.entraram > a.entraram ? h : a), horas[0]);
+
+  if (total === 0) {
+    return (
+      <div className="mb-4 rounded-xl border bg-white p-4">
+        <p className="text-xs font-bold text-slate-700">Em que horário os leads chegam</p>
+        <p className="mt-2 text-xs text-slate-400">Sem lead no período — nada a distribuir por hora.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-4 rounded-xl border bg-white p-4">
+      <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-xs font-bold text-slate-700">Em que horário os leads chegam</p>
+        <p className="text-[11px] text-slate-400">
+          soma dos últimos {dias} dias, horário de Brasília
+        </p>
+      </div>
+      {/*
+        A frase é a codificação secundária dos dois tons — e é o número que decide
+        escala de equipe, então fica em texto e não só no gráfico.
+      */}
+      <p className="mb-3 text-xs text-slate-500">
+        O pico é às{" "}
+        <b className="tabular-nums text-slate-900">
+          {String(pico.hora).padStart(2, "0")}h
+        </b>{" "}
+        ({pico.entraram} leads).{" "}
+        <b className="tabular-nums text-slate-900">
+          {Math.round((fora / total) * 100)}%
+        </b>{" "}
+        chegam <b>fora do expediente</b> (antes das {EXPEDIENTE_DE}h ou depois das{" "}
+        {EXPEDIENTE_ATE + 1}h) — {fora} de {total}, nas barras mais claras.
+      </p>
+      <div className="h-56 w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={serie} margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
+            {/* Grade e eixos por TOKEN, não hex fixo — o dark do projeto remapeia
+                CLASSES, e `stroke` de SVG é atributo. */}
+            <CartesianGrid vertical={false} stroke="var(--border)" />
+            <XAxis
+              dataKey="rotulo"
+              tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+              axisLine={false}
+              tickLine={false}
+              /* 24 rótulos não cabem: o Recharts rala os que não couberem, e o
+                 `minTickGap` garante que os que sobrarem fiquem legíveis. */
+              interval="preserveStartEnd"
+              minTickGap={12}
+            />
+            <YAxis
+              tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+              axisLine={false}
+              tickLine={false}
+              allowDecimals={false}
+            />
+            {/* Hover: é o que dá o número de CADA hora, já que 24 barras não
+                aceitam rótulo direto. */}
+            <Tooltip contentStyle={TOOLTIP_STYLE} />
+            <Bar dataKey="entraram" name="Leads" radius={[4, 4, 0, 0]} maxBarSize={26}>
+              {/*
+                ⚠️ Os dois tons saem de `<Cell>`, não de duas séries: duas séries
+                exigiriam legenda, pediriam validação de paleta categórica e
+                sugeririam que "fora do expediente" é outra coisa sendo contada.
+                É a mesma contagem, realçada.
+
+                ⚠️ E o tom apagado é TOKEN de tema (`--muted-foreground`): um
+                cinza fixo viraria mancha clara acesa no card escuro.
+              */}
+              {serie.map((p) => (
+                <Cell
+                  key={p.hora}
+                  fill={noExpediente(p.hora) ? INDIGO : "var(--muted-foreground)"}
+                />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Faixas do dia: a "table view" da checagem de acessibilidade, e onde os
+          números aparecem sem depender de passar o mouse. */}
+      <div className="mt-3 grid gap-2 sm:grid-cols-4">
+        {FAIXAS.map((f) => {
+          const n = horas
+            .filter((h) => h.hora >= f.de && h.hora <= f.ate)
+            .reduce((a, h) => a + h.entraram, 0);
+          return (
+            <div key={f.rotulo} className="rounded-lg border bg-slate-50 px-3 py-2">
+              <p className="text-[11px] text-slate-500">
+                {f.rotulo}{" "}
+                <span className="tabular-nums text-slate-400">
+                  {String(f.de).padStart(2, "0")}–{String(f.ate).padStart(2, "0")}h
+                </span>
+              </p>
+              <p className="text-sm font-bold tabular-nums text-slate-900">
+                {n}{" "}
+                <span className="text-[11px] font-normal text-slate-400">
+                  ({Math.round((n / total) * 100)}%)
+                </span>
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

@@ -24,6 +24,14 @@ export interface LinhaDia {
   pontosMedio: number | null;
 }
 
+export interface LinhaHora {
+  hora: number;
+  entraram: number;
+  concluiram: number;
+  desfechos: Record<string, number>;
+  pontosMedio: number | null;
+}
+
 export interface SerieDesfecho {
   chave: string;
   rotulo: string;
@@ -33,6 +41,8 @@ export interface SerieDesfecho {
 
 export interface DadosLeads {
   linhas: LinhaDia[];
+  /** 24 baldes, 0h a 23h, no fuso da operação. */
+  horas: LinhaHora[];
   total: { entraram: number; concluiram: number; desfechos: Record<string, number> };
   dias: number;
   fluxoKey: string;
@@ -59,6 +69,9 @@ function diaBR(iso: string): string {
   const [a, m, d] = iso.split("-");
   return `${d}/${m}/${a}`;
 }
+
+/** Indigo do gráfico por hora — o mesmo primário da tela. */
+const INDIGO_XLSX = "#6366f1";
 
 /** "#059669" → "FF059669" (ARGB do ExcelJS). */
 function argb(hex: string): string {
@@ -251,6 +264,71 @@ export async function montarWorkbookLeads(d: DadosLeads) {
    */
   d.series.forEach((s, i) => barra(3 + i, argb(s.cor)));
   barra(3 + d.series.length, argb(d.naoConcluiuCor));
+
+  /* ------------------------------------------------------------------ *
+   * Aba 3 — Por hora (em que horário os leads chegam)
+   * ------------------------------------------------------------------ */
+  /*
+   * ⚠️ Na TELA a visão por hora é barra simples: o mix de desfecho por hora é
+   * plano (33,5% de abandono dentro do expediente contra 34,5% fora) e as
+   * porcentagens fora dele estão sobre n de 1 a 9, então empilhar mostraria
+   * ruído como padrão.
+   *
+   * Na PLANILHA o detalhe entra: é onde alguém vai cruzar e somar, e uma coluna
+   * a mais não engana ninguém — quem abre a aba escolheu olhar o detalhe. Tirar
+   * o desfecho daqui obrigaria a exportar duas vezes para ter os dois cortes.
+   */
+  const ws3 = wb.addWorksheet("Por hora");
+  const colHora = [
+    "Hora",
+    "Entraram",
+    "% do total",
+    ...d.series.map((s) => s.rotulo),
+    "Não concluíram",
+  ];
+  ws3.addRow(colHora);
+  ws3.getRow(1).font = { bold: true, size: 10 };
+  ws3.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINZA } };
+  colHora.forEach((c, i) => (ws3.getColumn(i + 1).width = Math.max(11, c.length + 3)));
+  ws3.views = [{ state: "frozen", ySplit: 1 }];
+
+  const totalHoras = d.horas.reduce((a, h) => a + h.entraram, 0);
+  d.horas.forEach((h) => {
+    const r = ws3.addRow([
+      // Texto "08h" e não o número 8: no Excel o número viraria eixo contínuo e
+      // "0" se perderia na ordenação alfabética de um relatório colado.
+      `${String(h.hora).padStart(2, "0")}h`,
+      h.entraram,
+      // ⚠️ Sem nenhum lead no período a célula fica VAZIA, não 0%: zero
+      // afirmaria que aquela hora não recebe nada, quando nada foi medido.
+      totalHoras > 0 ? fracao((h.entraram / totalHoras) * 100) : null,
+      ...d.series.map((s) => h.desfechos[s.chave] ?? 0),
+      Math.max(h.entraram - h.concluiram, 0),
+    ]);
+    r.getCell(3).numFmt = "0.0%";
+  });
+
+  const ultimaHora = ws3.rowCount;
+  ws3.autoFilter = { from: "A1", to: `${colLetra(colHora.length)}${ultimaHora}` };
+  if (ultimaHora >= 2) {
+    /*
+     * Barra de dados na coluna do volume — é a leitura de "qual horário cai
+     * mais" dentro da própria planilha, e acompanha a ordenação que o leitor
+     * aplicar (uma imagem de gráfico não acompanharia).
+     */
+    ws3.addConditionalFormatting({
+      ref: `B2:B${ultimaHora}`,
+      rules: [
+        {
+          type: "dataBar",
+          // ⚠️ `cfvo` obrigatório: sem ele o writeBuffer estoura e TODO download
+          // quebra (ver a nota na aba "Por dia").
+          cfvo: [{ type: "min" }, { type: "max" }],
+          color: { argb: argb(INDIGO_XLSX) },
+        } as never,
+      ],
+    });
+  }
 
   return wb;
 }

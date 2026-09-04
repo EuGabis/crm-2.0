@@ -4814,3 +4814,98 @@ concluir); a do comercial nasce vazia até a Triagem Comercial ser ligada a um
 número. ⚠️ Fica de fora, por não haver como aferir: o nó `pergunta_situacao` do
 comercial é feito e **não entra no `weights`** — a nota sai só de `objetivo` +
 `conhece_lito`. Vale confirmar se é deliberado.
+
+### "Leads do dia": visão POR HORA (migrações 202609041015 / 202609041016)
+
+Pedido: "uma visualização por hora também, para analisar qual horário costuma
+cair mais leads".
+
+Medido antes de desenhar (secretaria, 30 dias): pico às **12h** (37 leads),
+depois 9h (33) e 14h (32), e **17% dos leads chegam fora do expediente** (58 de
+339). Há decisão de escala a tomar com isso — e o pico ser no horário de almoço
+é justamente o tipo de coisa que ninguém vê sem o gráfico.
+
+#### ⚠️ A questão de projeto não era a hora: era não ter DUAS definições de "lead"
+
+O caminho curto seria uma segunda função agregando por hora, com o predicado de
+"entrou" copiado da `relatorio_triagem_diaria`. São ~20 linhas duplicadas — e
+justamente as que tiveram um defeito no dia anterior (o desfecho contado no dia
+do evento em vez do dia de entrada). Divergindo, **os dois gráficos da mesma tela
+passariam a se contradizer** e ninguém saberia qual está certo.
+
+Então `public.triagem_leads` devolve **uma linha por lead** (conversa, dia, hora,
+resultado, pontos) e quem agrega por dia E por hora é a rota — o mesmo desenho de
+`sla_conversations` (0079). `relatorio_triagem_diaria` foi removida: uma
+definição só.
+
+⚠️ **O teto está medido**: 339 leads em 30 dias (a integração do WhatsApp tem ~1
+mês — 180 dias dão os mesmos 339), ~20 KB de resposta. O dia em que isso virar
+dezenas de milhares é o dia de voltar a agregar no servidor, a mesma ressalva da
+0079.
+
+⚠️ **Dia e hora saem do BANCO já no fuso de São Paulo**, não do navegador nem do
+processo. Devolvendo só o `timestamptz`, a hora sairia no relógio de quem abre a
+tela; e a Vercel roda em UTC, então às 21h de Brasília o servidor diria 0h. Mesma
+armadilha de `private.business_minutes` (0079) e das janelas de resposta
+automática.
+
+#### 🔴 A ordem de deploy, que eu errei no dia anterior
+
+Em 03/09 eu apliquei a migração que **removia** a função antiga ANTES de o código
+subir, e a aba "Leads do dia" ficou respondendo erro em produção até o merge.
+Neste projeto **o código chega à produção ANTES da migração** (deploy automático
+no merge, migração aplicada à mão), então a mudança foi partida em duas:
+
+| migração | o que faz | quando aplicar |
+|---|---|---|
+| `202609041015` | **cria** `triagem_leads` | pode ir ANTES do merge — nada a chama ainda |
+| `202609041016` | **remove** `relatorio_triagem_diaria` | só DEPOIS do merge |
+
+Assim a produção nunca fica sem uma função válida: antes do merge existem as
+duas, depois do merge sobra a nova. ⚠️ **Toda migração que remove ou renomeia
+objeto que o código no ar usa tem de ser um arquivo separado, aplicado depois.**
+
+#### ⚠️ Barra SIMPLES, e não empilhada — decidido por medida
+
+A tentação era reusar o empilhado por desfecho, já que a paleta estava validada.
+Foi medido antes: o mix de desfecho é praticamente o MESMO dentro e fora do
+expediente (**33,5% × 34,5%** de abandono), então o empilhado não acrescentaria
+informação nenhuma. E as porcentagens por hora fora do expediente estão sobre
+**n de 1 a 9** — empilhar faria "às 21h só 11% abandonam" (9 leads) parecer
+padrão. A pergunta ali é de VOLUME, e a barra simples responde direto.
+
+- **Uma série só → sem caixa de legenda**: o título nomeia o que é.
+- Os dois tons (expediente × fora) são **realce, não categoria**: saem de
+  `<Cell>` na mesma série, não de duas séries. Duas séries exigiriam legenda,
+  pediriam validação de paleta categórica e sugeririam que "fora do expediente" é
+  outra coisa sendo contada — é a mesma contagem, realçada. Quem carrega o
+  significado é a frase acima do gráfico, com o número.
+- ⚠️ O tom apagado é **token de tema** (`--muted-foreground`): um cinza fixo
+  viraria mancha clara acesa no card escuro.
+- **Faixas do dia** (madrugada/manhã/tarde/noite) abaixo do gráfico: é a "table
+  view" da checagem de acessibilidade e onde os números aparecem sem passar o
+  mouse. Com 24 barras não cabe rótulo direto em nenhuma, e uma tabela de 24
+  linhas ninguém lê — quatro faixas é como se pensa escala de equipe.
+- A hora vira `"08h"`, texto com zero à esquerda: no Excel o número viraria eixo
+  contínuo, e numa ordenação alfabética a 0h se perderia.
+- ⚠️ O card ficou **depois da tabela do diário**, não entre o gráfico e ela: no
+  meio, separava o gráfico diário dos próprios números.
+
+#### O que os testes pegaram desta vez
+
+`npm run test:leads-xlsx` subiu para **35 asserções** (a aba "Por hora" nos dois
+fluxos). A que mais importa: **24 linhas de hora, sempre** — no dado real a hora
+2 tem ZERO lead, e sem baldes pré-criados a tabela pularia da 01h para a 03h e
+quem somasse a coluna concluiria que a madrugada não existe. Mesma razão de a
+série de dias existir.
+
+⚠️ Na PLANILHA a aba por hora **mantém** o detalhe por desfecho, ao contrário da
+tela. Não é incoerência: quem abre aquela aba escolheu olhar o detalhe e vai
+cruzar e somar; tirar o desfecho de lá obrigaria a exportar duas vezes para ter
+os dois cortes.
+
+E o fuso foi conferido com casos: às **21h de Brasília** (00h30 UTC do dia
+seguinte) o `toISOString().slice(0,10)` de antes devolvia **o dia seguinte** — o
+período pedia um dia à frente e perdia o dia corrente. Agora é
+`Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" })`, e o passo de
+24h é dado ao meio-dia UTC para nunca cair em cima de uma virada de dia.

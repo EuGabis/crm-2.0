@@ -42,6 +42,13 @@ const COMERCIAL = {
     { dia: "2026-09-02", entraram: 4, concluiram: 0, desfechos: {}, pontosMedio: null },
   ],
   total: { entraram: 14, concluiram: 8, desfechos: { quente: 5, frio: 3 } },
+  horas: Array.from({ length: 24 }, (_, h) => ({
+    hora: h,
+    entraram: h === 12 ? 9 : h === 9 ? 5 : 0,
+    concluiram: h === 12 ? 6 : h === 9 ? 2 : 0,
+    desfechos: h === 12 ? { quente: 4, frio: 2 } : h === 9 ? { quente: 1, frio: 1 } : {},
+    pontosMedio: null,
+  })),
 };
 
 // Dados REAIS de produção (03/09/2026), para o teste não medir só um caso feliz.
@@ -63,6 +70,20 @@ const SECRETARIA = {
     { dia: "2026-08-30", entraram: 3, concluiram: 1, desfechos: { docs: 1 }, pontosMedio: null },
   ],
   total: { entraram: 58, concluiram: 42, desfechos: { docs: 6, imersao: 16, outros: 20 } },
+  /*
+   * Distribuição REAL de produção (secretaria, 30 dias): pico às 12h (37), a
+   * hora 2 com ZERO e 17% fora do expediente. A hora vazia é o caso que importa
+   * — ela tem de aparecer como linha, não faltar na aba.
+   */
+  horas: [2, 2, 0, 2, 2, 2, 2, 9, 20, 33, 28, 20, 37, 24, 32, 29, 24, 17, 17, 11, 10, 9, 6, 1].map(
+    (n, h) => ({
+      hora: h,
+      entraram: n,
+      concluiram: Math.round(n * 0.66),
+      desfechos: n > 0 ? { docs: Math.round(n * 0.1), imersao: Math.round(n * 0.2), outros: Math.round(n * 0.36) } : {},
+      pontosMedio: null,
+    })
+  ),
 };
 
 async function relê(dados) {
@@ -97,7 +118,7 @@ function porRotulo(ws) {
 console.log("── Comercial (2 séries, com pontuação) ──");
 {
   const { lido: wb, montado } = await relê(COMERCIAL);
-  eq("abas e ordem", wb.worksheets.map((w) => w.name), ["Resumo", "Por dia"]);
+  eq("abas e ordem", wb.worksheets.map((w) => w.name), ["Resumo", "Por dia", "Por hora"]);
 
   const ws = wb.getWorksheet("Por dia");
   eq("cabeçalho", ws.getRow(1).values.slice(1), [
@@ -160,19 +181,54 @@ function d3(rotulos) {
   return ["Documentos/Prova Sub", "Imersão Pres. MMA", "Outros"].every((r) => rotulos.includes(r));
 }
 
+console.log("── Aba Por hora ──");
+{
+  const { lido: wb, montado } = await relê(SECRETARIA);
+  eq("três abas, na ordem", wb.worksheets.map((w) => w.name), ["Resumo", "Por dia", "Por hora"]);
+
+  const ws = wb.getWorksheet("Por hora");
+  eq("cabeçalho", ws.getRow(1).values.slice(1), [
+    "Hora", "Entraram", "% do total",
+    "Documentos/Prova Sub", "Imersão Pres. MMA", "Outros", "Não concluíram",
+  ]);
+  // 24 horas + cabeçalho. ⚠️ É a asserção que garante que a hora com ZERO lead
+  // não desaparece da planilha: sem ela a tabela pularia da 01h para a 03h e
+  // quem somasse a coluna acharia que a madrugada não existe.
+  eq("24 linhas de hora", ws.rowCount, 25);
+  eq("a hora 02h existe e vale 0", ws.getRow(4).values.slice(1, 3), ["02h", 0]);
+  // Pico real: 12h com 37 leads (linha 2 + 12).
+  eq("pico às 12h", ws.getRow(14).values.slice(1, 3), ["12h", 37]);
+  // 37 de 339 = 10,91% → 0.1091 (4 casas; sem o arredondamento viria
+  // 0.10914454277286136 gravado na célula).
+  eq("porcentagem em fração de 4 casas", ws.getRow(14).getCell(3).value, 0.1091);
+  eq("formato de porcentagem", ws.getRow(14).getCell(3).numFmt, "0.0%");
+  // ⚠️ "08h" como TEXTO, não o número 8: número viraria eixo contínuo no Excel
+  // e a ordenação alfabética de um relatório colado perderia a 0h.
+  eq("hora é texto com zero à esquerda", ws.getRow(10).getCell(1).value, "08h");
+  eq("filtro automático até G", montado.getWorksheet("Por hora").autoFilter?.to, "G25");
+}
+
 console.log("── Bordas ──");
 {
   // Período sem nenhum dado: não pode estourar, e a barra de dados não pode ser
   // aplicada num intervalo vazio.
-  const vazio = { ...SECRETARIA, linhas: [], total: { entraram: 0, concluiram: 0, desfechos: {} } };
+  const vazio = {
+    ...SECRETARIA,
+    linhas: [],
+    horas: Array.from({ length: 24 }, (_, h) => ({ hora: h, entraram: 0, concluiram: 0, desfechos: {}, pontosMedio: null })),
+    total: { entraram: 0, concluiram: 0, desfechos: {} },
+  };
   const { lido: wb } = await relê(vazio);
-  eq("período vazio ainda gera as duas abas", wb.worksheets.map((w) => w.name), ["Resumo", "Por dia"]);
+  eq("período vazio ainda gera as três abas", wb.worksheets.map((w) => w.name), ["Resumo", "Por dia", "Por hora"]);
   eq("só o cabeçalho na aba Por dia", wb.getWorksheet("Por dia").rowCount, 1);
   const res = wb.getWorksheet("Resumo");
   const rot = porRotulo(res);
   // Sem ninguém entrando, a porcentagem fica VAZIA e não 0% — 0% afirmaria que
   // ninguém escolheu o assunto, quando ninguém foi medido.
   eq("porcentagem vazia sem dado", res.getRow(rot.get("Escolheram o assunto")).getCell(2).value, null);
+  // Hora sem nada medido: célula VAZIA e não 0% — 0% afirmaria que aquela hora
+  // não recebe lead, quando nada foi medido.
+  eq("% da hora fica vazia sem dado", wb.getWorksheet("Por hora").getRow(2).getCell(3).value, null);
 }
 
 console.log(`\n${ok} asserção(ões) ok · ${falhas} falha(s)`);
