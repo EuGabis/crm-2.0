@@ -5358,3 +5358,200 @@ e é de quem sabe quem era a reunião.
 
 ⏳ `calendarios/page.tsx` já tinha **1 erro de lint** (`react-hooks/purity`,
 `Date.now()` dentro do `useMemo`) na `main`, anterior a esta mudança.
+
+## 🔴 O rodízio: a fila do setor não tinha SAÍDA (2026-09-08)
+
+Pedido: "deixar muito claro o rodízio atual e garantir que vai funcionar
+corretamente para não ficar leads presos na fila por ter gente offline".
+
+Medindo antes de mexer, o problema não era o que a queixa sugeria — não era o
+rodízio distribuindo para quem está offline (isso a `202608280930` já
+consertou). Eram **duas falhas independentes**, as duas fazendo o lead parar:
+
+| # | falha | prova medida |
+|---|---|---|
+| 1 | **NADA esvaziava a fila do setor.** O lead entra em `awaiting_distribution` e só saía pelo BOTÃO DO ADMIN. | **12 leads presos**, 3 desde 03/09 (**115 horas**), com atendente ONLINE no setor |
+| 2 | **A rede de segurança de 28/08 (`devolverInativas`) era um NO-OP** desde que subiu. | **0 eventos de devolução em 11 dias**; como `service_role`, 0 linhas; como admin real, 35 clientes esperando |
+
+### A falha 1: o lado que faltava da decisão de 28/08
+
+A decisão de 2026-08-28 está certa e continua valendo: ninguém online → o lead
+**espera na fila do setor**, visível a todos, em vez de ficar preso com quem não
+está lá. O que nunca foi construído é o outro lado: **quem tira o lead da fila
+quando a equipe chega.** Este arquivo já registrava a pista —
+*"a varredura que a 0058 prometia (`/api/leads/sweep`) nunca existiu"* — sem
+notar que isso torna a fila um **beco sem saída**.
+
+O caso de 08/09 é legível linha por linha no fio:
+
+```
+08:47:37  bot inicia a triagem
+08:49:55  "Atendente do fluxo está offline — encaminhado para o rodízio do setor"
+08:49:56  "Nenhum atendente no rodízio — lead aguardando distribuição"
+09:59 / 10:06 / 10:24   o cliente escreve três vezes
+          ... e ninguém pegou até 12:30, com a equipe trabalhando
+```
+
+Às 08:49 ninguém da Secretaria estava online (medido: às 8h a equipe tem 48
+respostas em 9 dias, contra 762 às 10h). Ir para a fila estava certo. **Ficar lá
+depois das 10h é o defeito.**
+
+`distribuirFilaDoSetor` (em `lib/leads/distribution.ts`) roda no tique de minuto
+que já existe — como as agendadas (0028), a transcrição (0085) e a devolução —
+e reusa o `distributeOne` de sempre.
+
+- ⚠️ **Ninguém online não é problema a resolver: é para deixar na fila.** A
+  varredura NUNCA atribui a quem está offline; ela só volta no minuto seguinte.
+  Na prática o lead da madrugada é atribuído no primeiro minuto em que a
+  primeira pessoa do setor aparece.
+- 🔴 ⚠️ **Conversa com a triagem EM CURSO não é distribuída, e este é o filtro
+  mais importante do arquivo.** `assignLeadTo` põe `bot_paused = true`: distribuir
+  no meio da triagem **cala o bot** e entrega ao atendente uma conversa sem nome,
+  sem e-mail e sem assunto. Não é hipótese — era o estado dos 3 leads de 03/09
+  presos há 115h: `bot_sessions.status = 'aguardando'` nos nós
+  `pede_nome`/`pede_email`, ou seja o bot esperava o cliente, que abandonou.
+  Regra: `concluido` ou sem sessão → vai; `aguardando`/`ativo` → fica, e é o
+  PRÓPRIO bot que chama `distributeLead` ao terminar.
+- ⚠️ **A flag de fila do ciclo ANTERIOR sobrevivia à triagem nova.** Era a origem
+  daqueles 3: conversa finalizada → cliente escreve → o webhook zera a sessão do
+  bot e recomeça a triagem, **sem limpar `awaiting_distribution`**. O webhook
+  passa a limpar (quem liga a flag de novo é o nó `distribute`, ao FIM da
+  triagem, que é onde ela significa algo) e a migração faz o retroativo, com
+  critério estreito: só sessão `aguardando`.
+- **Teto de 25 por setor por tique** (`FILA_POR_TIQUE`). Não é desempenho: é rede
+  contra despejo. Fila acumulada por dias — ou um defeito que marque a flag em
+  massa — cairia inteira na caixa de quem estivesse online no minuto seguinte ao
+  deploy.
+- **`naFila` sai na resposta do tique** de propósito. Zero distribuídas COM fila
+  cheia significa "ninguém online" — informação, não erro. Sem esse número,
+  `{distribuidas: 0}` deixa um rodízio PARADO indistinguível de um rodízio SEM
+  TRABALHO, que é exatamente o que deixou a fila crescer 11 dias sem ninguém
+  notar.
+- **Setor sem rodízio (0081) e setor sem número vinculado ficam de fora** — o
+  primeiro é decisão explícita do admin, o segundo não tem como ser identificado.
+
+### A falha 2: `devolverInativas` nunca rodou UMA vez
+
+Ela chama `public.sla_conversations`, cuja PRIMEIRA linha é a guarda de empresa
+(`p_location not in (select private.user_locations())`, padrão 0049) — e o tique
+chama com a **SERVICE ROLE**, cujo `auth.uid()` é nulo. A guarda dava `return`:
+**zero linhas, sem erro**, então nem o `if (error)` do chamador salvava. O tique
+respondia `200 {"devolvidas":0}`, com cara de saúde.
+
+```sql
+set local role service_role;
+select count(*) from public.sla_conversations(<loc>, now()-'7 days', now(), 15);  -- 0
+```
+
+⚠️ **É a armadilha que este arquivo já registrou DUAS vezes** ("zero linhas por
+guarda de RLS não é prova de que a função funciona") e que ainda assim passou —
+porque aqui a chamada estava do lado do TypeScript, não numa conferência de
+migração. **Ao chamar função `security definer` com a service role, teste COM a
+service role.**
+
+`public.conversas_esperando` (202609081310) é o recorte mínimo dessa pergunta,
+concedido **só à service_role**, e reusa a MESMA `private.business_minutes` da
+0079 — a devolução e o relatório de SLA continuam concordando sobre o que é
+"esperando", e a resposta do BOT continua não contando como atendimento (sem
+isso nenhuma conversa pareceria parada). Conferido depois: **34 linhas** para a
+service role, 5 delas presas com atendente.
+
+### 🔴 O par `revoke from public, anon` NÃO basta — e isto é geral
+
+Ao conferir os privilégios da função nova, `authenticated` aparecia com EXECUTE
+**sem nenhum `grant` meu**. A causa está em `pg_default_acl`: este projeto tem
+`alter default privileges` concedendo EXECUTE de toda função nova a `anon`,
+`authenticated` e `service_role` **INDIVIDUALMENTE**:
+
+```
+{postgres=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres}
+```
+
+⚠️ Ou seja: a frase deste arquivo — *"`create function` já concede EXECUTE a
+PUBLIC"* — descreve o padrão do Postgres, **não o mecanismo que vale aqui**. A
+concessão ao `authenticated` é DIRETA e não vem do PUBLIC, então
+`revoke ... from public, anon` (o par que o repositório usa desde a 0080) **deixa
+o `authenticated` executando**. Na maioria das funções isso não aparece, porque
+elas levam `grant ... to authenticated` de propósito. **Ao escrever função que
+não deve ser chamável pela tela, revogue dos TRÊS.**
+
+### A presença: 5 minutos medem a coisa errada
+
+`PRESENCE_MS` foi de 5 para **15 minutos** (decisão do Gabriel). O carimbo sai do
+`session-manager`, que pinga enquanto houver mouse/teclado/scroll recente — ele
+mede "está mexendo no CRM", não "está trabalhando". Medido em 08/09, com a equipe
+em plena operação: o Daniel aparecia OFFLINE com 13 min de último carimbo e a
+Beatriz com 36 — **dos 3 atendentes da Secretaria, 1 contava como online.** Quem
+lê uma conversa longa ou atende o telefone saía do rodízio, e o lead ia para a
+fila: a janela curta era uma das causas de a fila encher.
+
+⚠️ O risco do outro lado (lead cair em quem saiu de fato) fica coberto pelas
+outras duas peças da mesma mudança: a devolução por espera volta a funcionar (15
+min ÚTEIS sem resposta) e **`clear_presence()` apaga a presença no logout**.
+Isso importa porque nada apagava `last_seen_at`: o logout por inatividade do
+papel "user" acontece em **10 min**, e antes deixava o carimbo parado no último
+clique — com a janela de 15 min, haveria 5 minutos em que o lead cairia
+justamente em quem o CRM acabou de pôr para fora. A chamada vai **ANTES** do
+`signOut`: depois não há sessão, e a função decide a linha por `auth.uid()`.
+
+### `npm run test:rodizio` — 23 asserções
+
+⚠️ Este é um caminho que quase não se observa rodando o app: depende de quem está
+online AGORA, do estado da sessão do bot e da hora do dia. E a regra que mais
+importa — não roubar a conversa do bot no meio da triagem — tem consequência
+grave e **nenhum sintoma imediato**.
+
+O banco falso **APLICA** os updates ao estado, não só os registra. Sem isso o
+`rr_cursor` que `distributeOne` grava nunca avançava e o rodízio parecia despejar
+tudo na primeira pessoa — um falso alarme que custou uma rodada, e é o que torna
+as asserções de alternância verdadeiras em vez de decorativas.
+
+Metade dos casos vigia o lado OPOSTO (não distribuir o que não deve), que é onde
+o excesso de zelo faz mais dano que o defeito: triagem em curso, setor sem
+rodízio, setor sem número, finalizada, arquivada, conversa que já tem dono.
+
+### ⏳ O que continua em aberto
+
+- **A fila é distribuída para quem está online, seja quantos forem.** Medido no
+  dia: 1 pessoa online na Secretaria e 9 leads prontos → os 9 vão para ela. É o
+  certo (é quem está trabalhando), mas não há noção de carga por atendente.
+- **Horário de trabalho por atendente** continua não existindo — era a minha
+  proposta em 28/08 e o Gabriel escolheu presença + devolução. Se a presença se
+  mostrar frágil (gente que trabalha com a aba fechada), turno por pessoa é o
+  próximo passo.
+- O departamento **Vendas** tem 0 membros e 0 números: quando o número entrar,
+  sem vincular ninguém a fila dele cresce sem saída — a varredura não inventa
+  pool. Ver a seção "Departamento VENDAS".
+- **Financeiro tem `usa_rodizio = false`**, então os leads dele ficam na fila por
+  desenho, e a varredura não os toca. Com 1 membro só, é provavelmente o que se
+  quer — mas vale confirmar.
+- `session-manager.tsx` já tinha **1 erro de lint** (`react-hooks/purity`,
+  `useRef(Date.now())` na linha 29) na `main`, anterior a esta mudança.
+
+### Como conferir se o rodízio está dando conta
+
+```sql
+-- Leads parados na fila e há quanto tempo (deve ficar perto de zero no expediente):
+select count(*) as na_fila,
+       round(extract(epoch from (now()-min(last_message_at)))/3600.0,1) as horas_max
+  from public.conversations
+ where awaiting_distribution is true and assigned_to is null
+   and closed_at is null and archived_at is null;
+
+-- Quem o CRM considera online AGORA (janela de 15 min):
+select p.name, d.name as setor,
+       round(extract(epoch from (now()-m.last_seen_at))/60.0,0) as min_atras,
+       (m.last_seen_at > now() - interval '15 minutes') as online
+  from public.location_members m
+  join public.profiles p on p.id = m.user_id
+  left join public.departments d on d.id = m.department_id
+ order by m.last_seen_at desc nulls last;
+
+-- A varredura e a devolução estão agindo? (o motivo é escrito só por elas)
+select left(body, 90) as evento, count(*)
+  from public.messages
+ where type = 'event' and created_at > now() - interval '2 days'
+   and (body ilike '%varredura da fila%' or body ilike '%de espera%'
+        or body ilike '%esperava%sem resposta%')
+ group by 1 order by 2 desc;
+```

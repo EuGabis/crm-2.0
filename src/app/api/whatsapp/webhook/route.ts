@@ -560,7 +560,22 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
         // número tem fluxo, volta pra FILA (tira o dono pra triar/redistribuir).
         ...(wasClosed && !keepWithHuman ? { bot_paused: false } : {}),
         ...(wasClosed && !keepWithHuman && channel.bot_flow
-          ? { assigned_to: null, assign_reason: "conversa finalizada — volta para o bot triar" }
+          ? {
+              assigned_to: null,
+              assign_reason: "conversa finalizada — volta para o bot triar",
+              /*
+               * ⚠️ **A flag de fila do ciclo ANTERIOR não pode sobreviver à
+               * triagem nova.** Sem isto ela ficava para trás e a conversa
+               * aparecia "aguardando distribuição" enquanto o bot, na verdade,
+               * estava no meio de uma triagem recomeçada. Medido em 2026-09-08:
+               * era o estado dos 3 leads presos há 115 horas — sessão do bot em
+               * `pede_nome`/`pede_email` e flag de fila ligada de dias antes.
+               *
+               * Quem liga a flag de novo é o nó `distribute`, ao FIM da triagem,
+               * se ninguém estiver online. É lá que ela significa algo.
+               */
+              awaiting_distribution: false,
+            }
           : {}),
       })
       .eq("id", conv.id);

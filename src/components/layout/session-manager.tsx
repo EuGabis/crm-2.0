@@ -34,6 +34,22 @@ export function SessionManager() {
     if (done.current) return;
     done.current = true;
     try {
+      /*
+       * ⚠️ Apaga a presença ANTES do signOut, e a ordem importa: depois do
+       * signOut não há mais sessão, e `clear_presence()` decide a linha por
+       * `auth.uid()` — a chamada não faria nada.
+       *
+       * Sem isto, `last_seen_at` ficava parado no último clique e a pessoa
+       * seguia "online" para o rodízio pela janela inteira. Pesa mais desde que
+       * a janela virou 15 min: o logout por inatividade do papel "user"
+       * acontece em 10 min, então havia 5 minutos em que o lead caía justamente
+       * em quem o CRM acabou de pôr para fora.
+       */
+      await createClient().rpc("clear_presence");
+    } catch {
+      // best-effort: a devolução por espera cobre o lead que caia nessa sobra.
+    }
+    try {
       // scope "local": só esta sessão/dispositivo — não derruba o mesmo usuário
       // logado no celular/outro navegador.
       await createClient().auth.signOut({ scope: "local" });

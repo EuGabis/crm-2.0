@@ -8,7 +8,27 @@ import { normalize } from "@/lib/bot/types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-export const PRESENCE_MS = 5 * 60 * 1000;
+/**
+ * Janela de presença: "online" = carimbou `last_seen_at` nos últimos 15 minutos.
+ *
+ * ⚠️ **Eram 5 minutos, e 5 minutos mede a coisa errada.** O carimbo sai do
+ * `session-manager`, que pinga a cada 60 s enquanto houver mouse/teclado/scroll
+ * recente — ou seja, ele mede "está mexendo no CRM", não "está trabalhando".
+ * Quem lê uma conversa longa, atende o telefone ou vai ao banheiro sai do
+ * rodízio. Medido em 2026-09-08, com a equipe em plena operação: o Daniel
+ * aparecia OFFLINE com 13 min de último carimbo e a Beatriz com 36 — dos 3
+ * atendentes da Secretaria, 1 contava como online.
+ *
+ * Atendente que o rodízio julga offline não recebe lead, e o lead vai para a
+ * fila do setor: a janela curta era uma das causas da fila encher.
+ *
+ * ⚠️ O risco do outro lado (lead cair em quem saiu de fato) fica coberto por
+ * duas peças que a mesma mudança conserta: `devolverInativas` volta a funcionar
+ * (devolve em 15 min ÚTEIS sem resposta) e `clear_presence()` apaga a presença
+ * no logout — inclusive no logout por inatividade, que para o papel "user"
+ * acontece em 10 min e antes deixava `last_seen_at` parado no último clique.
+ */
+export const PRESENCE_MS = 15 * 60 * 1000;
 
 /** Status da oportunidade deduzido do nome da etapa (igual ao pipeline.ts). */
 function statusForStageName(name: string): "open" | "won" | "lost" {
@@ -347,37 +367,44 @@ export async function devolverInativas(
     if (!channelIds.length) continue;
 
     /*
-     * `sla_conversations` já responde exatamente a pergunta "quem está esperando
-     * e há quantos minutos ÚTEIS" — com a resposta do bot não contando como
-     * atendimento, que é essencial aqui: o auto-responder responde em segundos e
-     * sem isso NENHUMA conversa pareceria parada.
+     * 🔴 **Aqui era `sla_conversations`, e era um NO-OP.** A função tem a guarda
+     * de empresa na PRIMEIRA linha (`p_location not in (select
+     * private.user_locations())`, padrão 0049) e este código roda com a SERVICE
+     * ROLE, cujo `auth.uid()` é nulo. A guarda dava `return` e devolvia ZERO
+     * LINHAS, SEM ERRO — então nem o `if (error)` abaixo salvava.
      *
-     * Reusar em vez de escrever a consulta de novo evita duas definições de
-     * "esperando" para divergirem — foi o cuidado que a própria 0079 registrou.
-     */
-    /*
-     * ⚠️ Os nomes são `p_from`/`p_to`/`p_target_min` (assinatura da 0079). Errar
-     * o nome de parâmetro num `rpc` do PostgREST não dá erro de compilação — dá
-     * 404 "function not found" em produção.
+     * Medido em 2026-09-08: como `service_role`, 0 linhas; como admin real, 35
+     * clientes esperando e 6 presos com atendente. Em 11 dias no ar, ZERO
+     * eventos de devolução. O tique respondia 200 e `{devolvidas: 0}` — com cara
+     * de saúde, que é o que fez isso passar despercebido.
      *
-     * Janela de 7 dias: a devolução só interessa para quem está esperando AGORA,
-     * e varrer 30 dias a cada minuto seria pagar caro por linhas que já foram
-     * respondidas ou fechadas há semanas.
+     * ⚠️ É a armadilha que este repositório já registrou duas vezes: "zero
+     * linhas por guarda de RLS não é prova de que a função funciona".
+     *
+     * `conversas_esperando` (202609081310) é o recorte mínimo desta pergunta,
+     * concedido SÓ à service_role, e reusa a MESMA `private.business_minutes`
+     * da 0079 — a devolução e o relatório de SLA continuam concordando sobre o
+     * que é "esperando".
      */
-    const { data: linhas, error } = await db.rpc("sla_conversations", {
+    const { data: linhas, error } = await db.rpc("conversas_esperando", {
       p_location: locationId,
-      p_from: new Date(Date.now() - 7 * 86400000).toISOString(),
-      p_to: new Date(Date.now() + 86400000).toISOString(),
-      p_target_min: limite,
+      p_limite_min: limite,
     });
     if (error) {
+      // Antes da migração ser aplicada, a função não existe. Avisa e segue: a
+      // varredura da fila (que não depende de SQL novo) continua funcionando.
       console.warn("[rodizio] não deu para ler a espera:", error.message);
       continue;
     }
 
+    /*
+     * A função já filtra "sem resposta humana" e "espera >= limite"; aqui só
+     * sobra quem TEM dono. Quem está sem dono é assunto de
+     * `distribuirFilaDoSetor` — devolver para a fila quem já está na fila seria
+     * um evento de transferência por tique, para sempre.
+     */
     const parados = (linhas ?? []).filter(
-      (l: any) =>
-        !l.respondida && !l.fechada && Number(l.espera_util_min ?? 0) >= limite,
+      (l: any) => l.assigned_to && channelIds.includes(l.channel_id),
     );
     if (!parados.length) continue;
 
@@ -400,7 +427,7 @@ export async function devolverInativas(
        * primeiro e soltar depois deixaria a conversa parada no caso ruim.
        */
       const esperou = Math.round(
-        parados.find((p: any) => p.conversation_id === conv.id)?.espera_util_min ?? limite,
+        Number(parados.find((p: any) => p.conversation_id === conv.id)?.espera_util_min ?? limite),
       );
       await db
         .from("conversations")
@@ -459,4 +486,195 @@ export async function devolverInativasDeTodas(): Promise<{
     }
   }
   return { devolvidas, redistribuidas };
+}
+
+/* ------------------------------------------------------------------ *
+ * Esvaziar a fila do setor
+ * ------------------------------------------------------------------ */
+
+/**
+ * Teto de conversas distribuídas por setor em UM tique.
+ *
+ * Não é ajuste de desempenho: é rede contra despejo. Uma fila que acumulou por
+ * dias (ou um defeito que marque `awaiting_distribution` em massa) cairia inteira
+ * na caixa de quem estivesse online no minuto seguinte ao deploy. Com o teto, um
+ * atraso grande escoa em alguns minutos e continua reversível.
+ */
+const FILA_POR_TIQUE = 25;
+
+/**
+ * A fila do setor, já sem o que NÃO pode ser distribuído.
+ *
+ * 🔴 ⚠️ **`emTriagem` é o filtro mais importante deste arquivo.** `assignLeadTo`
+ * põe `bot_paused = true`, então distribuir uma conversa cuja triagem está em
+ * curso **CALA o bot** e entrega ao atendente uma conversa sem nome, sem e-mail e
+ * sem assunto — o oposto do que a triagem existe para fazer.
+ *
+ * Não é hipótese: era o estado dos 3 leads de 03/09 presos há 115h. A conversa
+ * havia sido finalizada, o cliente escreveu de novo, o webhook zerou a sessão do
+ * bot e uma triagem NOVA começou — mas a flag de fila do ciclo ANTERIOR ficou
+ * para trás. `bot_sessions.status` estava `aguardando` em `pede_nome`/`pede_email`:
+ * o bot esperava o cliente, que abandonou. Não havia atendente a quem entregar.
+ *
+ * `concluido` (ou sem sessão) = a triagem terminou e o lead espera humano de
+ * verdade → vai. `aguardando`/`ativo` = o bot está no meio → fica, e é o PRÓPRIO
+ * bot que chama `distributeLead` ao terminar.
+ *
+ * ⚠️ Mora aqui, exportada, porque **existem DOIS caminhos que esvaziam a fila**:
+ * esta varredura e o botão do admin (`/api/leads/distribute`). Com a regra escrita
+ * só na varredura, o botão continuaria podendo cortar a triagem — e a divergência
+ * apareceria como "às vezes o bot para no meio", que é indepurável.
+ *
+ * `retidas` é devolvido para o chamador poder dizer quantas FICARAM, em vez de
+ * confundir "não havia nada" com "havia e não pôde".
+ */
+export async function filaProntaDoSetor(
+  db: any,
+  locationId: string,
+  channelIds: string[],
+  limite: number,
+): Promise<{ prontas: { id: string; contact_id: string }[]; retidas: number }> {
+  const { data: fila } = await db
+    .from("conversations")
+    .select("id, contact_id")
+    .eq("location_id", locationId)
+    .eq("awaiting_distribution", true)
+    .is("assigned_to", null)
+    .is("closed_at", null)
+    .is("archived_at", null)
+    .in("channel_id", channelIds)
+    // Quem espera há mais tempo primeiro — é uma fila.
+    .order("last_message_at", { ascending: true })
+    .limit(limite);
+  if (!fila?.length) return { prontas: [], retidas: 0 };
+
+  const { data: sessoes } = await db
+    .from("bot_sessions")
+    .select("conversation_id, status")
+    .in("conversation_id", fila.map((c: any) => c.id));
+  const emTriagem = new Set(
+    (sessoes ?? [])
+      .filter((s: any) => s.status === "aguardando" || s.status === "ativo")
+      .map((s: any) => s.conversation_id),
+  );
+
+  const prontas = fila.filter((c: any) => !emTriagem.has(c.id));
+  return { prontas, retidas: fila.length - prontas.length };
+}
+
+/**
+ * Distribui a FILA DO SETOR (`awaiting_distribution`) entre quem está online.
+ *
+ * 🔴 **Existe porque a fila não tinha saída.** Medido em 2026-09-08: 12 leads
+ * presos, 3 desde 03/09 (115 horas), com atendente ONLINE no setor. O lead entra
+ * na fila quando o bot termina a triagem e ninguém está online — o que está
+ * CERTO, e é a decisão de 2026-08-28 (melhor esperar na fila do grupo, visível a
+ * todos, do que ficar preso com quem não está lá). O que faltava era o outro
+ * lado: **ninguém tirava o lead da fila quando a equipe chegava.**
+ *
+ * A varredura que a 0058 prometia (`/api/leads/sweep`) nunca existiu; o único
+ * caminho era o botão do admin em `/api/leads/distribute`. Um lead que caísse às
+ * 5h da manhã só saía se um administrador se lembrasse de clicar.
+ *
+ * Roda no tique de minuto que já existe, como as agendadas (0028), a transcrição
+ * (0085) e a devolução por espera — segundo cron seria segundo segredo, segunda
+ * migração de agendamento e mais um passo manual em produção.
+ *
+ * ⚠️ **Ninguém online não é problema a resolver: é para deixar na fila.** A
+ * função não atribui a quem está offline em nenhuma hipótese; ela apenas volta no
+ * minuto seguinte. Na prática o lead da madrugada é atribuído no primeiro minuto
+ * em que a primeira pessoa do setor aparece.
+ */
+export async function distribuirFilaDoSetor(
+  db: any,
+  locationId: string,
+): Promise<{ distribuidas: number; naFila: number }> {
+  let distribuidas = 0;
+  let naFila = 0;
+
+  const { data: deps } = await db
+    .from("departments")
+    .select("id, usa_rodizio")
+    .eq("location_id", locationId);
+
+  for (const dep of deps ?? []) {
+    /*
+     * Setor sem rodízio (0081) é decisão explícita: os leads dele ficam na fila
+     * para alguém assumir à mão. Distribuir aqui atropelaria essa escolha — é a
+     * mesma regra que o nó `distribute` do bot já respeita.
+     */
+    if (dep.usa_rodizio === false) continue;
+
+    const { data: dcs } = await db
+      .from("department_channels")
+      .select("channel_id")
+      .eq("department_id", dep.id);
+    const channelIds = (dcs ?? []).map((d: any) => d.channel_id);
+    // Sem número vinculado não há como saber que a conversa é deste setor.
+    if (!channelIds.length) continue;
+
+    const { prontas, retidas } = await filaProntaDoSetor(db, locationId, channelIds, FILA_POR_TIQUE);
+    if (!prontas.length) {
+      naFila += retidas;
+      continue;
+    }
+    naFila += retidas;
+
+    // ⚠️ Contador POR SETOR. Usar o acumulador `distribuidas` para calcular o
+    // resto desta fila daria número errado a partir do segundo setor com fila.
+    let feitasAqui = 0;
+    for (const conv of prontas) {
+      const user = await distributeOne(db, {
+        locationId,
+        deptId: dep.id,
+        conversationId: conv.id,
+        contactId: conv.contact_id,
+        pipelineName: "Controle de Leads",
+        reason: "varredura da fila do setor",
+      });
+      if (user) {
+        feitasAqui++;
+      } else {
+        /*
+         * `distributeOne` devolveu null = ninguém online no setor. Não há por que
+         * tentar as outras da mesma fila neste tique: a resposta seria a mesma, e
+         * insistir só gastaria consultas. Elas continuam na fila, visíveis a
+         * todos, e o próximo tique tenta de novo.
+         */
+        naFila += prontas.length - feitasAqui;
+        break;
+      }
+    }
+    distribuidas += feitasAqui;
+  }
+
+  return { distribuidas, naFila };
+}
+
+/**
+ * Roda a varredura da fila em TODAS as empresas — é o que o tique chama.
+ *
+ * Mesma forma de `devolverInativasDeTodas`: o tique é máquina-a-máquina (pg_cron)
+ * e não tem sessão, então não existe "empresa atual". Uma empresa falhar não pode
+ * parar as outras.
+ */
+export async function distribuirFilaDeTodas(): Promise<{
+  distribuidas: number;
+  naFila: number;
+}> {
+  const { createAdminClient } = await import("@/lib/supabase/admin");
+  const db = createAdminClient();
+  const { data: locs } = await db.from("locations").select("id");
+  let distribuidas = 0;
+  let naFila = 0;
+  for (const l of locs ?? []) {
+    try {
+      const r = await distribuirFilaDoSetor(db, l.id as string);
+      distribuidas += r.distribuidas;
+      naFila += r.naFila;
+    } catch (e) {
+      console.warn(`[rodizio] varredura da fila falhou na empresa ${l.id}:`, e);
+    }
+  }
+  return { distribuidas, naFila };
 }
