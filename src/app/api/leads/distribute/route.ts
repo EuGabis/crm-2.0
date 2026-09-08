@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { distributeDepartment } from "@/lib/leads/distribution";
+import { distributeDepartment, filaProntaDoSetor } from "@/lib/leads/distribution";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -50,16 +50,24 @@ export async function POST(request: Request) {
     const channelIds = (dcs ?? []).map((d: any) => d.channel_id);
     if (!channelIds.length) continue;
 
-    const { data: convs } = await db
-      .from("conversations")
-      .select("id, contact_id")
-      .eq("location_id", locationId)
-      .eq("awaiting_distribution", true)
-      .in("channel_id", channelIds)
-      .order("last_message_at", { ascending: true });
-    if (!convs?.length) continue;
+    /*
+     * ⚠️ Passou a usar `filaProntaDoSetor`, a MESMA leitura da varredura de
+     * minuto, e não uma consulta própria. A consulta que estava aqui não olhava a
+     * sessão do bot: o botão do admin podia distribuir conversa com a triagem EM
+     * CURSO, e como `assignLeadTo` põe `bot_paused = true`, isso CALA o bot e
+     * entrega ao atendente uma conversa sem nome, sem e-mail e sem assunto.
+     *
+     * ⚠️ Ela também não filtrava `closed_at`/`archived_at`: conversa finalizada
+     * com a flag de fila para trás voltava para a caixa de alguém ao clicar no
+     * botão.
+     *
+     * O teto é alto de propósito (o do tique é 25): aqui é uma ação DELIBERADA
+     * do admin, que quer justamente esvaziar o acumulado de uma vez.
+     */
+    const { prontas } = await filaProntaDoSetor(db, locationId, channelIds, 1000);
+    if (!prontas.length) continue;
 
-    distributed += await distributeDepartment(db, locationId, dep.id, convs, fraction);
+    distributed += await distributeDepartment(db, locationId, dep.id, prontas, fraction);
   }
 
   return Response.json({ distributed });

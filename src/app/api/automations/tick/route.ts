@@ -1,7 +1,7 @@
 import { processDueRuns } from "@/lib/automations/engine";
 import { dispatchScheduledMessages } from "@/lib/messages/scheduled";
 import { processarFilaDeTranscricao } from "@/lib/ai/transcribe";
-import { devolverInativasDeTodas } from "@/lib/leads/distribution";
+import { devolverInativasDeTodas, distribuirFilaDeTodas } from "@/lib/leads/distribution";
 
 /** Nunca cachear: a rota é o batimento do motor. */
 export const dynamic = "force-dynamic";
@@ -13,11 +13,16 @@ export const dynamic = "force-dynamic";
  * `x-automation-secret`. Sem o segredo correto responde 401 — a rota
  * roda com a service role e não pode ficar aberta.
  *
- * Faz QUATRO coisas, no mesmo tique: executa os runs de automação vencidos,
+ * Faz CINCO coisas, no mesmo tique: executa os runs de automação vencidos,
  * dispara as mensagens agendadas que chegaram a hora (migração 0028),
  * transcreve os áudios da fila (migração 0085) e devolve ao rodízio as conversas
- * cujo cliente está esperando demais. São independentes — uma falhar não impede
- * as outras, daí o `allSettled`.
+ * cujo cliente está esperando demais e **esvazia a fila do setor**. São
+ * independentes — uma falhar não impede as outras, daí o `allSettled`.
+ *
+ * 🔴 A varredura da fila (`distribuirFilaDeTodas`) entrou em 2026-09-08 e é o
+ * lado que faltava do rodízio: o lead ia para a fila quando ninguém estava
+ * online (certo) e NUNCA saía dela quando a equipe chegava (a varredura que a
+ * 0058 prometia nunca existiu). Medido antes: 12 leads presos, 3 há 115 horas.
  *
  * A transcrição entrou AQUI de propósito, como as agendadas: um segundo cron
  * significaria segundo segredo, segunda migração de agendamento e mais um passo
@@ -37,7 +42,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "não autorizado" }, { status: 401 });
   }
 
-  const [automations, scheduled, transcricoes, devolucoes] = await Promise.allSettled([
+  const [automations, scheduled, transcricoes, devolucoes, fila] = await Promise.allSettled([
     processDueRuns(),
     dispatchScheduledMessages(),
     processarFilaDeTranscricao(),
@@ -45,6 +50,15 @@ export async function POST(request: Request) {
     // segundo segredo, segunda migração de agendamento e mais um passo manual em
     // produção — para uma varredura que cabe no batimento que já existe.
     devolverInativasDeTodas(),
+    /*
+     * Esvazia a fila do setor. ⚠️ Roda em PARALELO com a devolução de propósito,
+     * e as duas não se atropelam porque tratam conjuntos disjuntos: a devolução
+     * só mexe em conversa COM dono (`l.assigned_to`), a varredura só em conversa
+     * SEM dono (`.is("assigned_to", null)`). Uma conversa devolvida neste tique é
+     * pega pela varredura no próximo — o que é o comportamento certo, porque
+     * `devolverInativas` já tenta redistribuir na hora.
+     */
+    distribuirFilaDeTodas(),
   ]);
 
   if (automations.status === "rejected") {
@@ -58,6 +72,9 @@ export async function POST(request: Request) {
   }
   if (devolucoes.status === "rejected") {
     console.error("[rodizio] falha na devolução:", devolucoes.reason);
+  }
+  if (fila.status === "rejected") {
+    console.error("[rodizio] falha na varredura da fila:", fila.reason);
   }
 
   if (automations.status === "rejected" && scheduled.status === "rejected") {
@@ -86,5 +103,17 @@ export async function POST(request: Request) {
       devolucoes.status === "fulfilled"
         ? devolucoes.value
         : { devolvidas: 0, redistribuidas: 0, tickError: true },
+    /*
+     * `naFila` sai na resposta de propósito: é o número que diz se o rodízio está
+     * dando conta. Zero distribuídas COM fila cheia significa "ninguém online no
+     * setor" — informação, não erro. Sem ele, o tique responderia
+     * `{distribuidas: 0}` e um rodízio parado ficaria indistinguível de um
+     * rodízio sem trabalho, que é exatamente o que deixou a fila crescer 11 dias
+     * sem ninguém notar.
+     */
+    fila:
+      fila.status === "fulfilled"
+        ? fila.value
+        : { distribuidas: 0, naFila: 0, tickError: true },
   });
 }
