@@ -6614,3 +6614,138 @@ todos em `'online'`, nada muda em setor nenhum.
 ⏳ Se um vendedor entrar de férias sem sair do pool, `devolver_so_com_todos_online`
 desliga a devolução do setor até ele voltar. A saída é tirá-lo do `lead_pool` (ou
 desligar a coluna) — está aqui para não virar mistério.
+## 🔴 O funil "Controle de Leads" não existia — e o bot escrevia no Comercial
+
+Relato do Gabriel (2026-09-08): *"na pipeline comercial tem cards com responsável
+os atendentes da secretaria. A pipe do comercial é somente do Alberto, Paulo,
+Rogerio e os Admins."*
+
+⚠️ **Não era permissão nem visibilidade** — e é importante não procurar ali. A
+segmentação estava CORRETA: o funil Comercial é `scope=department` do
+"Secretaria Backup", que tem exatamente Alberto, Paulo e Rogério. O problema é
+que o bot da Secretaria **escrevia no funil errado**, e a cadeia foi medida
+inteira:
+
+1. o fluxo `triagem-secretaria` (nos números Secretaria Principal e Backup
+   Secretaria) manda criar o card no funil **"Controle de Leads"**, etapa
+   **"NOVO LEAD"**;
+2. **nenhum dos dois existia** — conferido: 0 pipelines com esse nome e 0 etapas
+   "NOVO LEAD" em todo o banco;
+3. `resolvePipeline` então ADIVINHAVA, e as duas heurísticas caíam no Comercial:
+   - a busca por etapa contendo `"quente"` casava com **"Perdido Quente"**
+     (casamento acidental — a dica existia para uma etapa "Lead Quente");
+   - o último recurso era `pipelines[0]`, que é o Comercial (`position = 0`);
+4. o card nascia em **Comercial/Entrada**, e depois `assignLeadTo` (rodízio)
+   fazia o MESMO caminho e escrevia `owner_id` = a atendente da Secretaria.
+
+**Escala medida: 365 cards do bot em Comercial/Entrada** — que é exatamente o
+"Entrada · 365" que aparecia na tela. 82% dos cards com dono eram de gente de
+fora do time comercial:
+
+| dono | setor | cards |
+|---|---|---|
+| Jenifer Martins | Secretaria | **144** |
+| Daniel Messias | Secretaria | 82 |
+| Beatriz Brito | Secretaria | 53 |
+| Cibelle Paiva | Financeiro | 15 |
+| Alberto + Rogério + Paulo | Comercial | **37** |
+
+⚠️ O absurdo que isso produzia: **a Jenifer era dona de 144 cards num funil que
+ela não pode ver** (`private.pipeline_visible` é por departamento). Dono
+invisível para o próprio dono.
+
+⚠️ **Não era regressão nova**: o padrão é diário desde 25/08 (48 em 31/08, 31 em
+01/09). A varredura da fila que entrou em 08/09 somou 40 ao problema, não o criou.
+
+### A configuração estava certa; faltava o OBJETO
+
+⚠️ Os **dois** fluxos nomeiam "Controle de Leads", e o `stageMap` da Triagem
+Comercial (`{quente: "Qualificado", frio: "PERDIDO"}`) **não encaixa no
+Comercial** e encaixa num funil de leads. Ou seja: alguém desenhou um *intake
+compartilhado* e nunca o criou. A migração **202609081500** cria o que já estava
+configurado, em vez de reescrever a intenção de quem configurou — que era a
+tentação (renomear etapa, apontar o fluxo para outro funil).
+
+- **`scope = 'empresa'`, não do departamento Secretaria.** Os donos dos cards
+  movidos são da Secretaria E do Financeiro (15 da Cibelle, também `source=Bot`,
+  que chegaram a ela pela cascata de transferência). Num funil de escopo
+  Secretaria ela viraria dona de cards invisíveis — o mesmo defeito, do outro
+  lado. Restringir depois é um clique em "Quem vê"; descobrir que alguém não vê
+  os próprios cards não tem aviso.
+- **Etapas: `NOVO LEAD | Em contato | Qualificado | Ganho | Perdido`.** Os nomes
+  não são rótulo: `statusForStageName` DEDUZ o status pelo nome ("GANHO" → won,
+  "PERDID" → lost). Um "Fechado" não seria reconhecido e o card ficaria `open`
+  para sempre. E "Qualificado"/"Perdido" são exatamente o que o `stageMap` da
+  Triagem Comercial espera (`stageByName` casa por `includes`, então "PERDIDO"
+  encontra "Perdido").
+- Entra no **fim** (`position 3`): virar a primeira aba mudaria a tela de todo
+  mundo sem ninguém pedir.
+
+### Os 293 cards movidos, e os 2 que FICARAM
+
+Critério estreito, cada condição excluindo um caso legítimo:
+
+- **`source = 'Bot'`** — medido: existem **2 cards `source='Conversas'`** de gente
+  da Secretaria, criados pelo "Enviar para pipeline" do inbox, **onde a pessoa
+  ESCOLHE o funil**. Mover desfaria decisão humana (princípio da 0090), então
+  eles ficam no Comercial. É por isso que o Comercial ainda mostra 2 donos da
+  Secretaria — e está certo.
+- **dono de Secretaria/Financeiro** — os 37 do time comercial e os 11 dos admins
+  ficam onde estão.
+- **etapa mapeada explicitamente**, nada de adivinhar: Entrada→NOVO LEAD,
+  Em contato→Em contato, Perdido Quente→Perdido. O `status` é preservado pelo
+  mapeamento; sem isso um card perdido reapareceria como aberto.
+
+Resultado conferido: Comercial de 388 → **95 cards**; Controle de Leads com
+**293**, e o card perdido continuou perdido.
+
+⚠️ Um contato tem DOIS cards nesta leva, então ficou com dois no funil novo. O
+código tolera porque `ensureCard`, `syncCard` e `assignLeadTo` usam `.limit(1)`
+**antes** do `.maybeSingle()` — vale saber antes de "consertar" a duplicata.
+
+### 🔴 A correção que impede a repetição: parar de adivinhar
+
+O comentário de `resolvePipeline` dizia literalmente *"Evita mexer no funil
+errado"* — e era o fallback dela que fazia mexer no funil errado.
+
+**Nome configurado que não resolve agora devolve `null`**, o chamador desiste e o
+motivo vai para o log. Um nome errado na configuração passa a ser um erro visível
+em vez de duas semanas de leads arquivados no lugar errado.
+
+⚠️ A adivinhação por etapa e o `pipelines[0]` **continuam**, mas SÓ quando nenhum
+nome foi configurado — aí não há intenção declarada a respeitar e um palpite é
+melhor que não criar o card. **O que não pode existir é palpite CONTRA uma
+intenção declarada.**
+
+Mesma correção em `leadsPipelineId` (rodízio): sem funil resolvido ele não escreve
+dono em card nenhum, e a atribuição da CONVERSA segue normal — o atendimento não
+depende do card.
+
+### Dois erros de SQL que só a execução pegou
+
+- ⚠️ **`stages.location_id` é NOT NULL e sem default** (a RLS multi-tenant depende
+  dela). Omitir deu `23502`.
+- ⚠️ **Não existe `max(uuid)` no Postgres** (`42883`). O idioma
+  `max(case when ... then s.id end)` para achar a etapa por nome não compila, e o
+  erro só aparece ao executar. Trocado por subconsultas escalares — que de
+  quebra deixam o mapeamento explícito, etapa por etapa.
+
+Os dois reforçam a regra que este arquivo já registra: **aplicar não é
+verificar.** As duas tentativas falhas foram revertidas inteiras pela transação,
+sem deixar objeto pela metade.
+
+### ⏳ O que fica em aberto
+
+- **Os dois bots agora COMPARTILHAM o intake.** `triagem` (Comercial) e
+  `triagem-secretaria` nomeiam o mesmo funil, e é assim que estavam
+  configurados. A Triagem Comercial **não está ligada a nenhum número**, então
+  hoje isso não tem efeito; quando o número de Vendas entrar, decidir se o
+  comercial deve ter intake próprio. Apontar o fluxo para outro funil é editar
+  `bot_flows.definition` — não fiz porque é decisão de produto, não defeito.
+- **A cascata de transferência** (`transfer_conversation` reatribui
+  `opportunities.owner_id` de TODAS as oportunidades do contato) foi o que levou
+  15 cards de lead da Secretaria à Cibelle, do Financeiro. Está documentado
+  como intencional, mas cruza setores.
+- O funil **Comercial segue como `scope=department` do "Secretaria Backup"**. O
+  `AGENTS.md` já registra que ele deveria migrar para o departamento **Vendas** —
+  continua pendente, junto do número novo.

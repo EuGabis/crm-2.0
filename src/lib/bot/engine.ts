@@ -343,13 +343,39 @@ const stageByName = (stages: any[], name: string) =>
 
 /**
  * Escolhe o FUNIL DE LEADS certo — o contato pode ter card em vários funis.
- * 1) por nome configurado; 2) senão, o funil que mais contém as etapas esperadas
- * (ex.: QUENTE/NOVO LEAD); 3) fallback no primeiro. Evita mexer no funil errado.
+ *
+ * 🔴 **O comentário desta função dizia "Evita mexer no funil errado", e era o
+ * fallback dela que fazia mexer no funil errado.** Medido em 2026-09-08: o fluxo
+ * `triagem-secretaria` pede o funil "Controle de Leads", que NÃO EXISTIA; a
+ * heurística de etapa casou "quente" com **"Perdido Quente"** do Comercial, e o
+ * último recurso era `pipelines[0]`, também o Comercial. Resultado: **365 cards
+ * do bot da Secretaria dentro do funil do time comercial**, com donos que nem
+ * podem ver aquele funil (a Jenifer era dona de 144).
+ *
+ * Agora: nome configurado que não resolve **devolve `null`** e o chamador
+ * desiste, registrando o motivo. Um nome errado na configuração passa a ser um
+ * erro visível no log em vez de duas semanas de leads arquivados no lugar errado.
+ *
+ * ⚠️ A adivinhação por etapa e o `pipelines[0]` continuam, mas SÓ quando nenhum
+ * nome foi configurado — aí não há intenção declarada a respeitar e um palpite é
+ * melhor que não criar o card. O que não pode existir é palpite CONTRA uma
+ * intenção declarada.
  */
-function resolvePipeline(pipelines: any[], allStages: any[], name: string | undefined, hints: string[]) {
+function resolvePipeline(
+  pipelines: any[],
+  allStages: any[],
+  name: string | undefined,
+  hints: string[],
+) {
   if (name) {
     const byName = pipelines.find((p: any) => normalize(p.name).includes(normalize(name)));
     if (byName) return byName;
+    // Intenção declarada que não existe: NÃO adivinha. Ver o bloco acima.
+    console.warn(
+      `[bot] funil "${name}" não existe nesta empresa — card não criado. ` +
+        `Crie o funil com esse nome ou corrija o fluxo (nenhum palpite foi feito).`,
+    );
+    return null;
   }
   let best: any = null;
   let bestScore = -1;
@@ -388,6 +414,9 @@ async function ensureCard(
   const { pipelines, allStages } = await loadPipelines(ctx);
   if (!pipelines.length) return;
   const pick = resolvePipeline(pipelines, allStages, node.pipeline, [node.stage]);
+  // `null` = o funil configurado não existe. `resolvePipeline` já registrou o
+  // motivo; criar o card em outro funil é justamente o defeito que se corrige.
+  if (!pick) return;
   const stages = stagesOf(allStages, pick.id);
   if (!stages.length) return;
 
@@ -422,6 +451,7 @@ async function syncCard(
   const { pipelines, allStages } = await loadPipelines(ctx);
   if (!pipelines.length) return;
   const pick = resolvePipeline(pipelines, allStages, node.pipeline, Object.values(node.stageMap));
+  if (!pick) return;
   const stages = stagesOf(allStages, pick.id);
   if (!stages.length) return;
 
