@@ -5555,3 +5555,171 @@ select left(body, 90) as evento, count(*)
         or body ilike '%esperava%sem resposta%')
  group by 1 order by 2 desc;
 ```
+
+## 🔴 A devolução por espera: quatro defeitos em 11 minutos (2026-09-08)
+
+A `202609081310` fez a devolução por espera (28/08) **rodar pela primeira vez**.
+Ela nunca havia rodado, então nenhum dos defeitos dela tinha aparecido — e todos
+apareceram juntos, em produção, entre **13:08 e 13:19: 150 eventos, 13
+conversas, um ciclo POR MINUTO**.
+
+⚠️ **Lição de método que vale mais que as quatro correções:** consertar algo que
+nunca executou é *ligar código novo*, não corrigir código existente. A
+`202609081310` foi tratada como conserto e mereceu o cuidado de estreia — canário,
+teto, ou religar num horário de baixo volume. O laço foi estancado à mão zerando
+`departments.devolver_apos_min` (0 = desligado no código), que é a válvula.
+
+### 1) Laço infinito
+
+Reatribuir **não faz o cliente ser respondido**. No tique seguinte a conversa
+continuava parada, e ela devolvia outra vez. O fio virava uma escada:
+
+```
+Devolvida à fila · esperava 676 min   → Atribuída a Jenifer
+Devolvida à fila · esperava 678 min   → Atribuída a Beatriz
+Devolvida à fila · esperava 679 min   → Atribuída a Daniel
+```
+
+⚠️ **A causa é a devolução não ter MEMÓRIA.** O `excluir` (que impede reescolher
+quem não respondeu) foi desenhado contra a churn e não a impede: a conversa
+apenas passa a circular entre pessoas diferentes.
+
+Correção: `conversations.devolvida_em`. `devolvivel()` exige que o CLIENTE tenha
+escrito **depois** do último carimbo — **uma devolução por mensagem nova do
+cliente**, não uma por minuto. A repetição passa a estar amarrada a um evento
+real do mundo, não ao relógio.
+
+### 2) Desfazia TRANSFERÊNCIA HUMANA (o pior)
+
+Medido: uma conversa transferida à mão de Jenifer para **Paulo Lopes** — que é de
+**outro setor e outro número** — foi arrancada dele e jogada de volta no rodízio
+da Secretaria, passando por Jenifer, Daniel e Beatriz.
+
+⚠️ O princípio já estava escrito neste repositório, na **0090** ("decisão humana
+não se desfaz"), e simplesmente não havia sido aplicado aqui.
+
+Regra nova, e é a que resolve de raiz: **o rodízio só retoma o que o rodízio
+deu.** `conversations.assigned_by` guarda o `auth.uid()` de quem trocou o
+responsável — **NULL = sistema** (webhook, bot, rodízio, varredura, cron: nenhum
+tem sessão). `assigned_by` não nulo → a devolução não toca.
+
+- ⚠️ **GATILHO** (`private.marca_quem_atribuiu`, BEFORE UPDATE), não um `set` em
+  cada caminho: são OITO caminhos que mudam `assigned_to`. É a lição da
+  202608281530 — consertar um por um deixa de fora o próximo que alguém criar.
+- ⚠️ **Decidir por `assign_reason` (texto) foi rejeitado**: bastaria alguém
+  escrever um motivo novo para a devolução voltar a atropelar transferência
+  humana, em silêncio.
+- Transferência humana também **limpa `devolvida_em`**: responsável novo por
+  decisão de pessoa é episódio novo.
+
+### 3) O tempo reportado era ficção — nos DOIS sentidos
+
+A âncora era o **PRIMEIRO** contato dentro de uma janela de **7 dias**. Medido:
+
+| reportado | real | o que aconteceu |
+|---|---|---|
+| 688 min | 137 min | inflou: somou desde a primeira mensagem da semana |
+| 480 min | 135 min | idem |
+| **0 min** | **3.301 min** | **apagou**: a mensagem do cliente saiu da janela |
+
+⚠️ Ou seja: o número dependia de **quando se olhava**, não do atendimento.
+
+⚠️ **E o erro de origem foi meu raciocínio de reuso.** Eu escrevi na
+`202609081310` que reusar a definição do SLA evitaria divergência. Mas as duas
+perguntas são **genuinamente diferentes**: o SLA (0079) mede *capacidade de
+resposta a um atendimento novo* (primeira entrada → primeira resposta); a
+devolução mede *"a bola está com a gente AGORA, e há quanto tempo"*. Forçar uma
+definição só foi o que produziu este defeito. **Reuso é bom quando a PERGUNTA é a
+mesma — não quando só o vocabulário é.**
+
+`public.conversas_paradas` ancora na **última mensagem do cliente**, e só quando
+nenhuma resposta humana veio depois dela. Sem janela na âncora (era ela que
+produzia o zero). Continua em minutos ÚTEIS pela mesma `private.business_minutes`
+— isso sim é a mesma pergunta.
+
+### 4) Devolvia conversa JÁ RESPONDIDA
+
+Dois casos: última resposta humana **13:16** contra última mensagem do cliente
+**10:35**. A regra do Gabriel é explícita — *só redistribuir se o atendente não
+responder o contato* — e a âncora errada violava exatamente isso. Resolvido pela
+mesma correção do item 3.
+
+### O teto: um dia útil
+
+⚠️ Com as regras novas, a primeira execução devolveria **24 conversas, e 19
+esperavam mais de um dia útil** (a mais velha de **21/08**). Isso é BACKLOG, não
+"o atendente não está respondendo agora": reatribuir não resolve, só move um
+abandono entre pessoas e enche o fio.
+
+`DEVOLVER_TETO_MIN = 660` (8h–19h de um dia). Acima disso o rodízio não mexe — o
+instrumento certo para backlog é a aba Atendimento (0079) e a fila do setor, que
+MOSTRAM o problema; o rodízio não avisa ninguém, só reatribui. Com o teto, a
+primeira execução mexe em 5 em vez de 24.
+
+### A hora no evento do fio
+
+Pedido do Gabriel. O dado **sempre existiu** em `message.at` e só não era
+desenhado — `PipelineEvent` mostrava apenas o `body`.
+
+⚠️ Não é enfeite: sem a hora, uma pilha de "Atribuída a X · Devolvida · Atribuída
+a Y" é ilegível — não se distingue histórico normal de roteamento de um ciclo por
+minuto. **Foi exatamente o que escondeu este laço** até alguém abrir o
+`created_at` no banco. A data aparece só quando o evento não é de hoje.
+
+### Duas fases de migração, e por quê
+
+Neste projeto **o código vai ao ar ANTES da migração**. Então:
+
+| migração | o que faz | quando |
+|---|---|---|
+| `202609081345` | colunas, gatilho, retroativo, `conversas_paradas` | **antes** do merge (nada a chama ainda) |
+| `202609081346` | remove `conversas_esperando` e **religa** `devolver_apos_min = 15` | **só depois** do merge |
+
+⚠️ Aplicar a `202609081346` antes do merge **reintroduz o laço**, porque o código
+no ar ainda é o defeituoso. E o **nome novo** (`conversas_paradas`) não é estética:
+`create or replace` não pode trocar o tipo de retorno (5 → 8 colunas, daria
+`42P13`), e `drop` derrubaria a função que o código no ar ainda chama. Com nomes
+diferentes os dois mundos coexistem.
+
+### `npm run test:rodizio` — 38 asserções
+
+`devolvivel()` é função pura, exportada só para ter teste: as quatro regras são
+invisíveis em revisão de código e o estrago aparece no fio do cliente, não num
+erro. Cada caso escreve um defeito REAL como regressão — inclusive o empate exato
+de carimbos (que não pode virar brecha para o laço) e o `espera_util_min` vindo
+como **string** do PostgREST.
+
+### 5) Quem NÃO passou pelo bot não é distribuído
+
+Regra do Gabriel, no mesmo dia: *"temos que validar o contexto — o aluno passou
+pelo bot? Se não passou, ele não deve ser distribuído mesmo."*
+
+O rodízio existe para o lead que o bot TRIOU (nome, e-mail, assunto). Conversa
+aberta pelo próprio CRM ("Nova conversa"), contato de antes da integração ou
+abordagem nossa não são lead de fila — e distribuí-los põe na caixa de alguém
+uma conversa sem contexto nenhum, e ainda consome a vez daquele atendente no
+rodízio para o lead seguinte.
+
+⚠️ **Medido: das 299 conversas abertas, 135 (45%) NUNCA passaram pelo bot** — e
+77 delas sem o cliente ter escrito uma linha. Não era caso de borda.
+
+⚠️ **Dois sinais, unidos por OR, porque nenhum sozinho basta:**
+- `bot_sessions` é **apagada** quando uma conversa finalizada reabre (o webhook a
+  zera para o bot triar de novo), então a ausência dela NÃO prova que o bot nunca
+  falou;
+- mensagem `automated` é durável, mas uma sessão recém-criada pode existir antes
+  da primeira palavra do bot.
+
+Medidos neste banco, os dois concordaram em **164 de 164** conversas (zero
+divergência nos dois sentidos). O OR é a rede para as bordas acima, não
+desconfiança de um deles.
+
+Vale nos DOIS caminhos — `filaProntaDoSetor` (varredura + botão do admin) e
+`devolvivel` (devolução). Na devolução não muda nenhum caso hoje (6 antes, 6
+depois), porque o que o sistema atribui já vem do bot; está lá como **garantia**,
+já que a própria devolução põe conversa na fila e bastaria um caminho novo marcar
+a flag para conversa sem contexto começar a circular.
+
+⏳ `thread.tsx` continua com **1 erro de lint** pré-existente
+(`react-hooks/immutability`, agora ~linha 1671 por causa das linhas que
+acrescentei), anterior a esta mudança.

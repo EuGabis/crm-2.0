@@ -19,7 +19,7 @@
  *
  * Roda direto no Node 24 (`npm run test:rodizio`), sem runner de teste.
  */
-import { distribuirFilaDoSetor, PRESENCE_MS } from "../src/lib/leads/distribution.ts";
+import { distribuirFilaDoSetor, devolvivel, PRESENCE_MS } from "../src/lib/leads/distribution.ts";
 
 let ok = 0;
 let falhas = 0;
@@ -116,7 +116,7 @@ const offline = vistoHa(60);
 
 /** Cenário base: 1 setor com rodízio, 1 número, 2 atendentes online. */
 function cenario(over = {}) {
-  return {
+  const base = {
     departments: [
       {
         id: "dep1",
@@ -134,11 +134,24 @@ function cenario(over = {}) {
     ],
     conversations: [],
     bot_sessions: [],
+    messages: [],
     pipelines: [{ id: "p1", location_id: "loc1", name: "Controle de Leads", position: 0 }],
     stages: [{ id: "s1", pipeline_id: "p1", name: "Novo Lead" }],
     opportunities: [],
     ...over,
   };
+  /*
+   * Por padrao toda conversa da fila JA passou pelo bot com a triagem concluida
+   * — que e o caso normal: e o no `distribute`, no FIM da triagem, que poe o
+   * lead na fila. Quem quiser testar o contrario passa `bot_sessions` explicito.
+   */
+  if (!over.bot_sessions) {
+    base.bot_sessions = base.conversations.map((c) => ({
+      conversation_id: c.id,
+      status: "concluido",
+    }));
+  }
+  return base;
 }
 
 const naFila = (id, extra = {}) => ({
@@ -228,10 +241,30 @@ console.log("\nRodizio - a fila do setor tem saida\n");
   });
 }
 
-/* 5. Sem sessão de bot nenhuma -> distribui (número sem fluxo). */
+/* 5. 🔴 NUNCA passou pelo bot -> NAO distribui (regra do Gabriel).
+ *    Sem sessao E sem mensagem automatizada = conversa aberta pelo CRM, contato
+ *    de antes da integracao ou abordagem nossa. Nao e lead de fila, e distribuir
+ *    poria na caixa de alguem uma conversa sem contexto nenhum. */
 {
-  const db = fakeDb(cenario({ conversations: [naFila("k1")] }));
-  eq("sem sessao de bot -> distribui", await distribuirFilaDoSetor(db, "loc1"), {
+  const db = fakeDb(cenario({ conversations: [naFila("k1")], bot_sessions: [] }));
+  eq("nunca passou pelo bot -> NAO distribui", await distribuirFilaDoSetor(db, "loc1"), {
+    distribuidas: 0,
+    naFila: 1,
+  });
+  eq("e nao atribui a ninguem", db.atribuicoes().length, 0);
+}
+
+/* 5b. Sessao APAGADA (conversa finalizada reabriu e o webhook zerou), mas o bot
+ *     falou: a mensagem automatizada e a prova duravel -> distribui. */
+{
+  const db = fakeDb(
+    cenario({
+      conversations: [naFila("k1")],
+      bot_sessions: [],
+      messages: [{ conversation_id: "k1", direction: "out", automated: true }],
+    }),
+  );
+  eq("sessao apagada mas o bot falou -> distribui", await distribuirFilaDoSetor(db, "loc1"), {
     distribuidas: 1,
     naFila: 0,
   });
@@ -396,6 +429,107 @@ console.log("\nRodizio - a fila do setor tem saida\n");
   });
   eq("e nenhuma escrita", db.escritas.length, 0);
 }
+
+/* ------------------------------------------------------------------ *
+ * devolvivel() - as quatro regras da devolucao por espera
+ *
+ * Cada caso abaixo escreve como REGRESSAO um defeito que aconteceu em producao
+ * em 2026-09-08, entre 13:08 e 13:19: 150 eventos, 13 conversas, 1 ciclo/minuto.
+ * ------------------------------------------------------------------ */
+console.log("\ndevolvivel() - o que o rodizio pode retomar\n");
+
+const CANAIS = ["ch1"];
+const linha = (over = {}) => ({
+  conversation_id: "c1",
+  contact_id: "ct1",
+  assigned_to: "ana",
+  assigned_by: null, // null = o SISTEMA atribuiu
+  channel_id: "ch1",
+  devolvida_em: null,
+  ultima_do_cliente: "2026-09-08T13:00:00Z",
+  espera_util_min: 30,
+  passou_pelo_bot: true,
+  ...over,
+});
+
+eq("sistema atribuiu e ninguem respondeu -> devolve", devolvivel(linha(), CANAIS), true);
+
+// 1) LACO: devolvida agora e o cliente nao escreveu depois -> nao devolve de novo.
+eq(
+  "ja devolvida e cliente nao escreveu depois -> NAO (era o laco)",
+  devolvivel(linha({ devolvida_em: "2026-09-08T13:05:00Z" }), CANAIS),
+  false,
+);
+eq(
+  "cliente escreveu DEPOIS da devolucao -> devolve outra vez",
+  devolvivel(
+    linha({ devolvida_em: "2026-09-08T13:05:00Z", ultima_do_cliente: "2026-09-08T13:40:00Z" }),
+    CANAIS,
+  ),
+  true,
+);
+eq(
+  "devolucao e mensagem no MESMO instante -> NAO (sem brecha para o laco)",
+  devolvivel(
+    linha({ devolvida_em: "2026-09-08T13:00:00Z", ultima_do_cliente: "2026-09-08T13:00:00Z" }),
+    CANAIS,
+  ),
+  false,
+);
+eq(
+  "devolvida antes e sem data do cliente -> NAO (lado seguro)",
+  devolvivel(linha({ devolvida_em: "2026-09-08T13:05:00Z", ultima_do_cliente: null }), CANAIS),
+  false,
+);
+
+// 2) DECISAO HUMANA NAO SE DESFAZ: transferida a mao para o Paulo Lopes (outro
+//    setor, outro numero) e arrancada dele pelo rodizio.
+eq(
+  "atribuida por uma PESSOA -> NAO (transferencia nao se desfaz)",
+  devolvivel(linha({ assigned_by: "jenifer" }), CANAIS),
+  false,
+);
+eq(
+  "atribuida pelo SISTEMA -> devolve",
+  devolvivel(linha({ assigned_by: null }), CANAIS),
+  true,
+);
+
+// 5) NUNCA passou pelo bot -> nao entra no rodizio (regra do Gabriel).
+eq(
+  "nao passou pelo bot -> NAO devolve",
+  devolvivel(linha({ passou_pelo_bot: false }), CANAIS),
+  false,
+);
+eq(
+  "passou_pelo_bot nulo -> NAO devolve (na duvida, nao mexer)",
+  devolvivel(linha({ passou_pelo_bot: null }), CANAIS),
+  false,
+);
+
+// 3) Sem dono e assunto da FILA, nao da devolucao.
+eq("sem dono -> NAO (e fila)", devolvivel(linha({ assigned_to: null }), CANAIS), false);
+
+// 4) Conversa de outro numero nao e deste rodizio.
+eq("canal de outro setor -> NAO", devolvivel(linha({ channel_id: "ch9" }), CANAIS), false);
+eq("conversa sem canal -> NAO", devolvivel(linha({ channel_id: null }), CANAIS), false);
+
+// 5) TETO: passado um dia util (660 min) e backlog, nao roteamento. Sem isto,
+//    religar a devolucao despejaria 19 conversas abandonadas (a mais velha de
+//    21/08) na caixa de quem esta online.
+eq("espera de 300 min -> devolve", devolvivel(linha({ espera_util_min: 300 }), CANAIS), true);
+eq("espera de 660 min (no teto) -> devolve", devolvivel(linha({ espera_util_min: 660 }), CANAIS), true);
+eq("espera de 661 min -> NAO (backlog)", devolvivel(linha({ espera_util_min: 661 }), CANAIS), false);
+eq(
+  "espera de 7868 min, caso real de 21/08 -> NAO",
+  devolvivel(linha({ espera_util_min: 7868 }), CANAIS),
+  false,
+);
+eq(
+  "numero vindo como STRING do PostgREST ainda respeita o teto",
+  devolvivel(linha({ espera_util_min: "7868" }), CANAIS),
+  false,
+);
 
 console.log(`\n${ok} assercoes ok, ${falhas} falha(s)\n`);
 process.exit(falhas ? 1 : 0);
