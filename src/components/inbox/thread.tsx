@@ -735,11 +735,33 @@ function MediaContent({ message, out }: { message: Message; out: boolean }) {
   );
 }
 
+/**
+ * Evento do fio (atribuição, transferência, finalização, devolução ao rodízio).
+ *
+ * ⚠️ **A HORA é parte do evento, não enfeite.** Ela sempre existiu em
+ * `message.at` e simplesmente não era desenhada — e sem ela uma pilha de
+ * "Atribuída a X · Devolvida à fila · Atribuída a Y" é ilegível: não se sabe se
+ * aconteceu ao longo do dia ou tudo no mesmo minuto. Foi exatamente o que
+ * esconderia o laço de 2026-09-08 (um ciclo POR MINUTO): a sequência parecia
+ * histórico normal de roteamento até alguém olhar o `created_at` no banco.
+ *
+ * A data entra só quando o evento NÃO é de hoje — no fio de hoje, "13:19" basta,
+ * e repetir "08/09" em cada selo rouba a largura do texto que importa.
+ */
 function PipelineEvent({ message }: { message: Message }) {
+  const quando = new Date(message.at);
+  const hoje = new Date();
+  const mesmoDia =
+    quando.getFullYear() === hoje.getFullYear() &&
+    quando.getMonth() === hoje.getMonth() &&
+    quando.getDate() === hoje.getDate();
   return (
     <div className="my-2 flex justify-center">
       <span className="flex items-center gap-1.5 rounded-full border bg-slate-50 px-3 py-1 text-[10px] text-slate-500">
         <CalendarDays className="size-3" />
+        <span className="font-medium tabular-nums text-slate-600">
+          {format(quando, mesmoDia ? "HH:mm" : "dd/MM HH:mm", { locale: ptBR })}
+        </span>
         {message.body}
       </span>
     </div>

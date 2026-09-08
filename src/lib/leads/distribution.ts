@@ -323,6 +323,123 @@ export { statusForStageName };
  * ------------------------------------------------------------------ */
 
 /**
+ * Teto da devolução, em minutos ÚTEIS: passado disto, o rodízio NÃO mexe.
+ *
+ * ⚠️ **Um dia útil (660 min = 8h–19h).** A devolução existe para o caso "o
+ * atendente não está respondendo AGORA" — reatribuir resolve isso. Uma conversa
+ * parada há três semanas é BACKLOG, e reatribuir não resolve nada: só move um
+ * abandono entre pessoas e enche o fio de eventos.
+ *
+ * O número saiu de medida, não de gosto: na primeira execução com as regras
+ * novas, 24 conversas seriam devolvidas e **19 delas esperavam mais de um dia
+ * útil** — algumas desde 21/08. Sem o teto, religar a devolução despejaria três
+ * semanas de abandono na caixa dos 3 atendentes online, de uma vez.
+ *
+ * Para o backlog o instrumento certo é a aba Atendimento (0079) e a fila do
+ * setor, que mostram o problema; o rodízio não avisa ninguém, só reatribui.
+ */
+const DEVOLVER_TETO_MIN = 660;
+
+/** Uma linha de `public.conversas_paradas` (202609081345). */
+export type LinhaParada = {
+  conversation_id: string;
+  contact_id: string;
+  assigned_to: string | null;
+  /** Quem atribuiu. **NULL = o sistema.** Preenchido pelo gatilho `marca_quem_atribuiu`. */
+  assigned_by: string | null;
+  channel_id: string | null;
+  /** Quando o rodízio devolveu esta conversa da última vez. */
+  devolvida_em: string | null;
+  /** Última mensagem DO CLIENTE — a âncora da espera. */
+  ultima_do_cliente: string | null;
+  espera_util_min: number | string;
+  /** O bot triou esta conversa? Ver a regra em `devolvivel`. */
+  passou_pelo_bot: boolean | null;
+};
+
+/**
+ * Esta conversa pode ser devolvida ao rodízio?
+ *
+ * 🔴 **Cada `return false` aqui é um defeito que ACONTECEU em produção**, em 11
+ * minutos do dia 2026-09-08 (150 eventos, 13 conversas). A função existe
+ * separada e exportada para que as quatro regras tenham teste: elas são
+ * invisíveis em revisão de código e o estrago só aparece no fio do cliente.
+ *
+ * A pergunta que a SQL já respondeu: "a bola está com a gente há mais de N
+ * minutos úteis?" A que sobra aqui é: "e mesmo assim, devo mexer?"
+ */
+export function devolvivel(l: LinhaParada, channelIds: string[]): boolean {
+  // Sem dono não é devolução: é fila, e quem cuida dela é `distribuirFilaDoSetor`.
+  // Devolver para a fila quem já está na fila seria um evento por tique, para
+  // sempre.
+  if (!l.assigned_to) return false;
+
+  // A conversa tem de ser deste setor. Sem isto o rodízio de um setor mexeria em
+  // conversa de outro número.
+  if (!l.channel_id || !channelIds.includes(l.channel_id)) return false;
+
+  /*
+   * 🔴 **O rodízio só retoma o que o RODÍZIO deu.**
+   *
+   * `assigned_by` não nulo = uma PESSOA pôs a conversa ali (transferiu, assumiu,
+   * supervisão puxou). Medido: uma conversa transferida à mão de Jenifer para
+   * Paulo Lopes — que é de outro setor e outro número — foi arrancada dele e
+   * jogada de volta no rodízio da Secretaria, e depois passou por Jenifer,
+   * Daniel e Beatriz, um por minuto.
+   *
+   * O princípio já estava escrito neste repositório, na 0090 ("decisão humana
+   * não se desfaz"); só não havia sido aplicado aqui. E é também a regra que o
+   * Gabriel deu: conversa transferida não volta para a fila, porque foi para
+   * outro atendente e geralmente para outro número.
+   */
+  if (l.assigned_by) return false;
+
+  /*
+   * 🔴 **Uma devolução por mensagem NOVA do cliente — não uma por minuto.**
+   *
+   * Era o laço: reatribuir não faz o cliente ser respondido, então a condição
+   * continuava verdadeira no tique seguinte. Exigir que o cliente tenha escrito
+   * DEPOIS do último carimbo dá à devolução a memória que faltava, e amarra a
+   * repetição a um evento real do mundo em vez de ao relógio.
+   *
+   * ⚠️ Sem `ultima_do_cliente` não há como comparar — e, na dúvida, NÃO mexer é
+   * o lado seguro: o custo é uma conversa parada continuar com quem está; o
+   * outro lado é o laço.
+   */
+  if (l.devolvida_em) {
+    if (!l.ultima_do_cliente) return false;
+    if (new Date(l.devolvida_em) >= new Date(l.ultima_do_cliente)) return false;
+  }
+
+  /*
+   * ⚠️ **Teto**: passado um dia útil, isto é backlog e não "o atendente não
+   * respondeu agora". Ver `DEVOLVER_TETO_MIN` — sem o teto, religar a devolução
+   * despejaria 19 conversas abandonadas (a mais velha de 21/08) na caixa de quem
+   * está online.
+   */
+  if (Number(l.espera_util_min) > DEVOLVER_TETO_MIN) return false;
+
+  /*
+   * 🔴 **Quem não passou pelo bot não entra no rodízio.** Regra do Gabriel: o
+   * rodízio existe para o lead que o bot triou (nome, e-mail, assunto).
+   * Conversa aberta pelo próprio CRM ("Nova conversa"), contato de antes da
+   * integração ou abordagem nossa não são lead de fila — e distribuí-los põe na
+   * caixa de alguém uma conversa sem contexto nenhum.
+   *
+   * Medido: das 299 conversas abertas, **135 (45%) nunca passaram pelo bot**, 77
+   * delas sem o cliente ter escrito uma linha.
+   *
+   * ⚠️ Hoje isto não muda nenhuma devolução (6 antes, 6 depois) — o que o
+   * sistema atribui já vem do bot. Está aqui como GARANTIA: a própria devolução
+   * põe conversa na fila, e sem a regra bastaria um caminho novo marcar a flag
+   * para conversa sem contexto começar a circular.
+   */
+  if (!l.passou_pelo_bot) return false;
+
+  return true;
+}
+
+/**
  * Devolve ao rodízio as conversas cujo aluno está esperando há tempo demais.
  *
  * ⚠️ **Existe porque respeitar presença não basta.** Relato de 2026-08-28: a
@@ -367,44 +484,35 @@ export async function devolverInativas(
     if (!channelIds.length) continue;
 
     /*
-     * 🔴 **Aqui era `sla_conversations`, e era um NO-OP.** A função tem a guarda
-     * de empresa na PRIMEIRA linha (`p_location not in (select
-     * private.user_locations())`, padrão 0049) e este código roda com a SERVICE
-     * ROLE, cujo `auth.uid()` é nulo. A guarda dava `return` e devolvia ZERO
-     * LINHAS, SEM ERRO — então nem o `if (error)` abaixo salvava.
+     * 🔴 **Duas trocas de função em um dia, e a segunda é a que importa.**
      *
-     * Medido em 2026-09-08: como `service_role`, 0 linhas; como admin real, 35
-     * clientes esperando e 6 presos com atendente. Em 11 dias no ar, ZERO
-     * eventos de devolução. O tique respondia 200 e `{devolvidas: 0}` — com cara
-     * de saúde, que é o que fez isso passar despercebido.
+     * Era `sla_conversations`, que é um NO-OP para a service role (a guarda de
+     * empresa devolve zero linhas, sem erro — em 11 dias no ar, zero devoluções
+     * e o tique respondendo `200 {"devolvidas":0}` com cara de saúde).
      *
-     * ⚠️ É a armadilha que este repositório já registrou duas vezes: "zero
-     * linhas por guarda de RLS não é prova de que a função funciona".
-     *
-     * `conversas_esperando` (202609081310) é o recorte mínimo desta pergunta,
-     * concedido SÓ à service_role, e reusa a MESMA `private.business_minutes`
-     * da 0079 — a devolução e o relatório de SLA continuam concordando sobre o
-     * que é "esperando".
+     * Passou a ser `conversas_esperando`, que fez a devolução RODAR — e aí os
+     * defeitos latentes dela apareceram em 11 minutos de produção. Agora é
+     * `conversas_paradas` (202609081345), que ancora na ÚLTIMA mensagem do
+     * cliente em vez da primeira de uma janela de 7 dias. A âncora antiga
+     * inflava (688 min reportados para quem esperava 137) e APAGAVA (0 min para
+     * quem esperava 3.301, porque a mensagem saiu da janela).
      */
-    const { data: linhas, error } = await db.rpc("conversas_esperando", {
+    const { data: linhas, error } = await db.rpc("conversas_paradas", {
       p_location: locationId,
       p_limite_min: limite,
     });
     if (error) {
-      // Antes da migração ser aplicada, a função não existe. Avisa e segue: a
-      // varredura da fila (que não depende de SQL novo) continua funcionando.
+      /*
+       * ⚠️ Neste projeto o CÓDIGO vai ao ar antes da migração, então esta função
+       * pode ainda não existir. Avisar e seguir é o certo: a varredura da fila
+       * não depende de SQL novo e continua trabalhando.
+       */
       console.warn("[rodizio] não deu para ler a espera:", error.message);
       continue;
     }
 
-    /*
-     * A função já filtra "sem resposta humana" e "espera >= limite"; aqui só
-     * sobra quem TEM dono. Quem está sem dono é assunto de
-     * `distribuirFilaDoSetor` — devolver para a fila quem já está na fila seria
-     * um evento de transferência por tique, para sempre.
-     */
-    const parados = (linhas ?? []).filter(
-      (l: any) => l.assigned_to && channelIds.includes(l.channel_id),
+    const parados = (linhas ?? []).filter((l: any) =>
+      devolvivel(l, channelIds),
     );
     if (!parados.length) continue;
 
@@ -435,6 +543,18 @@ export async function devolverInativas(
           assigned_to: null,
           awaiting_distribution: true,
           assigned_offline: false,
+          /*
+           * 🔴 **A MEMÓRIA que faltava, e sem ela nada mais importa.** Devolver
+           * não faz o cliente ser respondido: no tique seguinte a conversa
+           * continuava parada e ela devolvia de novo — 150 eventos em 11
+           * minutos, um ciclo por minuto, com o fio virando uma escada de
+           * "Devolvida · Atribuída a X · Devolvida · Atribuída a Y".
+           *
+           * Com o carimbo, `devolvivel()` exige que o CLIENTE tenha escrito
+           * depois dele: uma devolução por mensagem nova do cliente, não por
+           * minuto.
+           */
+          devolvida_em: new Date().toISOString(),
           // O gatilho `log_atribuicao` escreve o evento; aqui só vai o motivo.
           assign_reason: `devolvida: cliente esperava ${esperou} min sem resposta`,
         })
@@ -548,17 +668,45 @@ export async function filaProntaDoSetor(
     .limit(limite);
   if (!fila?.length) return { prontas: [], retidas: 0 };
 
+  const ids = fila.map((c: any) => c.id);
   const { data: sessoes } = await db
     .from("bot_sessions")
     .select("conversation_id, status")
-    .in("conversation_id", fila.map((c: any) => c.id));
+    .in("conversation_id", ids);
   const emTriagem = new Set(
     (sessoes ?? [])
       .filter((s: any) => s.status === "aguardando" || s.status === "ativo")
       .map((s: any) => s.conversation_id),
   );
+  const comSessao = new Set((sessoes ?? []).map((s: any) => s.conversation_id));
 
-  const prontas = fila.filter((c: any) => !emTriagem.has(c.id));
+  /*
+   * 🔴 **Quem não passou pelo bot NÃO é distribuído.** Regra do Gabriel: o
+   * rodízio existe para o lead que o bot triou. Conversa aberta pelo próprio CRM
+   * ("Nova conversa"), contato de antes da integração ou abordagem nossa não são
+   * lead de fila — distribuí-los põe na caixa de alguém uma conversa sem
+   * contexto nenhum, e ainda tira o atendente do rodízio para o lead seguinte.
+   *
+   * Medido: das 299 conversas abertas, **135 (45%) nunca passaram pelo bot** — 77
+   * delas sem o cliente ter escrito uma linha.
+   *
+   * ⚠️ **Dois sinais, unidos por OR, porque nenhum sozinho basta:** a sessão do
+   * bot é APAGADA quando uma conversa finalizada reabre (o webhook a zera para
+   * triar de novo), então a ausência dela não prova que o bot nunca falou; e uma
+   * sessão recém-criada pode existir antes da primeira palavra do bot. Medidos
+   * neste banco, os dois concordaram em 164 de 164 — o OR é a rede de borda.
+   */
+  const { data: automatizadas } = await db
+    .from("messages")
+    .select("conversation_id")
+    .in("conversation_id", ids)
+    .eq("direction", "out")
+    .eq("automated", true);
+  const botFalou = new Set((automatizadas ?? []).map((m: any) => m.conversation_id));
+
+  const prontas = fila.filter(
+    (c: any) => !emTriagem.has(c.id) && (comSessao.has(c.id) || botFalou.has(c.id)),
+  );
   return { prontas, retidas: fila.length - prontas.length };
 }
 
