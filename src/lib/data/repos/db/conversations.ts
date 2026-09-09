@@ -60,12 +60,33 @@ const mapConversation = (r: any): Conversation => ({
   botPaused: r.bot_paused ?? false,
   awaitingDistribution: r.awaiting_distribution ?? false,
   assignedOffline: r.assigned_offline ?? false,
-  contactFirstName: r.contact?.first_name ?? undefined,
-  contactLastName: r.contact?.last_name ?? undefined,
-  contactPhone: r.contact?.phone ?? undefined,
-  contactEmail: r.contact?.email ?? undefined,
-  contactTags: r.contact?.tags ?? undefined,
+  ...contatoDoJoin(r),
 });
+
+/**
+ * Os campos do contato vindos do join.
+ *
+ * 🔴 **Tolera o embed vir como ARRAY.** O PostgREST devolve objeto quando
+ * resolve a relação como muitos-para-um e ARRAY quando resolve como
+ * um-para-muitos — e a escolha depende das chaves estrangeiras que existem no
+ * schema, não do que a consulta pede. Com array, `r.contact?.first_name` é
+ * `undefined` e a lista inteira cai no literal "Contato", que foi o relatado em
+ * 2026-09-09: a MESMA conversa mostrando "Contato" na lista e o nome certo no
+ * painel (que busca por id, sem join).
+ *
+ * ⚠️ Ler as duas formas custa três linhas e vale mais que descobrir qual delas o
+ * PostgREST escolheu depois de uma mudança de schema.
+ */
+function contatoDoJoin(r: any) {
+  const c = Array.isArray(r?.contact) ? r.contact[0] : r?.contact;
+  return {
+    contactFirstName: c?.first_name ?? undefined,
+    contactLastName: c?.last_name ?? undefined,
+    contactPhone: c?.phone ?? undefined,
+    contactEmail: c?.email ?? undefined,
+    contactTags: c?.tags ?? undefined,
+  };
+}
 
 const mapMessage = (r: any): Message => ({
   id: r.id,
@@ -201,6 +222,24 @@ export const useConvStore = create<ConvState>((set, get) => ({
      * Nota interna apagada reaparecendo é bem menos grave do que a conversa
      * inteira esvaziar, e a exclusão local já filtra a store na hora.
      */
+    /*
+     * ⚠️ O erro destas consultas era DESCARTADO (`convs.data ?? []`), e o
+     * sintoma virava "a lista está estranha" sem nenhuma pista. É a mesma lição
+     * que a rota de Agentes já custou: erro sempre carrega `code` e `message`.
+     */
+    for (const [nome, r] of [
+      ["conversations", convs],
+      ["messages", msgs],
+      ["snippets", snips],
+      ["inbox_views", views],
+    ] as const) {
+      if (r.error) {
+        console.error(
+          `[inbox] falha ao carregar ${nome}: ${r.error.code ?? "?"} · ${r.error.message}` +
+            (r.error.details ? ` · ${r.error.details}` : "")
+        );
+      }
+    }
     const recentes = (msgs.data ?? []).map(mapMessage);
     set({
       loaded: true,
