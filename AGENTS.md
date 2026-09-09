@@ -5902,3 +5902,72 @@ consequência do modelo, não um ajuste que se possa fazer aqui.
 **Esta migração é independente do resto**: substitui uma função existente com a
 MESMA assinatura, e o cliente já a chamava. Pode ser aplicada antes ou depois do
 merge, sem ordem.
+
+## 🔴 Quem só vê as próprias conversas não conseguia CRIAR uma (2026-09-09)
+
+Relato: *"o Paulo criou um contato, mas não conseguiu abrir a conversa e nem foi
+atribuído o contato a ele."*
+
+⚠️ **O alcance identifica a causa sozinho:** Alberto, Paulo e Rogério são os
+ÚNICOS da empresa com `only_assigned = true`. Se o defeito atinge um deles e
+ninguém mais, o suspeito é a policy que depende exatamente desse campo.
+
+A policy de SELECT de `conversations` exige `assigned_to = auth.uid()` para quem
+não tem `sees_all`. E os três caminhos de criação — `open()`, `openForChannel()`
+e `openForContact()` — inseriam a conversa **sem responsável**:
+
+```ts
+// Não existe conversa → cria SEM responsável (a atribuição vem só com o template).
+const id = await conversationActions.open(contactId, "whatsapp", null);
+```
+
+Então: o INSERT **passa** (o `with check` só olha a empresa), o RETURNING é
+**filtrado pela RLS**, o `.select().single()` volta vazio, `open()` devolve
+`null` e a tela diz "Não foi possível abrir a conversa".
+
+⚠️ **E o pior fica para trás: a conversa EXISTE no banco, invisível para quem a
+criou.** Na segunda tentativa, a busca do topo (`select ... eq contact_id`)
+também não a enxerga, então o código tenta inserir de novo e bate no índice
+único da 0075. O usuário vê o mesmo erro para sempre, e o banco acumula
+conversas órfãs.
+
+⚠️ **O próprio `open()` já documentava a exigência e ninguém a aplicava:**
+
+> `assignTo` já nasce como responsável — necessário quando quem cria só vê o que
+> é dele (senão a RLS esconderia a conversa recém-criada e daria erro)
+
+O parâmetro existia, o comentário explicava o porquê, e os três chamadores
+passavam `null`. **Comentário não é garantia** — se a regra importa, ela precisa
+estar no caminho do código, não ao lado dele.
+
+### A correção, e por que ela é uma EXCEÇÃO e não uma volta atrás
+
+`donoObrigatorio(location)` devolve o `auth.uid()` **só quando
+`only_assigned = true`**; para quem vê tudo, devolve `null` e nada muda.
+
+Isso preserva a decisão anterior do Gabriel — *"a atribuição vem só com o
+template"*, que veio de uma queixa oposta (a conversa era atribuída a quem só
+queria abri-la). Reverter aquilo consertaria o Paulo e traria de volta o defeito
+antigo para os outros sete. O que faltava não era mudar a regra, era a exceção
+de **quem não consegue nem ver o que criou**.
+
+⚠️ `.eq("user_id", uid)` na leitura de `location_members` é obrigatório: a policy
+daquela tabela é por EMPRESA, então sem o filtro vêm todas as pessoas e o
+`maybeSingle()` some com a resposta. É a mesma armadilha que `escolherCanal`
+levou em 01/09.
+
+### ⏳ A segunda metade do relato continua sem confirmação
+
+*"nem foi atribuído o contato a ele"* — `dbContactActions.add` grava
+`owner_id: userId` e o `ensureSession()` roda antes, então no código isso está
+certo. Duas explicações restam, e **não deu para medir** (o conector do Supabase
+estava fora):
+
+1. o relato é sobre a CONVERSA, não sobre o contato — o que a correção acima
+   resolve;
+2. `contact.ownerId` está gravado e a tela mostra "—" porque
+   `team.find(u => u.id === contact.ownerId)` não achou a pessoa (a lista de
+   equipe ainda não carregou naquele render).
+
+A checagem é direta: abrir o contato e olhar "Proprietário" no cabeçalho; e no
+banco, `select owner_id from contacts where id = '<id>'`.
