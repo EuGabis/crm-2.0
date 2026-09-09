@@ -424,44 +424,83 @@ export const dbContactActions = {
     return data ? mapContact(data) : null;
   },
 
+  /**
+   * Marca a etiqueta nos contatos.
+   *
+   * 🔴 **Lia o contato no ARRAY DO STORE e falhava em SILÊNCIO.** A linha era
+   * `ids.map(id => contacts.find(...))`: se o contato não estivesse na store,
+   * `updates` ficava vazio, `Promise.all([])` devolvia `[]`, `[].some(...)` era
+   * falso — e a função retornava **true**. A tela dizia "Tag adicionada a 12
+   * contatos" sem uma única escrita.
+   *
+   * E a store deixou de ser carregada justamente onde isso mais se usa: a tela
+   * de Contatos virou consulta no servidor na 0078. É a MESMA armadilha que o
+   * `findByPhone` teve ("buscava o contato no array do store e por isso falhava
+   * em silêncio") e que o dedupe da importação teve antes dele.
+   *
+   * ⚠️ Agora as etiquetas atuais vêm do BANCO. A store continua sendo atualizada
+   * quando está carregada — mas não é mais a FONTE.
+   */
   async addTag(ids: string[], tag: string): Promise<boolean> {
-    const { contacts, setContacts } = useDbStore.getState();
+    const nome = tag.trim();
+    if (!ids.length || !nome) return false;
     const supabase = createClient();
-    const updates = ids
-      .map((id) => contacts.find((c) => c.id === id))
-      .filter((c): c is Contact => !!c && !c.tags.includes(tag));
+    const { data: rows, error } = await supabase.from("contacts").select("id, tags").in("id", ids);
+    if (error || !rows) return false;
+    const alvo = (rows as { id: string; tags: string[] | null }[]).filter(
+      (c) => !(c.tags ?? []).includes(nome)
+    );
+    if (!alvo.length) return true; // todos já tinham — não é falha
     const results = await Promise.all(
-      updates.map((c) =>
-        supabase.from("contacts").update({ tags: [...c.tags, tag] }).eq("id", c.id)
+      alvo.map((c) =>
+        supabase
+          .from("contacts")
+          .update({ tags: [...(c.tags ?? []), nome] })
+          .eq("id", c.id)
+          .select("id")
       )
     );
-    if (results.some((r) => r.error)) return false;
-    setContacts((prev) =>
-      prev.map((c) =>
-        ids.includes(c.id) && !c.tags.includes(tag) ? { ...c, tags: [...c.tags, tag] } : c
-      )
-    );
+    /*
+     * ⚠️ Confere as LINHAS devolvidas, e não só o `error`: UPDATE recusado pela
+     * RLS volta calado. Sem isto voltaríamos ao sucesso falso, por outra porta.
+     */
+    if (results.some((r) => r.error || !r.data?.length)) return false;
+    const marcados = new Set(alvo.map((c) => c.id));
+    useDbStore
+      .getState()
+      .setContacts((prev) =>
+        prev.map((c) => (marcados.has(c.id) ? { ...c, tags: [...c.tags, nome] } : c))
+      );
     return true;
   },
 
+  /** Tira a etiqueta dos contatos. Mesma correção do `addTag`: lê do BANCO. */
   async removeTag(ids: string[], tag: string): Promise<boolean> {
-    const { contacts, setContacts } = useDbStore.getState();
+    const nome = tag.trim();
+    if (!ids.length || !nome) return false;
     const supabase = createClient();
-    const updates = ids
-      .map((id) => contacts.find((c) => c.id === id))
-      .filter((c): c is Contact => !!c && c.tags.includes(tag));
+    const { data: rows, error } = await supabase.from("contacts").select("id, tags").in("id", ids);
+    if (error || !rows) return false;
+    const alvo = (rows as { id: string; tags: string[] | null }[]).filter((c) =>
+      (c.tags ?? []).includes(nome)
+    );
+    if (!alvo.length) return true; // nenhum tinha — não é falha
     const results = await Promise.all(
-      updates.map((c) =>
+      alvo.map((c) =>
         supabase
           .from("contacts")
-          .update({ tags: c.tags.filter((t) => t !== tag) })
+          .update({ tags: (c.tags ?? []).filter((t) => t !== nome) })
           .eq("id", c.id)
+          .select("id")
       )
     );
-    if (results.some((r) => r.error)) return false;
-    setContacts((prev) =>
-      prev.map((c) => (ids.includes(c.id) ? { ...c, tags: c.tags.filter((t) => t !== tag) } : c))
-    );
+    if (results.some((r) => r.error || !r.data?.length)) return false;
+    const mexidos = new Set(alvo.map((c) => c.id));
+    useDbStore
+      .getState()
+      .setContacts((prev) =>
+        prev.map((c) => (mexidos.has(c.id) ? { ...c, tags: c.tags.filter((t) => t !== nome) } : c))
+      );
     return true;
   },
 

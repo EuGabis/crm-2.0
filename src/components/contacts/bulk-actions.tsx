@@ -36,7 +36,13 @@ export function BulkActions({ ids, clear }: { ids: string[]; clear: () => void }
   const addTag = async () => {
     const tag = window.prompt("Nome da tag para adicionar:");
     if (!tag?.trim()) return;
-    const ok = await dbContactActions.addTag(ids, tag.trim().toLowerCase());
+        /*
+     * ⚠️ O `.toLowerCase()` SAIU daqui. Ele gravava a etiqueta em minúscula
+     * enquanto o catálogo (202609091600) tem "PAGO", "Agora" e "Aluno Eng" — a
+     * ação em massa criava uma segunda grafia da mesma etiqueta, fora da lista,
+     * e o filtro da caixa deixava de encontrá-la.
+     */
+    const ok = await dbContactActions.addTag(ids, tag.trim());
     if (ok) {
       void logBulk(`Adicionar tag "${tag.trim().toLowerCase()}"`, ids.length);
       toast.success(`Tag "${tag.trim()}" adicionada a ${ids.length} contato(s)`);
@@ -49,7 +55,7 @@ export function BulkActions({ ids, clear }: { ids: string[]; clear: () => void }
   const removeTag = async () => {
     const tag = window.prompt("Nome da tag para remover:");
     if (!tag?.trim()) return;
-    const ok = await dbContactActions.removeTag(ids, tag.trim().toLowerCase());
+    const ok = await dbContactActions.removeTag(ids, tag.trim());
     if (ok) {
       void logBulk(`Remover tag "${tag.trim().toLowerCase()}"`, ids.length);
       toast.success(`Tag "${tag.trim()}" removida de ${ids.length} contato(s)`);

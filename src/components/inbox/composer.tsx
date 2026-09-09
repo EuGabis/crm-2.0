@@ -56,6 +56,7 @@ import {
 import { whatsappActions } from "@/lib/data/repos/db/whatsapp";
 import { TemplatePicker } from "@/components/whatsapp/template-picker";
 import { dbContactActions, useDbContact } from "@/lib/data/repos/db/contacts";
+import { TagPicker } from "@/components/contacts/tag-picker";
 import { useMyMembership } from "@/lib/data/repos/db/team";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -222,7 +223,6 @@ export function Composer({ conversationId }: { conversationId: string }) {
   const [subject, setSubject] = useState("");
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [sending, setSending] = useState(false);
-  const [tagInput, setTagInput] = useState("");
   const [uploading, setUploading] = useState(false);
   // Imagem colada (Ctrl+V) aguardando confirmação — mostra a prévia e só envia
   // no botão Enviar (usando o texto como legenda).
@@ -566,15 +566,33 @@ export function Composer({ conversationId }: { conversationId: string }) {
     recorderRef.current?.stop();
   };
 
-  const addTag = async () => {
-    const t = tagInput.trim();
-    if (!t || !contactId) return;
-    const ok = await dbContactActions.addTag([contactId], t);
-    if (ok) {
-      toast.success(`Tag "${t}" adicionada ao contato`);
-      setTagInput("");
-    } else {
-      toast.error("Não foi possível adicionar a tag");
+  /**
+   * Aplica ao contato o CONJUNTO de etiquetas escolhido no seletor.
+   *
+   * ⚠️ Era um campo de texto livre ("Ex.: quente"), e digitar de memória é o que
+   * produzia "QUENTE", "Quente" e "quente" como três etiquetas diferentes —
+   * nenhuma delas confiável para filtrar depois. Agora a lista é o catálogo
+   * (202609091600) e o vendedor só escolhe.
+   */
+  const aplicarEtiquetas = async (proximas: string[]) => {
+    if (!contactId) return;
+    const atuais = contact?.tags ?? [];
+    const juntar = proximas.filter((t) => !atuais.includes(t));
+    const tirar = atuais.filter((t) => !proximas.includes(t));
+    // Em série: são um ou dois cliques por vez, e cada chamada relê o contato no
+    // banco — em paralelo, duas escritas partiriam do mesmo estado e uma
+    // sobrescreveria a outra.
+    for (const t of juntar) {
+      if (!(await dbContactActions.addTag([contactId], t))) {
+        toast.error(`Não foi possível marcar "${t}"`);
+        return;
+      }
+    }
+    for (const t of tirar) {
+      if (!(await dbContactActions.removeTag([contactId], t))) {
+        toast.error(`Não foi possível desmarcar "${t}"`);
+        return;
+      }
     }
   };
 
@@ -1004,19 +1022,14 @@ export function Composer({ conversationId }: { conversationId: string }) {
             >
               <Tag className="size-4" />
             </PopoverTrigger>
-            <PopoverContent align="start" className="w-60 p-3">
-              <Label className="text-xs">Adicionar tag ao contato</Label>
-              <div className="mt-1.5 flex gap-1.5">
-                <Input
-                  value={tagInput}
-                  onChange={(e) => setTagInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addTag()}
-                  placeholder="Ex.: quente"
-                  className="h-8 text-xs"
+            <PopoverContent align="start" className="w-64 p-3">
+              <Label className="text-xs">Etiquetas do contato</Label>
+              <div className="mt-1.5">
+                <TagPicker
+                  value={contact?.tags ?? []}
+                  onChange={(t) => void aplicarEtiquetas(t)}
+                  placeholder="Escolher etiquetas"
                 />
-                <Button size="sm" className="h-8 text-xs" onClick={addTag} disabled={!tagInput.trim() || !contactId}>
-                  Add
-                </Button>
               </div>
             </PopoverContent>
           </Popover>
