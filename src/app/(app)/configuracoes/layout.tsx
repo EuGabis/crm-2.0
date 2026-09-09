@@ -29,6 +29,7 @@ const GROUPS: { title: string; items: { label: string; href?: string }[] }[] = [
     items: [
       { label: "Objetos", href: "/configuracoes/objetos" },
       { label: "Campos personalizados", href: "/configuracoes/campos" },
+      { label: "Etiquetas", href: "/configuracoes/etiquetas" },
       { label: "Valores personalizados", href: "/configuracoes/valores" },
       { label: "Importar dados", href: "/configuracoes/importar" },
       { label: "Pontuação de leads", href: "/configuracoes/pontuacao" },

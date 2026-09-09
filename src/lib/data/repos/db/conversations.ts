@@ -15,6 +15,22 @@ import type {
 import { useDbStore } from "./contacts";
 import { useTeamStore } from "./team";
 
+/**
+ * O SELECT de `conversations` que alimenta a store — **sempre com o join do
+ * contato**.
+ *
+ * 🔴 Vira CONSTANTE porque a string solta já causou defeito: quatro leituras (as
+ * duas de `open()` e as duas de `openForChannel()`) faziam `.select("*")` e a
+ * conversa entrava na lista mostrando o literal "Contato", já que
+ * `mapConversation` lê `r.contact?.first_name`. Corrigido em 2026-09-09 — e com
+ * a string repetida em OITO lugares, a nona cópia esqueceria de novo.
+ *
+ * `tags` entrou junto, para o filtro por ETIQUETA da caixa de entrada: um campo
+ * a mais num join que já existe, em vez de baixar os 41 mil contatos para saber
+ * a etiqueta de vinte conversas.
+ */
+const CONV_SELECT = "*, contact:contacts(first_name, last_name, phone, email, tags)";
+
 export type { ConversationFilter } from "@/lib/data/types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -48,6 +64,7 @@ const mapConversation = (r: any): Conversation => ({
   contactLastName: r.contact?.last_name ?? undefined,
   contactPhone: r.contact?.phone ?? undefined,
   contactEmail: r.contact?.email ?? undefined,
+  contactTags: r.contact?.tags ?? undefined,
 });
 
 const mapMessage = (r: any): Message => ({
@@ -154,7 +171,7 @@ export const useConvStore = create<ConvState>((set, get) => ({
     // lista usa o preview desnormalizado (last_message_preview), sem depender
     // deste array.
     const [convs, msgs, snips, views] = await Promise.all([
-      supabase.from("conversations").select("*, contact:contacts(first_name, last_name, phone, email)"),
+      supabase.from("conversations").select(CONV_SELECT),
       supabase
         .from("messages")
         .select("*")
@@ -389,7 +406,7 @@ export async function syncInboxDelta(): Promise<number> {
   const touched = [...new Set(fresh.map((m) => m.conversationId))];
   const { data: convs } = await supabase
     .from("conversations")
-    .select("*, contact:contacts(first_name, last_name, phone, email)")
+    .select(CONV_SELECT)
     .in("id", touched);
   if (convs?.length) {
     const byId = new Map(convs.map((c: any) => [c.id, mapConversation(c)]));
@@ -412,7 +429,7 @@ export async function resyncConversations(): Promise<void> {
   const supabase = createClient();
   const { data, error } = await supabase
     .from("conversations")
-    .select("*, contact:contacts(first_name, last_name, phone, email)");
+    .select(CONV_SELECT);
   if (error || !data) return;
   const s = useConvStore.getState();
   const known = new Set(s.conversations.map((c) => c.id));
@@ -1377,7 +1394,7 @@ export const conversationActions = {
       // Consigo VER essa conversa? (a RLS decide: dono/admin/sees_all).
       const { data: full } = await supabase
         .from("conversations")
-        .select("*, contact:contacts(first_name, last_name, phone, email)")
+        .select(CONV_SELECT)
         .eq("id", existing.conv_id)
         .maybeSingle();
       if (full) return { id: addToStore(full) };
@@ -1423,7 +1440,7 @@ export const conversationActions = {
     // uma conversa duplicada. Confere no banco antes de inserir.
     const { data: found } = await supabase
       .from("conversations")
-      .select("*, contact:contacts(first_name, last_name, phone, email)")
+      .select(CONV_SELECT)
       .eq("contact_id", contactId)
       .eq("channel", channel)
       .order("created_at", { ascending: true })
@@ -1464,7 +1481,7 @@ export const conversationActions = {
        * `conv.contactFirstName || "Contato"` — sem o join o nome vira o literal
        * "Contato" até alguém recarregar a página. Relatado em 2026-09-09.
        */
-      .select("*, contact:contacts(first_name, last_name, phone, email)")
+      .select(CONV_SELECT)
       .single();
     if (error || !data) return null;
     const conv = mapConversation(data);
@@ -1487,7 +1504,7 @@ export const conversationActions = {
     const supabase = createClient();
     const { data: found } = await supabase
       .from("conversations")
-      .select("*, contact:contacts(first_name, last_name, phone, email)")
+      .select(CONV_SELECT)
       .eq("contact_id", contactId)
       .eq("channel_id", channelId)
       .order("created_at", { ascending: true })
@@ -1520,7 +1537,7 @@ export const conversationActions = {
        * `conv.contactFirstName || "Contato"` — sem o join o nome vira o literal
        * "Contato" até alguém recarregar a página. Relatado em 2026-09-09.
        */
-      .select("*, contact:contacts(first_name, last_name, phone, email)")
+      .select(CONV_SELECT)
       .single();
     if (error || !data) return null;
     return patchIn(data);

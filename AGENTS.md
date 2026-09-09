@@ -5998,3 +5998,86 @@ rodava.
 **Regra: toda leitura de `conversations` que entra na store leva o join do
 contato.** O fallback existe para a linha não sumir enquanto carrega — não para
 ser o estado final.
+
+## Etiquetas: um catálogo curado, e o silêncio que ele revelou (2026-09-09)
+
+Pedido do Gabriel: as etiquetas do CRM antigo passam a existir aqui, o vendedor
+marca nos contatos e **filtra a própria caixa de entrada** por elas.
+
+⚠️ **`contacts.tags` NÃO mudou, e é a decisão central.** O catálogo
+(`public.contact_tags`, migração 202609091600) é só a lista de nomes VÁLIDOS; o
+valor continua no `text[]` de sempre. Trocar por tabela de junção quebraria de
+uma vez as listas inteligentes, as campanhas, os formulários (`forms.tag`), a
+importação/exportação CSV e as ações em massa — todos leem aquele array.
+
+**Decisões do Gabriel:** só admin cria (RLS, não botão escondido); o filtro é
+por QUALQUER uma das marcadas (o uso principal é juntar irmãs, como os cinco
+"INTERESSADO ..."); e a semente traz as 21 dos prints **mais** o que já estava
+em uso nos contatos, para a lista nascer refletindo a realidade.
+
+- ⚠️ Único por **`lower(name)`**: é a linha que impede o catálogo de repetir o
+  problema que veio resolver. A grafia escolhida é preservada — os nomes
+  misturam caixa de propósito ("PAGO", "Agora", "Aluno Eng").
+- As absorvidas entram com `position 900`, depois das curadas, para o admin ver
+  agrupado o que veio de fora. Colisão de grafia é resolvida por
+  `on conflict do nothing`: a curada vence, e a de fora **não é apagada do
+  contato** — só não vira item da lista.
+- Excluir do catálogo **não desmarca ninguém**. Some a opção de marcar de novo;
+  quem já está marcado continua, e as listas inteligentes seguem funcionando.
+
+### 🔴 O que o catálogo revelou: `addTag`/`removeTag` mentiam
+
+Ao ligar o seletor à marcação, apareceu um defeito que **já estava em produção**:
+
+```ts
+const updates = ids.map((id) => contacts.find((c) => c.id === id))  // ← o STORE
+```
+
+Contato fora da store → `updates` vazio → `Promise.all([])` → `[]` →
+`[].some(...)` **falso** → a função devolve **`true`**. A tela dizia "Tag
+adicionada a 12 contatos" sem uma única escrita.
+
+⚠️ **E a store deixou de ser carregada justamente onde isso mais se usa**: a tela
+de Contatos virou consulta no servidor na 0078. Ou seja, a ação de etiqueta em
+massa de `/contatos` provavelmente não fazia nada há semanas, anunciando
+sucesso.
+
+É a MESMA armadilha do `findByPhone` ("buscava o contato no array do store e por
+isso falhava em silêncio") e do dedupe da importação antes dele. **Terceira
+vez.** Agora as etiquetas atuais vêm do BANCO, e o resultado confere as LINHAS
+devolvidas — porque UPDATE recusado pela RLS volta calado e traria o sucesso
+falso de volta por outra porta.
+
+⚠️ O `.toLowerCase()` da ação em massa também saiu: ele gravava a etiqueta em
+minúscula enquanto o catálogo tem "PAGO" — criava uma segunda grafia fora da
+lista, e o filtro deixava de encontrá-la.
+
+### `CONV_SELECT`: o join do contato numa constante
+
+A string `"*, contact:contacts(...)"` estava repetida em OITO leituras, e quatro
+delas a tinham perdido (ver a seção do literal "Contato"). Virou constante, com
+`tags` incluído — o filtro por etiqueta lê o array pelo join que já existe, em
+vez de baixar os 41 mil contatos para saber a etiqueta de vinte conversas.
+
+**A nona cópia esqueceria de novo.** Repetição de string em leitura crítica é
+defeito à espera de acontecer.
+
+### ⏳ O que ficou pendente
+
+- **Formulário do contato** ainda usa campo de texto livre para etiquetas (o
+  composer e a ação em massa já usam o catálogo). Sem regressão — só não ganhou
+  a lista ainda.
+- **Sem teste automatizado.** O caminho que mais mereceria é `addTag`/`removeTag`
+  com banco falso, para travar as duas regras que acabaram de ser corrigidas
+  (ler do BANCO, conferir as LINHAS). O padrão existe em `scripts/test-rodizio.mjs`.
+- Consulta para ver colisões de grafia que a semente deixou de fora:
+
+```sql
+select distinct t.nome
+  from public.contacts c, unnest(c.tags) as t(nome)
+ where btrim(t.nome) <> ''
+   and not exists (
+     select 1 from public.contact_tags ct
+      where ct.location_id = c.location_id and lower(ct.name) = lower(t.nome)
+   );
+```

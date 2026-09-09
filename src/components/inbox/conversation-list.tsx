@@ -52,6 +52,7 @@ function quando(iso: string): string {
 import { ChannelIcon } from "@/components/shared/channel-icon";
 import { SlaBadge } from "@/components/shared/sla-badge";
 import { contactName } from "@/lib/data/repos/contacts";
+import { TagPicker } from "@/components/contacts/tag-picker";
 import {
   conversationActions,
   useAutomatedConversationIds,
@@ -107,6 +108,13 @@ export function ConversationList({
   const [channelFilter, setChannelFilter] = useState<string | null>(null);
   // Filtro por RESPONSÁVEL (só admin): "__none__" = sem responsável.
   const [userFilter, setUserFilter] = useState<string | null>(null);
+  /*
+   * Filtro por ETIQUETA, e este é de TODO MUNDO — o pedido foi o vendedor
+   * filtrar a PRÓPRIA caixa. Vazio = sem filtro. Várias etiquetas mostram quem
+   * tem QUALQUER uma delas (decisão do Gabriel): o uso principal é juntar
+   * categorias irmãs, como os cinco "INTERESSADO ...".
+   */
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
   const { channels } = useWhatsappChannels();
   const all = useConversations(filter);
   const realtime = useRealtimeStatus();
@@ -132,14 +140,26 @@ export function ConversationList({
    * que fez `aplicarFiltros` existir na aba de Atendimento.
    */
   const aplicaRecorte = useCallback(
-    <T extends { channelId?: string | null; assignedTo?: string | null }>(lista: T[]): T[] => {
+    <
+      T extends {
+        channelId?: string | null;
+        assignedTo?: string | null;
+        contactTags?: string[] | null;
+      },
+    >(
+      lista: T[]
+    ): T[] => {
       let r = channelFilter ? lista.filter((c) => c.channelId === channelFilter) : lista;
       // "__none__" = sem responsável, que é diferente de "sem filtro".
       if (userFilter === "__none__") r = r.filter((c) => !c.assignedTo);
       else if (userFilter) r = r.filter((c) => c.assignedTo === userFilter);
+      // Etiqueta: QUALQUER uma das marcadas (união, não interseção).
+      if (tagFilter.length) {
+        r = r.filter((c) => (c.contactTags ?? []).some((t) => tagFilter.includes(t)));
+      }
       return r;
     },
-    [channelFilter, userFilter]
+    [channelFilter, userFilter, tagFilter]
   );
 
   // Não lidas que ainda pedem ação (finalizada/arquivada não conta) DENTRO do escopo
@@ -459,6 +479,19 @@ export function ConversationList({
           </DropdownMenu>
         </div>
       )}
+      {/* Etiquetas: para TODO MUNDO, não só admin — é o filtro que o vendedor
+          usa na própria caixa. */}
+      <div className="flex items-center gap-1.5 border-b px-2 py-1.5">
+        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+          Etiquetas
+        </span>
+        <TagPicker
+          value={tagFilter}
+          onChange={setTagFilter}
+          placeholder="Todas"
+          className="h-[26px] min-w-0 flex-1 text-[11px]"
+        />
+      </div>
       {selecting && (
         <div className="flex items-center gap-2 border-b bg-slate-50 px-3 py-1.5">
           <Checkbox

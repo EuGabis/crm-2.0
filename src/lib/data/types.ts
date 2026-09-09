@@ -155,6 +155,11 @@ export interface Conversation {
   contactLastName?: string;
   contactPhone?: string;
   contactEmail?: string;
+  /**
+   * Etiquetas do CONTATO, desnormalizadas na conversa pelo join do inbox.
+   * É o que permite filtrar a caixa por etiqueta sem baixar os 41 mil contatos.
+   */
+  contactTags?: string[];
 }
 
 /** Abas de filtro da caixa de entrada. */
