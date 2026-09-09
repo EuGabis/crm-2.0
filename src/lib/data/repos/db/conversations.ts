@@ -31,9 +31,59 @@ import { useTeamStore } from "./team";
  */
 const CONV_SELECT = "*, contact:contacts(first_name, last_name, phone, email, tags)";
 
+
 export type { ConversationFilter } from "@/lib/data/types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
+/**
+ * TODAS as conversas visíveis, em páginas.
+ *
+ * 🔴 Era `select(CONV_SELECT)` seco — e essa é a armadilha nº 1 deste
+ * repositório: **o PostgREST corta a resposta no "Max rows" do projeto (1000)
+ * sem erro e sem aviso.** A caixa de entrada recebia UMA PÁGINA e o app achava
+ * que era tudo. Foi exatamente assim que o nome do contato virou "Contato" em
+ * todas as conversas depois da importação (regra nº 7 do AGENTS.md); a lista de
+ * conversas passou pelo mesmo lugar sem ninguém notar, porque em 2026-08 a
+ * empresa tinha algumas centenas e o teto não era alcançado.
+ *
+ * ⚠️ E o corte não é só "faltam as últimas": **sem `order` explícito, QUAIS mil
+ * linhas voltam é indefinido.** É isso que torna o sintoma errático — a mesma
+ * conversa aparece numa sessão e falta na seguinte, e uma conversa recém
+ * atribuída pode nascer fora da página. Nenhum erro em lugar nenhum.
+ *
+ * ⚠️ O desempate por `id` é obrigatório, pelo mesmo motivo do
+ * `fetchAllContacts`: conversa criada em lote (o rodízio, a varredura da fila)
+ * sai com `last_message_at` repetido, e ordem instável entre páginas repete umas
+ * linhas e PULA outras — a linha pulada é uma conversa que desaparece da caixa.
+ *
+ * ⚠️ `last_message_at` é anulável (conversa aberta pelo CRM e ainda sem
+ * mensagem), e no Postgres NULL vem PRIMEIRO no `desc`. `nullsFirst: false`
+ * mantém essas no fim, onde a caixa já as coloca.
+ */
+async function fetchAllConversations(supabase: any) {
+  const PAGE = 1000;
+  const all: any[] = [];
+  for (let from = 0; ; ) {
+    const { data, error } = await supabase
+      .from("conversations")
+      .select(CONV_SELECT)
+      .order("last_message_at", { ascending: false, nullsFirst: false })
+      .order("id", { ascending: false })
+      .range(from, from + PAGE - 1);
+    // Erro no MEIO da paginação devolve erro, não meia lista: meia lista é pior,
+    // porque parece completa — e é justamente o que este pager vem consertar.
+    if (error) return { data: null, error };
+    const got = data?.length ?? 0;
+    all.push(...(data ?? []));
+    // Avança pelo que REALMENTE veio e para na página vazia: se o "Max rows" do
+    // projeto for menor que PAGE, comparar com PAGE pararia na 1ª página e o
+    // defeito voltaria calado.
+    if (got === 0) break;
+    from += got;
+  }
+  return { data: all, error: null };
+}
 
 export interface Snippet {
   id: string;
@@ -192,7 +242,7 @@ export const useConvStore = create<ConvState>((set, get) => ({
     // lista usa o preview desnormalizado (last_message_preview), sem depender
     // deste array.
     const [convs, msgs, snips, views] = await Promise.all([
-      supabase.from("conversations").select(CONV_SELECT),
+      fetchAllConversations(supabase),
       supabase
         .from("messages")
         .select("*")

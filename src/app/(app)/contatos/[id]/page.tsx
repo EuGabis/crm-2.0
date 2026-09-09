@@ -8,12 +8,12 @@ import { ptBR } from "date-fns/locale";
 import { ArrowLeft, MessageSquare, Pencil, X } from "lucide-react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ChannelIcon } from "@/components/shared/channel-icon";
 import { CustomFieldsInputs } from "@/components/contacts/custom-fields-inputs";
+import { TagBadges } from "@/components/contacts/tag-badges";
 import { contactName } from "@/lib/data/repos/contacts";
 import { dbContactActions, useDbContact, useDbTeam } from "@/lib/data/repos/db/contacts";
 import { conversationActions } from "@/lib/data/repos/db/conversations";
@@ -262,13 +262,7 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
                   </div>
                 ))}
               </dl>
-              <div className="mt-3 flex flex-wrap gap-1">
-                {contact.tags.map((t) => (
-                  <Badge key={t} variant="secondary" className="text-[10px]">
-                    {t}
-                  </Badge>
-                ))}
-              </div>
+              <TagBadges tags={contact.tags} className="mt-3 flex flex-wrap gap-1" />
             </>
           )}
         </div>

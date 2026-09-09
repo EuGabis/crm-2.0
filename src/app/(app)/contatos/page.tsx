@@ -13,6 +13,7 @@ import { ChannelIcon } from "@/components/shared/channel-icon";
 import { BulkActions } from "@/components/contacts/bulk-actions";
 import { ContactFormDialog } from "@/components/contacts/contact-form-dialog";
 import { ImportDialog, exportContactsCsv } from "@/components/contacts/import-export";
+import { TagBadges } from "@/components/contacts/tag-badges";
 import {
   BulkLogTab,
   CompaniesTab,
@@ -151,15 +152,7 @@ export default function ContatosPage() {
     {
       key: "tags",
       header: "Tags",
-      render: (c) => (
-        <div className="flex flex-wrap gap-1">
-          {c.tags.map((t) => (
-            <Badge key={t} variant="secondary" className="text-[10px]">
-              {t}
-            </Badge>
-          ))}
-        </div>
-      ),
+      render: (c) => <TagBadges tags={c.tags} />,
     },
   ];
 

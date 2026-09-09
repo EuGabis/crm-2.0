@@ -14,6 +14,7 @@
     "test:bot": "node scripts/test-bot-campos.mjs",
     "test:inbox": "node --import ./scripts/lib/alias-register.mjs scripts/test-inbox-store.mjs",
     "test:frio": "node --import ./scripts/lib/alias-register.mjs scripts/test-lead-frio.mjs",
+    "test:etiquetas": "node --import ./scripts/lib/alias-register.mjs scripts/test-etiquetas.mjs",
     "test:leads-xlsx": "node scripts/test-leads-xlsx.mjs",
     "test:phone": "node scripts/test-phone.mjs",
     "test:rodizio": "node --import ./scripts/lib/alias-register.mjs scripts/test-rodizio.mjs",
