@@ -119,9 +119,20 @@ const IDEMPOTENCIA = [
     exigeDropAntes: /^drop trigger if exists/,
   },
   {
-    // `create function` sem `or replace` estoura se a função já existe.
+    /*
+     * `create function` sem `or replace` estoura se a função já existe.
+     *
+     * ⚠️ **`drop function if exists` ANTES conta como idempotente** — mesmo
+     * tratamento que policy e trigger já tinham. E não é conveniência: quando a
+     * função muda o TIPO DE RETORNO (uma coluna nova em `returns table`), o
+     * `create or replace` é PROIBIDO pelo Postgres (`42P13 cannot change return
+     * type of existing function`), e o drop é o único caminho. Sem esta exceção
+     * a guarda obrigava o impossível, e o mais provável é que alguém a
+     * ignorasse — que é como uma checagem morre.
+     */
     casa: /^create function/,
-    msg: "use `create or replace function`",
+    msg: "use `create or replace function` (ou um `drop function if exists` antes)",
+    exigeDropAntes: /^drop function if exists/,
   },
   { casa: /^create view/, msg: "use `create or replace view`" },
   {

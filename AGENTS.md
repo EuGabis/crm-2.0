@@ -6326,3 +6326,59 @@ O texto do rodízio no diálogo dizia *"online (ativo nos últimos 5 min)"* escr
 à mão — o resto exato da divergência que `PRESENCE_MS` veio acabar no mesmo dia:
 a tela prometia uma janela e o rodízio usava outra (15 min). Agora sai da
 constante. **Número que descreve comportamento não se escreve duas vezes.**
+
+## A devolução vale só ATÉ A PRIMEIRA RESPOSTA (2026-09-09, migração 202609092030)
+
+Regra do Gabriel: *"se um contato manda mensagem é atribuído para o vendedor;
+ele não responde em 15 minutos, passa para outro. Agora se ele foi atribuído e o
+vendedor MANDOU MENSAGEM, ele fica para aquele vendedor e não volta para o
+rodízio."*
+
+🔴 **Isto revisa a decisão do mesmo dia, e para melhor.** A saída anterior para o
+comercial foi desligar a devolução inteira (`devolver_apos_min = 0`), porque ela
+arrancava do vendedor uma negociação em andamento. Com a régua da primeira
+resposta, o problema deixa de existir na raiz — e a devolução **volta a valer no
+comercial**, o que resolve o outro lado da queixa: o lead que cai num vendedor
+ausente e não é visto por mais ninguém.
+
+⚠️ **A pergunta mudou de "respondeu depois da última mensagem do cliente?" para
+"respondeu ALGUMA VEZ?".** A diferença é o caso do dia a dia: proposta enviada,
+o cliente responde três dias depois, o vendedor está em outro atendimento — com
+a régua antiga a conversa era tirada dele no meio da negociação.
+
+- ⚠️ **A regra mora em `devolvivel()`, não no `where` da SQL.** O contrato entre
+  as duas camadas já estava escrito: a SQL responde *"a bola está com a gente há
+  mais de N minutos úteis?"* e o TypeScript responde *"e mesmo assim, devo
+  mexer?"*. "Já respondeu alguma vez" é do segundo tipo — e lá ela ganha TESTE,
+  que é o que falta a uma condição escondida num `where`. A coluna
+  `ja_respondida` é devolvida e **não muda o volume de linhas**: conversa
+  respondida em que o cliente voltou a escrever já vinha na lista — era
+  justamente ela que era arrancada do vendedor.
+- ⚠️ **O campo é OPCIONAL no TypeScript.** O código vai ao ar antes da migração,
+  então até ela ser aplicada ele chega `undefined` — e `undefined` cai no
+  comportamento de hoje em vez de travar a devolução inteira. Está escrito como
+  teste.
+- Nota interna e resposta do BOT não contam como resposta (a SQL exclui
+  `automated` e `internal`), senão toda conversa pareceria atendida em segundos
+  pelo auto-responder.
+
+### `drop` + `create` foi seguro aqui — e não foi na 202609081345
+
+A coluna nova troca o tipo de retorno, e `create or replace` é proibido nesse
+caso (`42P13`). O que muda entre os dois casos:
+
+| | 202609081345 | esta |
+|---|---|---|
+| o que mudava | o COMPORTAMENTO (âncora errada) | uma coluna A MAIS |
+| código no ar | chamava a função e seria atropelado | lê por nome de campo, não percebe |
+| saída | nome novo, os dois coexistem | `drop` + `create` na mesma transação |
+
+⚠️ **A guarda de migração aprendeu isso**: `create function` prececido de
+`drop function if exists` deixou de ser erro (mesmo tratamento que policy e
+trigger já tinham). Não é conveniência — quando o tipo de retorno muda, o
+`create or replace` é PROIBIDO e o drop é o único caminho; a guarda estava
+obrigando o impossível, e checagem que obriga o impossível é checagem que alguém
+aprende a ignorar.
+
+⚠️ E como o `drop` recria os privilégios do zero, o par `revoke`/`grant` **tem**
+de ser repetido — aqui não é redundância.
