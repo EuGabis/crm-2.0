@@ -33,22 +33,32 @@ export function SessionManager() {
   const logout = async (reason: "idle" | "expired") => {
     if (done.current) return;
     done.current = true;
-    try {
-      /*
-       * ⚠️ Apaga a presença ANTES do signOut, e a ordem importa: depois do
-       * signOut não há mais sessão, e `clear_presence()` decide a linha por
-       * `auth.uid()` — a chamada não faria nada.
-       *
-       * Sem isto, `last_seen_at` ficava parado no último clique e a pessoa
-       * seguia "online" para o rodízio pela janela inteira. Pesa mais desde que
-       * a janela virou 15 min: o logout por inatividade do papel "user"
-       * acontece em 10 min, então havia 5 minutos em que o lead caía justamente
-       * em quem o CRM acabou de pôr para fora.
-       */
-      await createClient().rpc("clear_presence");
-    } catch {
-      // best-effort: a devolução por espera cobre o lead que caia nessa sobra.
-    }
+    /*
+     * 🔴 **Aqui havia uma chamada a `clear_presence()`, e ela QUEBRAVA o
+     * rodízio. Removida em 2026-09-09, um dia depois de entrar.**
+     *
+     * A intenção era boa: sair do CRM devia tirar a pessoa do rodízio na hora,
+     * em vez de deixá-la "online" pelo resto da janela. O erro foi COMO —
+     * `clear_presence()` grava `last_seen_at = NULL`, e **NULL já tinha
+     * dono**: a tela de Departamentos escreve literalmente "nunca acessou"
+     * quando o campo é nulo (`presenceInfo`), e `onlineOrdered` filtra com
+     * `.gte("last_seen_at", ...)`, que NULL nunca satisfaz.
+     *
+     * Ou seja, um único valor passou a significar três coisas incompatíveis:
+     * "nunca entrou", "saiu agora" e "invisível para o rodízio". O resultado
+     * medido em produção: atendente que trabalhou o dia inteiro aparecendo como
+     * "nunca acessou" e deixando de receber lead.
+     *
+     * ⚠️ **Sobrecarregar um valor que já tem significado é o mesmo erro que
+     * este repositório já registrou** ao ler `null` de canais de áudio como
+     * "está mono": ausência de dado não pode ser reaproveitada como estado.
+     *
+     * O que se perde ao remover: a pessoa deslogada por inatividade (10 min)
+     * continua elegível até `last_seen_at` envelhecer os 15 min de
+     * `PRESENCE_MS` — uma sobra de ~10 min. É MUITO menor que o estrago acima,
+     * e a devolução por espera cobre o lead que caia nela. Fechar essa sobra
+     * direito pede coluna PRÓPRIA (`logged_out_at`), não reciclar o NULL.
+     */
     try {
       // scope "local": só esta sessão/dispositivo — não derruba o mesmo usuário
       // logado no celular/outro navegador.

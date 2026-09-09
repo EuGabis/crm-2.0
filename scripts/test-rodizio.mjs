@@ -19,7 +19,12 @@
  *
  * Roda direto no Node 24 (`npm run test:rodizio`), sem runner de teste.
  */
-import { distribuirFilaDoSetor, devolvivel, PRESENCE_MS } from "../src/lib/leads/distribution.ts";
+import {
+  distribuirFilaDoSetor,
+  devolvivel,
+  limiteDoTique,
+  PRESENCE_MS,
+} from "../src/lib/leads/distribution.ts";
 
 let ok = 0;
 let falhas = 0;
@@ -530,6 +535,110 @@ eq(
   devolvivel(linha({ espera_util_min: "7868" }), CANAIS),
   false,
 );
+
+/* ------------------------------------------------------------------ *
+ * limiteDoTique() - o RITMO da fila (regra do Gabriel, 09/09)
+ *
+ * "o lead que estiver esperando mais tempo passa pra ele. Aguarda 7 minutos,
+ * se ninguem logar, passa mais 1 para quem estiver online. So na secretaria."
+ *
+ * Nasceu porque a varredura despejava a fila inteira em quem logou primeiro: a
+ * Beatriz entrou antes do Daniel e levou o acumulado da noite.
+ * ------------------------------------------------------------------ */
+console.log("\nlimiteDoTique() - o ritmo da fila\n");
+
+const T = new Date("2026-09-09T12:00:00Z").getTime();
+const haMin = (m) => new Date(T - m * 60 * 1000).toISOString();
+
+// Setor SEM intervalo: nada muda para os outros setores.
+eq("sem intervalo -> teto normal do tique", limiteDoTique({}, T), 25);
+eq("intervalo 0 -> teto normal", limiteDoTique({ intervalo_fila_min: 0 }, T), 25);
+eq("intervalo nulo -> teto normal", limiteDoTique({ intervalo_fila_min: null }, T), 25);
+
+// Secretaria: 7 minutos, UMA por vez.
+eq(
+  "com intervalo e nunca entregou -> libera 1",
+  limiteDoTique({ intervalo_fila_min: 7, ultima_da_fila_em: null }, T),
+  1,
+);
+eq(
+  "entregou ha 1 min -> ESPERA (era o despejo)",
+  limiteDoTique({ intervalo_fila_min: 7, ultima_da_fila_em: haMin(1) }, T),
+  0,
+);
+eq(
+  "entregou ha 6 min -> ainda espera",
+  limiteDoTique({ intervalo_fila_min: 7, ultima_da_fila_em: haMin(6) }, T),
+  0,
+);
+eq(
+  "entregou ha exatamente 7 min -> libera 1",
+  limiteDoTique({ intervalo_fila_min: 7, ultima_da_fila_em: haMin(7) }, T),
+  1,
+);
+eq(
+  "entregou ha 30 min -> libera 1 (nao acumula credito)",
+  limiteDoTique({ intervalo_fila_min: 7, ultima_da_fila_em: haMin(30) }, T),
+  1,
+);
+
+// PostgREST devolve numero como string.
+eq(
+  "intervalo vindo como STRING funciona",
+  limiteDoTique({ intervalo_fila_min: "7", ultima_da_fila_em: haMin(1) }, T),
+  0,
+);
+
+// Carimbo corrompido nao pode travar a fila para sempre.
+eq(
+  "data invalida -> libera (o lado seguro e entregar)",
+  limiteDoTique({ intervalo_fila_min: 7, ultima_da_fila_em: "nao-e-data" }, T),
+  1,
+);
+
+/* A varredura inteira, com o ritmo: entrega UMA e deixa o resto na fila. */
+{
+  const st = cenario({
+    conversations: [naFila("k1"), naFila("k2"), naFila("k3"), naFila("k4")],
+  });
+  st.departments[0].intervalo_fila_min = 7;
+  st.departments[0].ultima_da_fila_em = null;
+  const db = fakeDb(st);
+  const r = await distribuirFilaDoSetor(db, "loc1");
+  eq("setor com ritmo -> entrega 1 e deixa 3 na fila", r, { distribuidas: 1, naFila: 3 });
+  eq("e carimba a entrega para o proximo tique esperar",
+     typeof st.departments[0].ultima_da_fila_em, "string");
+}
+
+/* Segundo tique logo em seguida: nao entrega nada, e a fila continua contada. */
+{
+  const st = cenario({ conversations: [naFila("k1"), naFila("k2")] });
+  st.departments[0].intervalo_fila_min = 7;
+  st.departments[0].ultima_da_fila_em = new Date(Date.now() - 60 * 1000).toISOString();
+  const db = fakeDb(st);
+  eq("dentro do intervalo -> 0 entregues, fila inteira contada",
+     await distribuirFilaDoSetor(db, "loc1"), { distribuidas: 0, naFila: 2 });
+  eq("e nao atribui nada", db.atribuicoes().length, 0);
+}
+
+/* Ninguem online NAO pode reiniciar o relogio da espera. */
+{
+  const st = cenario({ conversations: [naFila("k1")] });
+  st.departments[0].intervalo_fila_min = 7;
+  st.departments[0].ultima_da_fila_em = null;
+  st.location_members.forEach((m) => (m.last_seen_at = offline));
+  const db = fakeDb(st);
+  await distribuirFilaDoSetor(db, "loc1");
+  eq("sem ninguem online, o carimbo NAO e gravado",
+     st.departments[0].ultima_da_fila_em, null);
+}
+
+/* Setor SEM intervalo continua esvaziando a fila como antes. */
+{
+  const db = fakeDb(cenario({ conversations: [naFila("k1"), naFila("k2"), naFila("k3")] }));
+  eq("setor sem ritmo -> distribui tudo (comportamento inalterado)",
+     await distribuirFilaDoSetor(db, "loc1"), { distribuidas: 3, naFila: 0 });
+}
 
 console.log(`\n${ok} assercoes ok, ${falhas} falha(s)\n`);
 process.exit(falhas ? 1 : 0);
