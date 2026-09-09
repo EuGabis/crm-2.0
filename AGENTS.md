@@ -6380,3 +6380,60 @@ mesmo tratamento que policy e trigger já tinham. Quando o tipo de retorno muda
 
 ⏳ **A planilha ainda não tem a aba por atendente** — `leads-xlsx.ts` continua com
 Resumo/Por dia/Por hora. Quem baixar hoje não leva o quadro novo.
+## "Abrir conversa" do Relatório abria uma CASCA (2026-09-09)
+
+Print: a aba trocou para Conversas, a lista à esquerda cheia — e à direita
+apenas o campo de digitação. Sem cabeçalho, sem fio, sem barra lateral do
+contato, e o composer pronto para escrever.
+
+🔴 **A causa é o relatório e a caixa NÃO lerem a mesma coisa**, e vale saber
+antes de mexer em qualquer um dos dois:
+
+| tela | fonte | alcance |
+|---|---|---|
+| caixa de entrada | store, via RLS de `conversations` (0074) | as MINHAS + a fila do setor (sem dono) |
+| Relatório, para supervisor | RPC `sector_conversations` | o setor INTEIRO, por cima da RLS, de propósito |
+
+`ConversationsReport` faz `if (isSupervisor && sectorConvs.length > 0) return
+sectorConvs.map(...)` — para supervisor, TODAS as linhas vêm de lá. Então o
+relatório lista conversas que a store nunca teve, e `onOpen(id)` entregava à
+página um id que `useConversation` não resolve.
+
+⚠️ **E o painel era gated por `selectedId`, não pela CONVERSA:**
+
+```tsx
+{selectedId ? (<><Thread .../><Composer .../></>) : (<>Selecione uma conversa</>)}
+```
+
+Com id não resolvido, `Thread` monta sem achar nada e o `Composer` monta
+inteiro — dava para **digitar numa conversa que a tela não conseguia mostrar**.
+A `ContactPanel` era a única gated por `selectedConversation`, e é por isso que
+ela sumia: o print mostra exatamente essa combinação.
+
+**Duas correções, e a segunda é a que importa:**
+
+1. `carregarConversa(id)` busca a conversa por id (com o `CONV_SELECT`, então
+   nome e etiquetas vêm junto) e a acrescenta à store. Resolve o caso do ADMIN e
+   o de `/conversas?c=<id>` colado numa aba nova antes de a store carregar.
+   ⚠️ Devolve **booleano**: "a RLS não deixa ler" e "a rede caiu" pedem condutas
+   diferentes, e um `void` silencioso devolveria a casca por outro caminho.
+   Uma tentativa por id (`useRef` com os já tentados) — sem isso, conversa que a
+   RLS esconde viraria uma consulta por render.
+2. O painel passou a ser gated por **`selectedConversation`**. Não resolvendo, a
+   tela **diz o motivo**: a conversa é de outro atendente, e o caminho é o botão
+   **Assumir** do próprio relatório (que já existe para supervisor desde a 0080).
+   "Selecione uma conversa" logo depois de clicar em "Abrir conversa" parece
+   defeito — e era.
+
+⚠️ Isto NÃO se conserta apertando `sector_conversations`: enxergar o setor
+inteiro no relatório é o propósito dela, e foi por essa mesma permissividade que
+o roteamento entre setores funciona (ver a seção da 202609041530, onde eu quase
+apertei o lado errado). O que faltava era a tela saber lidar com um id que ela
+tem permissão de LISTAR e não de ABRIR.
+
+⏳ Para supervisor de setor **colaborativo**, abrir a conversa de um colega
+continua exigindo assumir — é a RLS de `messages` da 0074, não esta tela. Se um
+dia a leitura tiver de abrir, muda a policy de SELECT, não este componente.
+
+⏳ `conversas/page.tsx` já tinha **2 erros de lint** (`react-hooks/set-state-in-effect`,
+linhas ~160 e ~270 na `main`) anteriores a esta mudança.
