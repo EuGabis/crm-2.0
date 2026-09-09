@@ -6081,3 +6081,53 @@ select distinct t.nome
       where ct.location_id = c.location_id and lower(ct.name) = lower(t.nome)
    );
 ```
+
+## Lead FRIO visível na caixa de entrada (2026-09-09)
+
+Pedido do Gabriel: *"se o lead não bater a pontuação configurada no bot, ele é
+classificado como frio. Pode cair para os vendedores, mas não é prioridade —
+então já deve ficar como frio e na caixa de entrada ficar visível que é um lead
+frio."*
+
+Sem migração: `bot_desfechos` (202609031955) já guarda `pontos`, `limiar` e
+`resultado` por conversa, e é lida por qualquer membro.
+
+### 🔴 A temperatura sai da ARITMÉTICA, não do texto
+
+O caminho óbvio era `resultado === "frio"`. Ele quebra por dois lados, e nenhum
+dos dois dá erro — só pinta a caixa errado:
+
+1. **"frio"/"quente" são CONFIGURÁVEIS.** Saem de `hotValue`/`coldValue` do nó
+   `score`, que se editam no editor de bot. Renomear "frio" para "morno"
+   apagaria o selo da tela sem ninguém relacionar as duas coisas.
+2. **O fluxo da SECRETARIA grava o ASSUNTO em `resultado`** ("docs", "outros").
+   Comparar texto ali classificaria assunto como temperatura.
+
+`temperaturaDe()` usa `pontos < limiar`, e devolve `null` quando qualquer um dos
+dois é nulo — que é exatamente como a secretaria grava, de propósito ("NULL diz
+não pontuou; um zero diria pontuou zero, que é outra coisa").
+
+⚠️ **Zero não é ausência.** Um lead que pontuou 0 contra limiar 9 é frio DE
+VERDADE; se `pontos: 0` caísse no ramo do nulo, o pior lead da base ficaria sem
+selo — o contrário do que o selo existe para fazer. Está escrito como teste.
+
+### Decisões de tela
+
+- **Só o FRIO ganha selo.** Marcar o quente também faria toda linha ter um selo,
+  e aí nenhuma se destaca. O selo existe para dizer "este pode esperar".
+- **A lista NÃO é reordenada.** Prioridade é decisão de quem atende; mexer na
+  ordem esconderia conversa de quem a procura onde deixou.
+- Conversa **sem nota não entra em nenhum dos dois recortes** do filtro — não é
+  fria nem quente, é "o bot não pontuou". Nas conversas da secretaria o selo
+  simplesmente não aparece.
+- O filtro entra pelo `aplicaRecorte`, então o selo de "Não lidos" e as
+  contagens de pilha respeitam a temperatura de graça.
+- ⚠️ O mapa fica com o desfecho **VIGENTE**: a tabela é append-only e conversa
+  reaberta passa pela triagem de novo. A consulta ordena por `created_at desc` e
+  o primeiro por conversa vence — senão o selo viria de um atendimento
+  encerrado semanas atrás.
+
+`npm run test:frio` — 17 asserções, incluindo o caso que resume a regra:
+`resultado` dizendo "quente" com a conta dizendo frio deve dar **FRIO**.
+
+⏳ Hoje **só o fluxo Comercial pontua**, então o selo só existe no número novo.

@@ -53,6 +53,7 @@ import { ChannelIcon } from "@/components/shared/channel-icon";
 import { SlaBadge } from "@/components/shared/sla-badge";
 import { contactName } from "@/lib/data/repos/contacts";
 import { TagPicker } from "@/components/contacts/tag-picker";
+import { temperaturaDe, useDesfechos } from "@/lib/data/repos/db/bot-desfechos";
 import {
   conversationActions,
   useAutomatedConversationIds,
@@ -115,6 +116,16 @@ export function ConversationList({
    * categorias irmãs, como os cinco "INTERESSADO ...".
    */
   const [tagFilter, setTagFilter] = useState<string[]>([]);
+  /*
+   * Temperatura do lead, do nó `score` do bot. null = sem filtro.
+   *
+   * ⚠️ Só o fluxo COMERCIAL pontua — o da secretaria decide por assunto e grava
+   * `pontos`/`limiar` nulos. Nas conversas da secretaria não há temperatura, e o
+   * selo simplesmente não aparece; chamá-las todas de quentes seria inventar uma
+   * nota que ninguém deu.
+   */
+  const [tempFilter, setTempFilter] = useState<"frio" | "quente" | null>(null);
+  const desfechos = useDesfechos();
   const { channels } = useWhatsappChannels();
   const all = useConversations(filter);
   const realtime = useRealtimeStatus();
@@ -145,6 +156,7 @@ export function ConversationList({
         channelId?: string | null;
         assignedTo?: string | null;
         contactTags?: string[] | null;
+        id?: string;
       },
     >(
       lista: T[]
@@ -157,9 +169,14 @@ export function ConversationList({
       if (tagFilter.length) {
         r = r.filter((c) => (c.contactTags ?? []).some((t) => tagFilter.includes(t)));
       }
+      // Temperatura: quem não tem nota fica de fora dos DOIS recortes — não é
+      // frio nem quente, é "o bot não pontuou".
+      if (tempFilter) {
+        r = r.filter((c) => (c.id ? temperaturaDe(desfechos.get(c.id)) : null) === tempFilter);
+      }
       return r;
     },
-    [channelFilter, userFilter, tagFilter]
+    [channelFilter, userFilter, tagFilter, tempFilter, desfechos]
   );
 
   // Não lidas que ainda pedem ação (finalizada/arquivada não conta) DENTRO do escopo
@@ -492,6 +509,29 @@ export function ConversationList({
           className="h-[26px] min-w-0 flex-1 text-[11px]"
         />
       </div>
+      {/* Temperatura. Três botões, sem menu: são poucos, a troca é comparativa,
+          e escondido num dropdown o vendedor esquece que o recorte existe. */}
+      <div className="flex items-center gap-1.5 border-b px-2 py-1.5">
+        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+          Lead
+        </span>
+        <div className="flex gap-1">
+          {([null, "frio", "quente"] as const).map((t) => (
+            <button
+              key={t ?? "todos"}
+              onClick={() => setTempFilter(t)}
+              className={cn(
+                "rounded-md border px-2 py-0.5 text-[11px]",
+                tempFilter === t
+                  ? "border-indigo-200 bg-indigo-50 font-semibold text-indigo-700"
+                  : "text-slate-600 hover:bg-slate-50"
+              )}
+            >
+              {t === null ? "Todos" : t === "frio" ? "Frio" : "Quente"}
+            </button>
+          ))}
+        </div>
+      </div>
       {selecting && (
         <div className="flex items-center gap-2 border-b bg-slate-50 px-3 py-1.5">
           <Checkbox
@@ -607,6 +647,17 @@ export function ConversationList({
                     <span className="truncate text-xs font-semibold text-slate-800">
                       {contactName(contact)}
                     </span>
+                    {/* ⚠️ SÓ o frio ganha selo. Marcar o quente também faria
+                        toda linha ter um selo, e aí nenhuma se destaca — ele
+                        existe para dizer "este pode esperar". */}
+                    {temperaturaDe(desfechos.get(conv.id)) === "frio" && (
+                      <span
+                        title="O bot pontuou abaixo do limiar — atenda, mas não é prioridade"
+                        className="shrink-0 rounded border border-sky-200 bg-sky-50 px-1 text-[9px] font-semibold uppercase tracking-wide text-sky-700"
+                      >
+                        Frio
+                      </span>
+                    )}
                   </span>
                   <span className="flex shrink-0 items-center gap-1">
                     <SlaBadge days={conv.slaDays} />
