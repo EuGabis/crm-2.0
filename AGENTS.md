@@ -6437,3 +6437,24 @@ dia a leitura tiver de abrir, muda a policy de SELECT, não este componente.
 
 ⏳ `conversas/page.tsx` já tinha **2 erros de lint** (`react-hooks/set-state-in-effect`,
 linhas ~160 e ~270 na `main`) anteriores a esta mudança.
+### O selo QUENTE entrou junto do FRIO (2026-09-09)
+
+Pedido do Gabriel: *"igual aparece essa informação de frio, vamos adicionar em
+quente também"*.
+
+🔴 **Reverte a decisão registrada acima** ("só o frio ganha selo; marcar o quente
+faria toda linha ter um selo, e aí nenhuma se destaca").
+
+⚠️ **Aquele argumento partia de uma premissa errada:** que sem selo a linha seria
+"quente". Não é — **a maioria das conversas não tem nota nenhuma.** Só o fluxo
+Comercial pontua; o da secretaria decide por assunto e grava `pontos`/`limiar`
+nulos. Então nem toda linha ganha selo, e a ausência dele passa a dizer uma coisa
+precisa: *o bot não pontuou esta conversa*. Antes ela misturava isso com "é
+quente", que são conclusões opostas para quem prioriza.
+
+- ⚠️ A distinção é por **palavra e cor**, nunca só pela cor: verde × azul num selo
+  de 9px é exatamente o par que a deuteranopia embaralha. O texto é a codificação
+  secundária, e por isso não pode virar só uma bolinha.
+- As cores são as MESMAS do relatório "Leads do dia" (esmeralda = qualificado,
+  azul = frio): a caixa e o relatório não podem discordar sobre qual cor é o lead
+  bom. Todas com remapeamento de dark conferido em `globals.css`.
