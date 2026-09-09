@@ -44,16 +44,39 @@ export function TagPicker({
   const busca = term.trim().toLowerCase();
   const visiveis = busca ? tags.filter((t) => t.name.toLowerCase().includes(busca)) : tags;
 
+  /*
+   * ⚠️ Tudo aqui compara SEM diferenciar maiúsculas, porque o catálogo é único
+   * por `lower(name)`: um contato marcado como "interessado pp" está marcado com
+   * a MESMA etiqueta que o catálogo escreve "INTERESSADO PP". Comparando texto
+   * cru, o checkbox aparecia desmarcado numa etiqueta que já estava no contato —
+   * e clicar acrescentaria a segunda grafia.
+   */
+  const marcada = (nome: string) =>
+    value.some((v) => v.trim().toLowerCase() === nome.trim().toLowerCase());
+
   const alternar = (nome: string) => {
-    onChange(value.includes(nome) ? value.filter((v) => v !== nome) : [...value, nome]);
+    onChange(
+      marcada(nome)
+        ? value.filter((v) => v.trim().toLowerCase() !== nome.trim().toLowerCase())
+        : [...value, nome]
+    );
   };
 
+  /*
+   * ⚠️ O RÓTULO conta só o que está no catálogo. `value` é `contacts.tags` cru,
+   * que traz junto o carimbo da importação — sem este recorte, o botão de um
+   * contato sem etiqueta nenhuma dizia "2 etiquetas" e o de uma etiqueta só
+   * mostrava o nome do arquivo importado.
+   */
+  const conhecidas = new Set(tags.map((t) => t.name.trim().toLowerCase()));
+  const escolhidas = value.filter((v) => conhecidas.has(v.trim().toLowerCase()));
+
   const rotulo =
-    value.length === 0
+    escolhidas.length === 0
       ? placeholder
-      : value.length === 1
-        ? value[0]
-        : `${value.length} etiquetas`;
+      : escolhidas.length === 1
+        ? escolhidas[0]
+        : `${escolhidas.length} etiquetas`;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -64,7 +87,7 @@ export function TagPicker({
             className={cn(
               "flex h-8 w-full items-center justify-between gap-1.5 rounded-md border px-2.5 text-xs",
               "bg-white text-left hover:bg-slate-50",
-              value.length === 0 && "text-slate-400",
+              escolhidas.length === 0 && "text-slate-400",
               className
             )}
           />
@@ -103,17 +126,17 @@ export function TagPicker({
             </p>
           ) : (
             visiveis.map((t) => {
-              const marcada = value.includes(t.name);
+              const ativa = marcada(t.name);
               return (
                 <label
                   key={t.id}
                   className={cn(
                     "flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-slate-50",
-                    marcada && "bg-indigo-50/60"
+                    ativa && "bg-indigo-50/60"
                   )}
                 >
                   <Checkbox
-                    checked={marcada}
+                    checked={ativa}
                     onCheckedChange={() => alternar(t.name)}
                     className="size-3.5"
                   />
@@ -124,14 +147,19 @@ export function TagPicker({
           )}
         </div>
 
-        {value.length > 0 && (
+        {escolhidas.length > 0 && (
           <div className="border-t p-1">
             <button
               type="button"
-              onClick={() => onChange([])}
+              /* ⚠️ Limpa só as ETIQUETAS, preservando o que não é do catálogo.
+                 Com `onChange([])`, limpar a seleção apagaria do contato o
+                 carimbo da importação — dado que a tela nem mostra, e que as
+                 listas inteligentes usam. Desmarcar não pode apagar o
+                 invisível. */
+              onClick={() => onChange(value.filter((v) => !conhecidas.has(v.trim().toLowerCase())))}
               className="w-full rounded px-2 py-1.5 text-left text-xs text-slate-500 hover:bg-slate-50"
             >
-              Limpar seleção ({value.length})
+              Limpar seleção ({escolhidas.length})
             </button>
           </div>
         )}

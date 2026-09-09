@@ -53,6 +53,7 @@ import { ChannelIcon } from "@/components/shared/channel-icon";
 import { SlaBadge } from "@/components/shared/sla-badge";
 import { contactName } from "@/lib/data/repos/contacts";
 import { TagPicker } from "@/components/contacts/tag-picker";
+import { etiquetasVisiveis, useContactTags } from "@/lib/data/repos/db/tags";
 import { temperaturaDe, useDesfechos } from "@/lib/data/repos/db/bot-desfechos";
 import {
   conversationActions,
@@ -76,6 +77,50 @@ const FILTER_TABS: { key: ConversationFilter; label: string }[] = [
 ];
 
 const STATUS_VIEWS: InboxStatusView[] = ["abertas", "finalizadas", "arquivadas", "todas"];
+
+/**
+ * As etiquetas do contato na linha da conversa.
+ *
+ * ⚠️ No MÁXIMO duas, e o resto vira "+N": a lista tem ~300px e contato com seis
+ * etiquetas empurraria a prévia da mensagem para fora — a prévia é o que faz
+ * decidir se abre a conversa. Vêm do join (`contactTags`), não de baixar os 41
+ * mil contatos.
+ *
+ * 🔴 Passam por `etiquetasVisiveis` antes de aparecer. Sem isso a linha mostrava
+ * `lito-avioes-e-musicas_export...` duas vezes e a etiqueta que o vendedor
+ * marcou ficava escondida no "+2" — que é o print do relato.
+ */
+function EtiquetasDaLinha({
+  tags,
+  catalogo,
+  ok,
+}: {
+  tags?: string[] | null;
+  catalogo: { name: string }[];
+  ok: boolean;
+}) {
+  const etiquetas = useMemo(() => etiquetasVisiveis(tags, catalogo, ok), [tags, catalogo, ok]);
+  if (etiquetas.length === 0) return null;
+  const titulo = etiquetas.join(" · ");
+  return (
+    <div className="flex flex-wrap items-center gap-1 pt-0.5">
+      {etiquetas.slice(0, 2).map((t) => (
+        <span
+          key={t}
+          title={titulo}
+          className="max-w-[120px] truncate rounded border border-slate-200 bg-slate-50 px-1 text-[9px] font-medium text-slate-600"
+        >
+          {t}
+        </span>
+      ))}
+      {etiquetas.length > 2 && (
+        <span title={titulo} className="text-[9px] font-medium text-slate-400">
+          +{etiquetas.length - 2}
+        </span>
+      )}
+    </div>
+  );
+}
 
 export function ConversationList({
   selectedId,
@@ -126,6 +171,9 @@ export function ConversationList({
    */
   const [tempFilter, setTempFilter] = useState<"frio" | "quente" | null>(null);
   const desfechos = useDesfechos();
+  // O catálogo decide o que é etiqueta: `contacts.tags` traz junto o carimbo
+  // da importação, que é o que ocupava as duas vagas da linha.
+  const { tags: catalogo, loaded: catalogoOk } = useContactTags();
   const { channels } = useWhatsappChannels();
   const all = useConversations(filter);
   const realtime = useRealtimeStatus();
@@ -167,7 +215,15 @@ export function ConversationList({
       else if (userFilter) r = r.filter((c) => c.assignedTo === userFilter);
       // Etiqueta: QUALQUER uma das marcadas (união, não interseção).
       if (tagFilter.length) {
-        r = r.filter((c) => (c.contactTags ?? []).some((t) => tagFilter.includes(t)));
+        /*
+         * ⚠️ Compara SEM diferenciar maiúsculas. O catálogo é único por
+         * `lower(name)`, então o contato pode estar marcado como "interessado
+         * pp" e o filtro pedir "INTERESSADO PP" — a MESMA etiqueta. Com
+         * `includes` de texto cru, o filtro devolvia "Nenhuma conversa neste
+         * filtro" com as conversas ali, marcadas.
+         */
+        const alvo = new Set(tagFilter.map((t) => t.trim().toLowerCase()));
+        r = r.filter((c) => (c.contactTags ?? []).some((t) => alvo.has(t.trim().toLowerCase())));
       }
       // Temperatura: quem não tem nota fica de fora dos DOIS recortes — não é
       // frio nem quente, é "o bot não pontuou".
@@ -679,27 +735,7 @@ export function ConversationList({
                     contato com seis etiquetas empurraria a prévia da mensagem
                     para fora — a prévia é o que faz decidir se abre a conversa.
                     Vêm do join (`contactTags`), não de baixar os 41 mil. */}
-                {(conv.contactTags?.length ?? 0) > 0 && (
-                  <div className="flex flex-wrap items-center gap-1 pt-0.5">
-                    {conv.contactTags!.slice(0, 2).map((t) => (
-                      <span
-                        key={t}
-                        title={conv.contactTags!.join(" · ")}
-                        className="max-w-[120px] truncate rounded border border-slate-200 bg-slate-50 px-1 text-[9px] font-medium text-slate-600"
-                      >
-                        {t}
-                      </span>
-                    ))}
-                    {conv.contactTags!.length > 2 && (
-                      <span
-                        title={conv.contactTags!.join(" · ")}
-                        className="text-[9px] font-medium text-slate-400"
-                      >
-                        +{conv.contactTags!.length - 2}
-                      </span>
-                    )}
-                  </div>
-                )}
+                <EtiquetasDaLinha tags={conv.contactTags} catalogo={catalogo} ok={catalogoOk} />
                 <div className="flex items-center justify-between gap-1">
                   <p className="truncate text-[11px] text-slate-500">{conv.lastMessagePreview}</p>
                   {conv.unreadCount > 0 && (

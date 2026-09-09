@@ -23,6 +23,63 @@ export type ContactTag = {
   position: number;
 };
 
+/**
+ * As etiquetas do contato que são de fato ETIQUETA: as que existem no catálogo.
+ *
+ * 🔴 Relato do Gabriel (2026-09-09), com print da caixa de entrada e da tela de
+ * Contatos: *"não é pra aparecer de onde ela veio importada, apenas a etiqueta
+ * que é marcada"*. `contacts.tags` guarda as duas coisas misturadas — a
+ * etiqueta que o vendedor marca E o carimbo que veio no CSV do CRM antigo
+ * (`lito-avioes-e-musicas_export...`), que está em quase toda a base. Como a
+ * linha mostra no máximo duas, o carimbo ocupava as duas e a etiqueta de
+ * verdade caía no "+2".
+ *
+ * ⚠️ **Filtra pelo catálogo (lista de permissão), não por um padrão de nome.**
+ * Um `startsWith("lito-avioes")` esconderia este carimbo e nenhum outro — a
+ * próxima importação traria outro nome e o defeito voltaria. O catálogo é a
+ * resposta para "o que é etiqueta nesta empresa", e é ele que a migração
+ * 202609091700 limpa.
+ *
+ * ⚠️ **Casa sem diferenciar maiúsculas e devolve a grafia do CATÁLOGO.** O
+ * índice do catálogo é único por `lower(name)`, então "interessado pp" no
+ * contato e "INTERESSADO PP" no catálogo são a MESMA etiqueta — e comparar
+ * texto cru esconderia a do contato como se fosse lixo de importação. Devolver a
+ * grafia canônica também faz a linha parar de mostrar a mesma etiqueta em três
+ * caixas diferentes, que é o que o catálogo veio resolver.
+ *
+ * ⚠️ Catálogo ainda NÃO carregado devolve vazio, não a lista crua: exibir o
+ * carimbo por meio segundo até a consulta voltar é a piscada que o pedido
+ * reclama. Catálogo carregado e VAZIO devolve tudo — aí não há como distinguir
+ * (empresa sem etiqueta, ou migração ainda não aplicada), e esconder dado real
+ * seria pior.
+ *
+ * Exportada para ter teste: são três regras curtas e nenhuma delas dá erro
+ * quando está errada — só some etiqueta da tela.
+ */
+export function etiquetasVisiveis(
+  tags: string[] | null | undefined,
+  catalogo: Pick<ContactTag, "name">[],
+  carregado: boolean
+): string[] {
+  const brutas = (tags ?? []).filter((t) => typeof t === "string" && t.trim() !== "");
+  if (!carregado) return [];
+  if (catalogo.length === 0) return brutas;
+  const canonico = new Map(catalogo.map((t) => [t.name.trim().toLowerCase(), t.name]));
+  const saida: string[] = [];
+  for (const t of brutas) {
+    const nome = canonico.get(t.trim().toLowerCase());
+    // Dedup: "QUENTE" e "quente" no mesmo contato viram uma linha só.
+    if (nome && !saida.includes(nome)) saida.push(nome);
+  }
+  return saida;
+}
+
+/** A etiqueta está no catálogo? (comparação do índice: `lower(name)`) */
+export function noCatalogo(nome: string, catalogo: Pick<ContactTag, "name">[]): boolean {
+  const alvo = nome.trim().toLowerCase();
+  return catalogo.some((t) => t.name.trim().toLowerCase() === alvo);
+}
+
 type TagState = {
   tags: ContactTag[];
   loaded: boolean;

@@ -6186,3 +6186,89 @@ estava com o bot e foi atribuída) — não há anterior de onde herdar, então
 
 `npm run test:inbox` — 12 asserções, incluindo o que o Realtime traz de verdade
 vencendo (mensagem nova, não lidas) e a string vazia não voltando ao valor antigo.
+
+## Etiqueta × CARIMBO DE IMPORTAÇÃO, e a caixa que baixava uma página só
+
+Dois relatos do Gabriel no mesmo minuto (2026-09-09), com print: na caixa de
+entrada e na tela de Contatos aparecia `lito-avioes-e-musicas_export...` no lugar
+da etiqueta — *"não é pra aparecer de onde ela veio importada, apenas a etiqueta
+que é marcada"* —, e uma conversa transferida para a Juliana não estava na caixa
+dela. São coisas independentes; a segunda revelou um defeito bem maior.
+
+### 🔴 A caixa de entrada baixava UMA PÁGINA de conversas
+
+```ts
+supabase.from("conversations").select(CONV_SELECT)   // sem range, sem order
+```
+
+⚠️ **É a armadilha nº 7 deste arquivo, na tela mais usada do CRM.** O PostgREST
+corta no "Max rows" do projeto (1000) **sem erro e sem aviso** — e foi exatamente
+assim que o nome do contato virou "Contato" em todas as conversas depois da
+importação. A lista de conversas sempre passou pelo mesmo lugar; só não doía
+porque a empresa tinha algumas centenas. A última medição registrada aqui é de
+**945 conversas em 03/09**, com ~40 leads novos por dia: o teto foi cruzado nesta
+semana.
+
+⚠️ **E o corte não é "faltam as últimas".** Sem `order` explícito, QUAIS mil
+linhas voltam é indefinido — por isso o sintoma é errático: a mesma conversa
+aparece numa sessão e falta na seguinte. É a explicação que faltava para
+*"estou assumindo algumas conversas e estão sumindo da minha caixa"*, que eu
+tinha atribuído ao filtro de número — o filtro explicava o print daquele
+momento, não o desaparecimento depois de um tempo.
+
+⚠️ A RLS roda ANTES do corte, então o teto é por PESSOA: o admin (vê tudo)
+estoura primeiro, e o atendente com `sees_all` estoura junto porque a fila do
+setor (conversas sem dono) entra na conta dele.
+
+`fetchAllConversations` pagina com `.range()`, ordena por `last_message_at desc`
+e **desempata por `id`** — sem o desempate, conversa criada em lote (o rodízio, a
+varredura da fila) sai com o mesmo carimbo e a ordem instável entre páginas
+repete umas linhas e PULA outras; a pulada é uma conversa que some da caixa.
+`nullsFirst: false` mantém no fim a conversa ainda sem mensagem (no Postgres,
+NULL vem primeiro no `desc`).
+
+### Etiqueta e carimbo moram no mesmo array
+
+`contacts.tags` guarda duas coisas diferentes: a categoria que a equipe marca e o
+**carimbo de procedência** que o CSV do CRM antigo trouxe numa coluna de tags. O
+carimbo está em quase toda a base — ou seja, não separa nada, que é o contrário
+do que se espera de uma etiqueta. Como a linha da conversa mostra no máximo duas
+etiquetas, o carimbo tomava as duas e a etiqueta marcada caía no "+2".
+
+🔴 **A causa é uma decisão minha na 202609091600**: aquela migração absorve para
+o catálogo toda etiqueta já em uso nos contatos. O raciocínio continua certo
+(etiqueta de importação sumiria de vista e ninguém conseguiria marcá-la de novo),
+o que faltou foi excluir o carimbo. A **202609091700** o tira do catálogo.
+
+- ⚠️ **Lista de permissão (o catálogo), não padrão de nome.** Um
+  `startsWith("lito-avioes")` esconderia este carimbo e nenhum outro, e a próxima
+  importação traria outro nome. Quem esconde é `etiquetasVisiveis` (`db/tags.ts`),
+  usada pela linha da conversa, pela lista de Contatos e pelo detalhe do contato.
+- ⚠️ **`contacts.tags` NÃO é tocado.** O carimbo continua gravado, e as listas
+  inteligentes, campanhas e exportação seguem enxergando-o — quem usa "veio da
+  importação" como recorte não perde nada. Apagar do array seria irreversível.
+- ⚠️ **Casa por `lower(name)` e devolve a grafia do CATÁLOGO.** O índice do
+  catálogo é único por `lower(name)`, então "interessado pp" no contato é a MESMA
+  etiqueta que "INTERESSADO PP" no catálogo; comparar texto cru esconderia a do
+  contato como se fosse lixo. Devolver a grafia canônica também acaba com a mesma
+  etiqueta aparecendo em três caixas diferentes.
+- ⚠️ **Catálogo não carregado devolve vazio; carregado e VAZIO devolve tudo.** O
+  primeiro evita a piscada do carimbo enquanto a consulta volta; o segundo é
+  honesto — sem catálogo não há como distinguir (empresa nova, ou migração não
+  aplicada), e esconder dado real seria pior.
+- **"Limpar seleção" do `TagPicker` preserva o que não é do catálogo.** Com
+  `onChange([])` ele apagaria do contato o carimbo, que a tela nem mostra:
+  desmarcar não pode apagar o invisível.
+
+### ⚠️ O filtro de etiqueta diferenciava maiúsculas
+
+`aplicaRecorte` comparava com `includes` de texto cru. Contato marcado como
+"interessado pp" e filtro pedindo "INTERESSADO PP" — a mesma etiqueta pelo índice
+do catálogo — davam "Nenhuma conversa neste filtro" com as conversas ali. Agora a
+comparação é por `lower`, nos dois lados, como no resto do catálogo.
+
+`npm run test:etiquetas` — 19 asserções, com os casos `[real]` sendo o que estava
+no print.
+
+⏳ `contatos/[id]/page.tsx` já tinha **1 erro de lint** (`react-hooks/set-state-in-effect`,
+linha ~49) na `main`, anterior a esta mudança.
