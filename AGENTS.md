@@ -5835,3 +5835,70 @@ inteira entregando 1 e deixando 3 na fila.
   última mensagem DO CLIENTE, que é o que `conversas_paradas` já calcula.
 - **Os outros setores seguem sem intervalo**, por decisão. Se o Comercial entrar
   com número próprio, vale reavaliar antes de a mesma manhã se repetir lá.
+
+## O selo de "Não lidos" contradizia a própria lista (2026-09-09)
+
+Pedido: *"ao selecionar um responsável, em mensagens não lidas, quero ver as não
+lidas daquele responsável que selecionei."*
+
+⚠️ **A lista já estava certa; o número ao lado da aba é que não.** Vale registrar
+porque a leitura natural do pedido ("o filtro não funciona") aponta para o lugar
+errado: `conversations` aplicava `channelFilter`/`userFilter` inline e devolvia
+as não lidas daquela pessoa corretamente. O que ignorava os dois era o
+`unreadCount` do selo — que seguia marcando o total da empresa (**96** no
+relato). O número contradizia a lista embaixo dele.
+
+`statusCounts` (as contagens de Abertas/Finalizadas/Arquivadas no seletor) tinha
+o **mesmo** defeito e foi corrigido junto: com um responsável escolhido,
+"Abertas 12" tem de significar 12 dele, senão o seletor descreve uma lista que
+não está na tela.
+
+⚠️ **A correção é uma FUNÇÃO, não três filtros iguais.** `aplicaRecorte` é
+aplicada pela lista e pelos dois contadores. Escrito em três lugares, discordar é
+o padrão — foi exatamente o que aconteceu aqui, e é o mesmo raciocínio que fez
+`aplicarFiltros` existir na aba de Atendimento. Genérica sobre
+`{ channelId?, assignedTo? }` porque `Conversation` usa campos OPCIONAIS, não
+`| null` (o `tsc` pegou isso na primeira versão).
+
+**Regra que sai daqui: um recorte que vale para a lista tem de valer para todo
+número que acompanha a lista.**
+
+## Transferir para outro atendente deixa a conversa NÃO LIDA para ele (202609091100)
+
+Pedido do Gabriel, no mesmo dia. O defeito é real: quem recebia uma
+transferência não tinha **sinal nenhum** de que ela chegou. A conversa entrava na
+caixa dele já lida — sem selo, fora do contador de "Não lidos" — no meio da
+lista ordenada por última mensagem, indistinguível de tudo o que ele já tratou. O
+evento no fio só é visto por quem ABRE a conversa, que é justamente o que não ia
+acontecer.
+
+⚠️ Só o `update` do responsável mudou. O corpo inteiro é o que já estava no banco
+(202609041530) — reescrever a lógica junto seria mudança de comportamento
+disfarçada de correção, e a cascata dali é sensível.
+
+Três cuidados no `case`, cada um excluindo um caso legítimo:
+
+- **`to_user is not null`** — devolver à FILA não é transferir para um atendente,
+  e não há "ele" para quem marcar. ⏳ Se um dia se quiser que a fila do grupo
+  também acenda, é decisão separada: ali o selo apareceria para o setor inteiro.
+- **`to_user <> auth.uid()`** — ASSUMIR para si não pode marcar como não lida.
+  Quem assume está com a conversa aberta; acender o selo para a pessoa que
+  acabou de abrir é ruído, e ela apagaria na hora.
+- **`greatest(coalesce(unread_count,0), 1)` e NUNCA `= 1`** — a conversa pode ter
+  9 não lidas do cliente, e sobrescrever com 1 apagaria a informação de quanta
+  coisa está esperando. O `case` só garante o PISO.
+
+⚠️ **Conferido que nada re-zera depois:** `markRead` é chamado só no CLIQUE da
+lista (`conversation-list.tsx`) e no histórico do rail — não há efeito que o
+dispare por a conversa estar selecionada. Se houvesse, quem transferiu com a
+conversa aberta apagaria o selo que a função acabou de acender.
+
+⚠️ **`unread_count` é UM contador por conversa, não por pessoa** — não existe
+estado de leitura por usuário no schema. Então "não lida para ele" é, na
+verdade, "não lida para quem olhar". Como a conversa passa a ser dele, o efeito
+é o desejado; mas quem enxerga a caixa do grupo também vê o selo, e isso é
+consequência do modelo, não um ajuste que se possa fazer aqui.
+
+**Esta migração é independente do resto**: substitui uma função existente com a
+MESMA assinatura, e o cliente já a chamava. Pode ser aplicada antes ou depois do
+merge, sem ordem.
