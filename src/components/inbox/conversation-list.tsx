@@ -674,6 +674,32 @@ export function ConversationList({
                     </span>
                   </span>
                 </div>
+                {/* Etiquetas do contato, na própria linha.
+                    ⚠️ No MÁXIMO duas, e o resto vira "+N": a lista tem ~300px e
+                    contato com seis etiquetas empurraria a prévia da mensagem
+                    para fora — a prévia é o que faz decidir se abre a conversa.
+                    Vêm do join (`contactTags`), não de baixar os 41 mil. */}
+                {(conv.contactTags?.length ?? 0) > 0 && (
+                  <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                    {conv.contactTags!.slice(0, 2).map((t) => (
+                      <span
+                        key={t}
+                        title={conv.contactTags!.join(" · ")}
+                        className="max-w-[120px] truncate rounded border border-slate-200 bg-slate-50 px-1 text-[9px] font-medium text-slate-600"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                    {conv.contactTags!.length > 2 && (
+                      <span
+                        title={conv.contactTags!.join(" · ")}
+                        className="text-[9px] font-medium text-slate-400"
+                      >
+                        +{conv.contactTags!.length - 2}
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div className="flex items-center justify-between gap-1">
                   <p className="truncate text-[11px] text-slate-500">{conv.lastMessagePreview}</p>
                   {conv.unreadCount > 0 && (

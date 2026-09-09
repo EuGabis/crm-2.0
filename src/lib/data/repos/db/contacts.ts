@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { create } from "zustand";
 import { createClient } from "@/lib/supabase/client";
 import type { Channel, Contact, User } from "@/lib/data/types";
@@ -284,6 +284,19 @@ export function useDbContact(id: string | null) {
   const fromStore = id ? contacts.find((c) => c.id === id) ?? null : null;
   const [fetched, setFetched] = useState<Contact | null>(null);
   const [fetching, setFetching] = useState(false);
+  /*
+   * 🔴 `recarga` existe porque o contato deste hook **não vem da store** na
+   * maioria das telas. O inbox deixou de carregar `useDbContacts()`, então
+   * `fromStore` é sempre nulo e o valor vive no `fetched` local — e
+   * `addTag`/`removeTag` atualizam a STORE, que ninguém aqui está lendo.
+   *
+   * O sintoma foi exatamente esse: marcar a etiqueta no composer GRAVAVA no
+   * banco e o checkbox não marcava, porque o `contact` do seletor continuava o
+   * de antes. "Os vendedores não conseguem selecionar" era a tela mentindo
+   * sobre uma escrita que deu certo.
+   */
+  const [recarga, setRecarga] = useState(0);
+  const refresh = useCallback(() => setRecarga((n) => n + 1), []);
   useEffect(() => {
     if (!id || fromStore) {
       setFetched(null);
@@ -303,8 +316,8 @@ export function useDbContact(id: string | null) {
     return () => {
       active = false;
     };
-  }, [id, fromStore]);
-  return { contact: fromStore ?? fetched, loading: fetching };
+  }, [id, fromStore, recarga]);
+  return { contact: fromStore ?? fetched, loading: fetching, refresh };
 }
 
 export function useDbTeam() {

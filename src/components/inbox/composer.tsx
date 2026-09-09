@@ -257,7 +257,7 @@ export function Composer({ conversationId }: { conversationId: string }) {
   );
   const conversation = useConversation(conversationId);
   const contactId = conversation?.contactId ?? null;
-  const { contact } = useDbContact(contactId);
+  const { contact, refresh: recarregarContato } = useDbContact(contactId);
   const isWhatsapp = conversation?.channel === "whatsapp" && !!conversation?.channelId;
   // Responder (citação): mensagem marcada na bolha para esta conversa.
   const replyTarget = useReplyTarget(conversationId);
@@ -585,15 +585,23 @@ export function Composer({ conversationId }: { conversationId: string }) {
     for (const t of juntar) {
       if (!(await dbContactActions.addTag([contactId], t))) {
         toast.error(`Não foi possível marcar "${t}"`);
+        recarregarContato();
         return;
       }
     }
     for (const t of tirar) {
       if (!(await dbContactActions.removeTag([contactId], t))) {
         toast.error(`Não foi possível desmarcar "${t}"`);
+        recarregarContato();
         return;
       }
     }
+    /*
+     * ⚠️ Sem isto o checkbox NÃO marca. `addTag` atualiza a store, e o contato
+     * daqui não vem da store — o inbox não a carrega. A escrita ia para o banco
+     * e a tela ficava igual, que foi o relato de "não consigo selecionar".
+     */
+    recarregarContato();
   };
 
   const send = async (scheduledFor?: string) => {
