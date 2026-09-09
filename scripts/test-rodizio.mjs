@@ -459,6 +459,44 @@ const linha = (over = {}) => ({
 
 eq("sistema atribuiu e ninguem respondeu -> devolve", devolvivel(linha(), CANAIS), true);
 
+/* 0) PRIMEIRA RESPOSTA (regra do Gabriel, 09/09): o lead que ninguem respondeu
+   circula; o que o atendente JA respondeu e dele e nao volta ao rodizio.
+
+   ⚠️ E a regra que substituiu o desligamento do comercial: em vez de tirar a
+   devolucao de um setor inteiro, recorta o que ela nunca deveria ter tocado.
+   Sem isto, o vendedor mandava a proposta, o cliente respondia tres dias
+   depois e a conversa era ARRANCADA dele no meio da negociacao. */
+eq(
+  "[regra] vendedor ja respondeu -> NAO devolve, e dele",
+  devolvivel(linha({ ja_respondida: true }), CANAIS),
+  false,
+);
+/* O caso do dia a dia, e o que mais doia: proposta enviada, cliente responde
+   dias depois, vendedor em outro atendimento. A espera cresce e a conversa
+   continua sendo dele — responder UMA vez encerra a devolucao para sempre. */
+eq(
+  "ja respondeu e o cliente voltou a escrever ha 5h -> continua sendo dele",
+  devolvivel(linha({ ja_respondida: true, espera_util_min: 300 }), CANAIS),
+  false,
+);
+eq(
+  "ninguem respondeu -> devolve (o caso que o rodizio existe para resolver)",
+  devolvivel(linha({ ja_respondida: false }), CANAIS),
+  true,
+);
+/* ⚠️ Codigo no ar ANTES da migracao: a coluna ainda nao existe e chega
+   undefined. Tem de cair no comportamento de hoje, nao travar a devolucao. */
+eq(
+  "coluna ausente (migracao nao aplicada) -> devolve como antes",
+  devolvivel(linha({ ja_respondida: undefined }), CANAIS),
+  true,
+);
+eq(
+  "coluna nula -> devolve como antes",
+  devolvivel(linha({ ja_respondida: null }), CANAIS),
+  true,
+);
+
 // 1) LACO: devolvida agora e o cliente nao escreveu depois -> nao devolve de novo.
 eq(
   "ja devolvida e cliente nao escreveu depois -> NAO (era o laco)",

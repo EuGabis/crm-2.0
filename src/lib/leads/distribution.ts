@@ -342,6 +342,15 @@ export type LinhaParada = {
   espera_util_min: number | string;
   /** O bot triou esta conversa? Ver a regra em `devolvivel`. */
   passou_pelo_bot: boolean | null;
+  /**
+   * Alguém já respondeu esta conversa ALGUMA VEZ? (202609092030)
+   *
+   * ⚠️ Opcional de propósito: neste projeto o código vai ao ar ANTES da
+   * migração, então até ela ser aplicada o campo chega `undefined` — e
+   * `undefined` cai no comportamento de hoje em vez de travar a devolução
+   * inteira.
+   */
+  ja_respondida?: boolean | null;
 };
 
 /**
@@ -397,6 +406,25 @@ export function devolvivel(l: LinhaParada, channelIds: string[]): boolean {
     if (!l.ultima_do_cliente) return false;
     if (new Date(l.devolvida_em) >= new Date(l.ultima_do_cliente)) return false;
   }
+
+  /*
+   * 🔴 **A devolução vale só ATÉ A PRIMEIRA RESPOSTA.**
+   *
+   * Regra do Gabriel (2026-09-09): o lead que ninguém respondeu em 15 minutos
+   * passa para outro; mas, **uma vez que o atendente mandou mensagem, a conversa
+   * é dele e não volta ao rodízio** — o cliente responde quando puder, e o
+   * vendedor não tem como ficar de plantão no relógio.
+   *
+   * ⚠️ É a regra que substitui o desligamento do comercial (202609081346): em
+   * vez de tirar a devolução de um setor inteiro, ela recorta o que a devolução
+   * nunca deveria ter tocado. O que circula passa a ser só o lead SEM
+   * atendimento nenhum — que é exatamente o caso que criou o rodízio.
+   *
+   * ⚠️ Nota interna e resposta do BOT não contam como resposta: quem decide isso
+   * é a SQL (`ja_respondida` exclui `automated` e `internal`), senão toda
+   * conversa pareceria atendida em segundos pelo auto-responder.
+   */
+  if (l.ja_respondida) return false;
 
   /*
    * ⚠️ **Teto**: passado um dia útil, isto é backlog e não "o atendente não
