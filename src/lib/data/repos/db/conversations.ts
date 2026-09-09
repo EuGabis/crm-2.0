@@ -355,6 +355,9 @@ export function subscribeInbox() {
           const s = get();
           if (s.conversations.some((c) => c.id === conv.id)) return;
           set({ conversations: [conv, ...s.conversations] });
+          // O payload não traz o contato — busca o join para a linha não nascer
+          // como "Contato".
+          void completarContato(conv.id);
         }
       )
       .on(
@@ -363,14 +366,20 @@ export function subscribeInbox() {
         (payload) => {
           const conv = mapConversation(payload.new);
           const s = get();
-          // Upsert: uma conversa que estava OCULTA (com o bot) e foi atribuída ao
-          // atendente chega como UPDATE — se ainda não está na lista, adiciona ao
-          // vivo (senão só apareceria após um F5).
-          set({
-            conversations: s.conversations.some((c) => c.id === conv.id)
-              ? s.conversations.map((c) => (c.id === conv.id ? conv : c))
-              : [conv, ...s.conversations],
-          });
+          const anterior = s.conversations.find((c) => c.id === conv.id);
+          if (anterior) {
+            const junto = preservarContato(conv, anterior);
+            set({ conversations: s.conversations.map((c) => (c.id === conv.id ? junto : c)) });
+            return;
+          }
+          /*
+           * Upsert: conversa que estava OCULTA (com o bot) e foi atribuída chega
+           * como UPDATE. Não há versão anterior de onde herdar o contato, então
+           * entra já e o join é buscado à parte — sem isso ela nasceria como
+           * "Contato" e sem etiqueta até o próximo F5.
+           */
+          set({ conversations: [conv, ...s.conversations] });
+          void completarContato(conv.id);
         }
       )
       .subscribe((status) => {
@@ -666,6 +675,68 @@ export function useAutomatedConversationIds() {
  * Exportada só para poder ser testada — a regra é curta e o defeito que ela
  * conserta ("abre, carrega e some") era invisível em revisão de código.
  */
+/**
+ * Junta a conversa que veio do REALTIME com a que já está na store.
+ *
+ * 🔴 **O payload do `postgres_changes` é a LINHA CRUA da tabela — não tem o join
+ * do contato.** E o manipulador de UPDATE SUBSTITUÍA a entrada da store por
+ * ele, então toda conversa que recebesse qualquer atualização (mensagem nova,
+ * leitura, atribuição, devolução) perdia nome, telefone, e-mail e etiquetas.
+ *
+ * Foi a causa única de três sintomas relatados em 2026-09-09, que pareciam
+ * separados:
+ *  · a lista mostrando o literal **"Contato"** — inclusive em conversas antigas,
+ *    e "depois de um tempo", porque a degradação acompanha o movimento da caixa;
+ *  · a **etiqueta não aparecendo** na linha do contato;
+ *  · o **filtro por etiqueta** não achando nada.
+ *
+ * Os três leem os mesmos campos desnormalizados, e o F5 "consertava" porque o
+ * `load()` traz o join — até o Realtime apagar de novo.
+ *
+ * ⚠️ O critério é `?? anterior`, não `|| anterior`: string vazia é um nome
+ * legítimo de contato sem sobrenome, e `||` a trocaria pelo valor velho.
+ *
+ * Exportada para ter teste: a regra é curta e o defeito é invisível em revisão —
+ * só aparece depois que a conversa se mexe.
+ */
+/**
+ * Busca o join do contato para UMA conversa e emenda na store.
+ *
+ * Usada quando a conversa chega pelo Realtime e não há versão anterior de onde
+ * herdar o contato. Uma linha, com `CONV_SELECT` — a mesma consulta do `load()`,
+ * para não existir uma segunda ideia do que "a conversa com contato" significa.
+ *
+ * ⚠️ Silenciosa de propósito: é enfeite de linha, não dado de atendimento. Se
+ * falhar, a conversa fica com o nome genérico até o próximo carregamento — o que
+ * não pode acontecer é a falha derrubar o fluxo do Realtime.
+ */
+async function completarContato(id: string): Promise<void> {
+  try {
+    const supabase = createClient();
+    const { data } = await supabase.from("conversations").select(CONV_SELECT).eq("id", id).maybeSingle();
+    if (!data) return;
+    const cheia = mapConversation(data);
+    const s = useConvStore.getState();
+    s.patch({
+      conversations: s.conversations.map((c) => (c.id === id ? preservarContato(cheia, c) : c)),
+    });
+  } catch {
+    // ver o comentário acima
+  }
+}
+
+export function preservarContato(novo: Conversation, anterior?: Conversation): Conversation {
+  if (!anterior) return novo;
+  return {
+    ...novo,
+    contactFirstName: novo.contactFirstName ?? anterior.contactFirstName,
+    contactLastName: novo.contactLastName ?? anterior.contactLastName,
+    contactPhone: novo.contactPhone ?? anterior.contactPhone,
+    contactEmail: novo.contactEmail ?? anterior.contactEmail,
+    contactTags: novo.contactTags ?? anterior.contactTags,
+  };
+}
+
 export function mesclarMensagens(recentes: Message[], existentes: Message[]): Message[] {
   const ids = new Set(recentes.map((m) => m.id));
   return [...recentes, ...existentes.filter((m) => !ids.has(m.id))];

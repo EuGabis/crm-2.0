@@ -6131,3 +6131,58 @@ selo — o contrário do que o selo existe para fazer. Está escrito como teste.
 `resultado` dizendo "quente" com a conta dizendo frio deve dar **FRIO**.
 
 ⏳ Hoje **só o fluxo Comercial pontua**, então o selo só existe no número novo.
+
+## 🔴 O Realtime APAGAVA o contato da conversa (2026-09-09)
+
+Três relatos que pareciam separados tinham **uma causa só**:
+
+- a lista mostrando o literal **"Contato"** — em TODAS as conversas, inclusive
+  antigas, e "depois de um tempo";
+- a **etiqueta não aparecendo** na linha do contato;
+- o **filtro por etiqueta** não encontrando nada.
+
+Os três leem os mesmos campos desnormalizados (`contactFirstName`,
+`contactTags`), que vêm do join `contact:contacts(...)`.
+
+```ts
+{ event: "UPDATE", table: "conversations" },
+(payload) => {
+  const conv = mapConversation(payload.new);   // ← LINHA CRUA, sem join
+  ... s.conversations.map((c) => (c.id === conv.id ? conv : c))   // ← SUBSTITUI
+}
+```
+
+⚠️ **`payload.new` do `postgres_changes` é a linha da tabela, e o manipulador
+SUBSTITUÍA a entrada da store por ela.** Toda conversa que recebesse qualquer
+atualização — mensagem nova, leitura, atribuição, devolução — perdia nome,
+telefone, e-mail e etiquetas. Numa caixa movimentada, em minutos a lista inteira
+degrada.
+
+**E o F5 "consertava"**, porque o `load()` traz o join — até o Realtime apagar de
+novo. Foi isso que fez o defeito parecer intermitente e mandar a investigação
+para o lado errado (eu procurei ambiguidade de embed no PostgREST e cheguei a
+cobrir a hipótese de o embed vir como array, que era plausível e não era o caso).
+
+### Como o diagnóstico fechou
+
+O que apontou o caminho foi o print do **Relatório**: ele mostrava as conversas
+normalmente, e **lê a MESMA store** que a caixa. Se a store as tinha, o problema
+não era banco nem RLS. E o painel da direita mostrava o nome certo porque busca
+**por id, sem join**. Três fontes, dois comportamentos: quem tinha o join estava
+bem, quem dependia da store degradava.
+
+⚠️ **Regra: dado desnormalizado por JOIN não sobrevive a um payload de Realtime.**
+Quem escreve na store a partir de `postgres_changes` tem de MESCLAR com o que já
+está lá, nunca substituir.
+
+`preservarContato(novo, anterior)` carrega os campos do contato quando o payload
+não os traz. Usa `??` e não `||`: **string vazia é um nome legítimo** (contato sem
+sobrenome), e `||` traria o valor velho de volta.
+
+Para INSERT — e para o UPDATE de conversa que ainda não está na store (a que
+estava com o bot e foi atribuída) — não há anterior de onde herdar, então
+`completarContato(id)` busca a linha com `CONV_SELECT`. Silenciosa de propósito:
+é enfeite de linha, e uma falha ali não pode derrubar o fluxo do Realtime.
+
+`npm run test:inbox` — 12 asserções, incluindo o que o Realtime traz de verdade
+vencendo (mensagem nova, não lidas) e a string vazia não voltando ao valor antigo.
