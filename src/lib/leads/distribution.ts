@@ -697,6 +697,47 @@ export async function filaProntaDoSetor(
   return { prontas, retidas: fila.length - prontas.length };
 }
 
+/** O que a varredura sabe do setor para decidir o ritmo. */
+export type RitmoDoSetor = {
+  /** Minutos entre um lead e o próximo. 0 = sem intervalo. */
+  intervalo_fila_min?: number | string | null;
+  /** Quando a varredura entregou o último lead deste setor. */
+  ultima_da_fila_em?: string | null;
+};
+
+/**
+ * Quantos leads este setor pode receber NESTE tique.
+ *
+ * 🔴 Regra do Gabriel (2026-09-09), depois de a varredura despejar a fila
+ * inteira em quem logou primeiro: **um por vez, e depois aguarda.** A pausa é a
+ * janela para outro atendente logar e entrar no rodízio — sem ela, quem abre o
+ * CRM às 8h leva o acumulado da noite e quem chega às 8h30 não encontra nada.
+ *
+ * Devolve `0` (ainda no intervalo), `1` (setor com intervalo, liberado) ou o
+ * teto normal do tique (setor sem intervalo — o comportamento de todos os
+ * outros, que não muda).
+ *
+ * ⚠️ Função PURA e exportada só para ter teste: a regra é de relógio, depende
+ * de quando o tique roda, e um erro aqui não dá erro nenhum — só reparte os
+ * leads errado, que é invisível até alguém reclamar. Foi assim que este defeito
+ * chegou à produção.
+ */
+export function limiteDoTique(dep: RitmoDoSetor, agora = Date.now()): number {
+  const intervalo = Number(dep.intervalo_fila_min ?? 0);
+  // Setor sem intervalo configurado segue como sempre foi.
+  if (!Number.isFinite(intervalo) || intervalo <= 0) return FILA_POR_TIQUE;
+  // Nunca entregou nada: pode entregar o primeiro agora.
+  if (!dep.ultima_da_fila_em) return 1;
+  const ultima = new Date(dep.ultima_da_fila_em).getTime();
+  /*
+   * ⚠️ Data inválida vira `NaN`, e `NaN < x` é FALSO — o que liberaria a
+   * entrega. Aqui o lado seguro é liberar mesmo: segurar a fila para sempre por
+   * causa de um carimbo corrompido é pior que entregar um lead a mais.
+   */
+  if (Number.isNaN(ultima)) return 1;
+  return agora - ultima >= intervalo * 60_000 ? 1 : 0;
+}
+
 /**
  * Distribui a FILA DO SETOR (`awaiting_distribution`) entre quem está online.
  *
@@ -727,10 +768,32 @@ export async function distribuirFilaDoSetor(
   let distribuidas = 0;
   let naFila = 0;
 
-  const { data: deps } = await db
-    .from("departments")
-    .select("id, usa_rodizio")
-    .eq("location_id", locationId);
+  /*
+   * ⚠️ **O código vai ao ar ANTES da migração** neste projeto (deploy automático
+   * no merge, migração à mão). Pedir colunas que ainda não existem faz o
+   * PostgREST recusar a consulta INTEIRA — e a varredura pararia de esvaziar a
+   * fila, que é o oposto do que ela existe para fazer. Foi assim que o envio
+   * quebrou em 01/09. Tenta com as colunas do ritmo; falhando, refaz sem elas e
+   * segue no comportamento antigo.
+   */
+  let deps: any[] | null = null;
+  let temRitmo = true;
+  {
+    const r = await db
+      .from("departments")
+      .select("id, usa_rodizio, intervalo_fila_min, ultima_da_fila_em")
+      .eq("location_id", locationId);
+    if (r.error) {
+      temRitmo = false;
+      const semRitmo = await db
+        .from("departments")
+        .select("id, usa_rodizio")
+        .eq("location_id", locationId);
+      deps = semRitmo.data;
+    } else {
+      deps = r.data;
+    }
+  }
 
   for (const dep of deps ?? []) {
     /*
@@ -748,17 +811,39 @@ export async function distribuirFilaDoSetor(
     // Sem número vinculado não há como saber que a conversa é deste setor.
     if (!channelIds.length) continue;
 
+    /*
+     * ⚠️ Lê a fila INTEIRA (até o teto) mesmo quando só vai entregar uma. É o
+     * que mantém `naFila` verdadeiro — e `naFila` é o número que diz se o
+     * rodízio está dando conta. Contar só o que foi entregue faria uma fila
+     * represada de 20 leads parecer "0 na fila".
+     */
     const { prontas, retidas } = await filaProntaDoSetor(db, locationId, channelIds, FILA_POR_TIQUE);
-    if (!prontas.length) {
-      naFila += retidas;
+    naFila += retidas;
+    if (!prontas.length) continue;
+
+    /*
+     * 🔴 O RITMO. Setor com `intervalo_fila_min` entrega UMA por vez e espera —
+     * a pausa é a janela para outro atendente logar. Sem intervalo (todos os
+     * outros setores), nada muda.
+     */
+    // ⚠️ Lido UMA vez e reusado no carimbo lá embaixo. Reavaliar o relógio
+    // depois de distribuir daria respostas diferentes na mesma passagem.
+    const intervalo = temRitmo ? Number(dep.intervalo_fila_min ?? 0) : 0;
+    const cabem = intervalo > 0 ? limiteDoTique(dep) : FILA_POR_TIQUE;
+    if (cabem === 0) {
+      // Ainda dentro do intervalo: a fila fica, inteira e visível a todos.
+      naFila += prontas.length;
       continue;
     }
-    naFila += retidas;
+    // `prontas` já vem com o que espera HÁ MAIS TEMPO primeiro (a consulta
+    // ordena por `last_message_at` crescente) — é literalmente a regra pedida.
+    const aEntregar = prontas.slice(0, cabem);
+    naFila += prontas.length - aEntregar.length;
 
     // ⚠️ Contador POR SETOR. Usar o acumulador `distribuidas` para calcular o
     // resto desta fila daria número errado a partir do segundo setor com fila.
     let feitasAqui = 0;
-    for (const conv of prontas) {
+    for (const conv of aEntregar) {
       const user = await distributeOne(db, {
         locationId,
         deptId: dep.id,
@@ -776,11 +861,24 @@ export async function distribuirFilaDoSetor(
          * insistir só gastaria consultas. Elas continuam na fila, visíveis a
          * todos, e o próximo tique tenta de novo.
          */
-        naFila += prontas.length - feitasAqui;
+        naFila += aEntregar.length - feitasAqui;
         break;
       }
     }
     distribuidas += feitasAqui;
+
+    /*
+     * ⚠️ Carimba só se ENTREGOU. Marcar sempre faria um tique em que ninguém
+     * está online reiniciar o relógio, e a fila esperaria mais 7 minutos por
+     * nada — a espera existe para dar chance a outro atendente logar, não para
+     * punir a fila quando não há ninguém.
+     */
+    if (intervalo > 0 && feitasAqui > 0) {
+      await db
+        .from("departments")
+        .update({ ultima_da_fila_em: new Date().toISOString() })
+        .eq("id", dep.id);
+    }
   }
 
   return { distribuidas, naFila };

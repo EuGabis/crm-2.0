@@ -5723,3 +5723,115 @@ a flag para conversa sem contexto começar a circular.
 ⏳ `thread.tsx` continua com **1 erro de lint** pré-existente
 (`react-hooks/immutability`, agora ~linha 1671 por causa das linhas que
 acrescentei), anterior a esta mudança.
+
+## 🔴 A varredura despejava a fila em quem logou primeiro (2026-09-09)
+
+Relato: *"o Daniel da secretaria não está recebendo os contatos pelo bot"* →
+*"ele está online e mesmo assim só está sendo enviado para Beatriz"* →
+*"alguns usuários no sistema está como nunca logou, mas ele estava usando o
+sistema ontem"* → *"a Beatriz logou primeiro que o Daniel e o bot mandou tudo
+para a fila dela"*.
+
+Eram **DUAS causas**, e as duas entraram no dia anterior, minhas.
+
+### Causa 1 — `clear_presence()` gravava NULL, e NULL já tinha dono
+
+O "nunca logou" foi o que abriu o caso: **a única coisa em todo o código que
+grava `last_seen_at = NULL` é o `clear_presence()` da 202609081310**, chamado no
+logout. E o valor já significava outra coisa:
+
+- `presenceInfo` (tela de Departamentos) escreve literalmente **"nunca acessou"**
+  quando o campo é nulo;
+- `onlineOrdered` filtra com `.gte("last_seen_at", …)`, e **NULL nunca satisfaz
+  um `>=`** — a pessoa fica INVISÍVEL para o rodízio.
+
+Um valor passou a significar três coisas incompatíveis: "nunca entrou", "saiu
+agora" e "fora do rodízio". Quem é deslogado por inatividade (10 min, papel
+"user" — os três da Secretaria são) virava "nunca acessou" e parava de receber.
+
+⚠️ **Sobrecarregar um valor que já tem significado** é o mesmo erro que este
+arquivo registra na novela do áudio (ler `null` de canais como "está mono"):
+**ausência de dado não pode ser reaproveitada como estado.**
+
+A chamada foi REMOVIDA. O que se perde: quem é deslogado por inatividade segue
+elegível até o carimbo envelhecer os 15 min de `PRESENCE_MS` — sobra de ~10 min,
+coberta pela devolução por espera. ⏳ Fechar essa sobra direito pede **coluna
+própria** (`logged_out_at`), não reciclar o NULL.
+
+⚠️ A correção **não desfaz os NULL já gravados**: eles voltam no primeiro
+`touch_presence`, ou seja quando a pessoa recarregar o CRM com sessão válida.
+
+**Uma definição só de "online".** A tela de Departamentos usava 5 min e o rodízio
+15 — duas verdades sobre a mesma pessoa, e foi o que fez a investigação começar
+por "mas ele está online". `PRESENCE_MS` foi para **`src/lib/presence.ts`**, e
+não é detalhe de organização: importar `lib/leads/distribution.ts` numa página
+CLIENTE arrastaria o cliente de service role para o pacote do navegador (mesmo
+cuidado que tirou `telHref` para `lib/phone.ts`). Conferido no build que não
+vaza.
+
+### Causa 2 — a varredura entregava a fila inteira a quem estivesse online
+
+A leitura do Gabriel estava certa. A varredura de 08/09 roda a cada minuto e
+entrega até 25 por tique a quem está online — **com uma pessoa só, ela leva
+tudo**:
+
+- **antes:** ninguém online → o lead ficava na fila do setor, VISÍVEL A TODOS, e
+  quem chegasse primeiro puxava;
+- **depois:** a primeira pessoa que loga absorve o acumulado da noite, e quem
+  chega meia hora mais tarde não encontra nada.
+
+⚠️ **Estava anotado como pendência no dia anterior** ("não há noção de carga por
+atendente") e cobrou em menos de 24h. Pendência conhecida num caminho que acabou
+de mudar não é backlog — é risco aberto.
+
+**Regra do Gabriel, literal:** o lead que espera HÁ MAIS TEMPO vai primeiro, UM
+por vez, e depois **7 minutos** de espera antes do próximo — a pausa é a janela
+para outro atendente logar e entrar no rodízio. **Só na Secretaria.**
+
+- ⚠️ **COLUNA (`departments.intervalo_fila_min`), não o nome do setor no
+  código.** A tentação era `if (dep.name === 'Secretaria')`. Este repositório já
+  tropeçou em casar por NOME mais de uma vez — foi assim que o bot da secretaria
+  acabou escrevendo no funil Comercial. Padrão `0` = sem intervalo preserva
+  todos os outros setores.
+- `departments.ultima_da_fila_em` é a memória sem a qual o intervalo não existe.
+- ⚠️ **O carimbo só é gravado se ENTREGOU.** Marcar sempre faria um tique em que
+  ninguém está online reiniciar o relógio, e a fila esperaria mais 7 minutos por
+  nada — a espera existe para dar chance a outro atendente logar, não para punir
+  a fila quando não há ninguém. Está escrito como teste.
+- ⚠️ **A fila inteira continua sendo LIDA** mesmo entregando uma só: é o que
+  mantém `naFila` verdadeiro, e `naFila` é o número que diz se o rodízio está
+  dando conta. Contar só o entregue faria 20 leads represados parecerem "0".
+- **Dimensionamento medido:** ~11 leads/dia no fluxo da secretaria. Um a cada 7
+  min é teto de ~8,5/hora — muito acima da chegada normal, então **só morde
+  quando há acúmulo**, que é a intenção. Se o volume crescer, o número é uma
+  coluna.
+
+### ⚠️ O select tolera as colunas ainda não existirem
+
+`distribuirFilaDoSetor` pede `intervalo_fila_min`/`ultima_da_fila_em` e, se a
+consulta falhar, **refaz sem elas**. Não é zelo: neste projeto **o código chega
+à produção ANTES da migração**, e pedir coluna inexistente faz o PostgREST
+recusar a consulta INTEIRA — a varredura pararia de esvaziar a fila, que é o
+oposto do que ela existe para fazer. Foi exatamente assim que o envio quebrou em
+01/09.
+
+### `npm run test:rodizio` — 58 asserções
+
+`limiteDoTique()` é pura e exportada só para ter teste. É regra de RELÓGIO,
+depende de quando o tique roda, e **um erro nela não dá erro nenhum** — só
+reparte os leads errado, que fica invisível até alguém reclamar. Foi assim que a
+causa 2 chegou à produção.
+
+Casos: setor sem intervalo (comportamento inalterado), nunca entregou, 1/6/7/30
+minutos depois, número vindo como **string** do PostgREST, data corrompida (o
+lado seguro é ENTREGAR — travar a fila para sempre é pior), e a varredura
+inteira entregando 1 e deixando 3 na fila.
+
+### ⏳ O que fica em aberto
+
+- **A ordem "quem espera há mais tempo" usa `last_message_at`**, que é a última
+  mensagem QUALQUER da conversa (inclusive a do bot). Para lead recém-triado é
+  praticamente a pergunta do cliente, então serve — mas a medida fiel seria a
+  última mensagem DO CLIENTE, que é o que `conversas_paradas` já calcula.
+- **Os outros setores seguem sem intervalo**, por decisão. Se o Comercial entrar
+  com número próprio, vale reavaliar antes de a mesma manhã se repetir lá.
