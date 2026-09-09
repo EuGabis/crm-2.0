@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { differenceInCalendarDays, format, isToday, isYesterday } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -118,6 +118,30 @@ export function ConversationList({
   const activeView = views.find((v) => v.id === activeViewId) ?? null;
   const todas = useConversations("all");
 
+  /**
+   * Recorte de NÚMERO e RESPONSÁVEL, num lugar só.
+   *
+   * 🔴 Estava escrito inline dentro da lista e em nenhum dos contadores. O
+   * resultado, relatado em 2026-09-09: escolher um responsável filtrava a lista
+   * certo e o selo de "Não lidos" continuava marcando **96** — o total da
+   * empresa. O número ao lado da aba contradizia a própria lista embaixo dele.
+   *
+   * ⚠️ Um recorte que vale para a lista tem de valer para TODO número que
+   * acompanha a lista. Como função, é impossível a lista e o contador
+   * discordarem; escrito duas vezes, discordar é o padrão — o mesmo raciocínio
+   * que fez `aplicarFiltros` existir na aba de Atendimento.
+   */
+  const aplicaRecorte = useCallback(
+    <T extends { channelId?: string | null; assignedTo?: string | null }>(lista: T[]): T[] => {
+      let r = channelFilter ? lista.filter((c) => c.channelId === channelFilter) : lista;
+      // "__none__" = sem responsável, que é diferente de "sem filtro".
+      if (userFilter === "__none__") r = r.filter((c) => !c.assignedTo);
+      else if (userFilter) r = r.filter((c) => c.assignedTo === userFilter);
+      return r;
+    },
+    [channelFilter, userFilter]
+  );
+
   // Não lidas que ainda pedem ação (finalizada/arquivada não conta) DENTRO do escopo
   // atual — senão o badge conta uma conversa que a lista escopada não mostra.
   const unreadCount = useMemo(() => {
@@ -130,20 +154,22 @@ export function ConversationList({
           : scope === "bot"
             ? open.filter((c) => automatedIds.has(c.id))
             : open;
-    return scoped.length;
-  }, [unreadRaw, scope, me?.userId, automatedIds]);
+    return aplicaRecorte(scoped).length;
+  }, [unreadRaw, scope, me?.userId, automatedIds, aplicaRecorte]);
 
   // Contagem por pilha, mostrada no seletor — evita clicar em "Arquivadas" para
-  // descobrir que está vazio.
-  const statusCounts = useMemo(
-    () => ({
-      abertas: todas.filter((c) => !c.closedAt && !c.archivedAt).length,
-      finalizadas: todas.filter((c) => !!c.closedAt).length,
-      arquivadas: todas.filter((c) => !!c.archivedAt).length,
-      todas: todas.length,
-    }),
-    [todas]
-  );
+  // descobrir que está vazio. Respeita o mesmo recorte, pelo mesmo motivo do
+  // selo de não lidas: "Abertas 12" com um responsável escolhido significa 12
+  // DELE, senão o seletor descreve uma lista que não está na tela.
+  const statusCounts = useMemo(() => {
+    const r = aplicaRecorte(todas);
+    return {
+      abertas: r.filter((c) => !c.closedAt && !c.archivedAt).length,
+      finalizadas: r.filter((c) => !!c.closedAt).length,
+      arquivadas: r.filter((c) => !!c.archivedAt).length,
+      todas: r.length,
+    };
+  }, [todas, aplicaRecorte]);
 
   // O escopo do rail cruza com as abas (Não lidos/Todos/...) em vez de
   // substituí-las.
@@ -155,7 +181,7 @@ export function ConversationList({
       if (status === "arquivadas") return !!c.archivedAt;
       return !c.closedAt && !c.archivedAt;
     });
-    let list =
+    const list =
       scope === "mine"
         ? byStatus.filter((c) => c.assignedTo === me?.userId)
         : scope === "offline"
@@ -172,13 +198,9 @@ export function ConversationList({
           : scope === "bot"
             ? byStatus.filter((c) => automatedIds.has(c.id))
             : byStatus;
-    // Separa por número quando um está selecionado.
-    if (channelFilter) list = list.filter((c) => c.channelId === channelFilter);
-    // Filtro por responsável (admin): "__none__" = sem responsável.
-    if (userFilter === "__none__") list = list.filter((c) => !c.assignedTo);
-    else if (userFilter) list = list.filter((c) => c.assignedTo === userFilter);
-    return list;
-  }, [all, todas, status, scope, me?.userId, automatedIds, channelFilter, userFilter]);
+    // Número e responsável saem da MESMA função que os contadores usam.
+    return aplicaRecorte(list);
+  }, [all, todas, status, scope, me?.userId, automatedIds, aplicaRecorte]);
 
   const sorted =
     sort === "Maior atraso de SLA"
