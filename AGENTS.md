@@ -6131,3 +6131,57 @@ selo — o contrário do que o selo existe para fazer. Está escrito como teste.
 `resultado` dizendo "quente" com a conta dizendo frio deve dar **FRIO**.
 
 ⏳ Hoje **só o fluxo Comercial pontua**, então o selo só existe no número novo.
+
+## "Assumo a conversa e ela some da caixa" (2026-09-09)
+
+Relato do Gabriel, com o print do **Relatório** mostrando as duas conversas da
+mesma contato: **Aberta**, atendente João Lucas Mota, em dois números
+diferentes. Ou seja, existiam, estavam abertas e eram dele.
+
+⚠️ **O Relatório e a caixa leem a MESMA store** (`useConversations`), e foi isso
+que apontou a causa: se o Relatório as mostra, elas estão carregadas — quem as
+esconde é um RECORTE da lista, não o banco nem a RLS.
+
+E o status também estava descartado: o "Aberta" do Relatório exige `assignedTo`
+preenchido com `closedAt` e `archivedAt` nulos — exatamente o que a pilha
+"Abertas" da caixa deixa passar.
+
+Sobravam os quatro seletores. **Dois deles entraram no mesmo dia** (Etiquetas e
+Lead), e nenhum dos quatro se anunciava:
+
+- a barra de filtro ativo listava só escopo, pilha e visualização salva;
+- o "X" dela chamava o `reset()` da store, que **não enxerga** os seletores —
+  eles são estado local do componente. Clicar em "limpar" deixava o filtro
+  ligado.
+
+**Regra que sai daqui: filtro que esconde linha TEM de se anunciar, e o botão de
+limpar tem de limpar tudo.** "Some sem explicação" é indistinguível de defeito, e
+custou uma investigação inteira. A barra agora lista os oito recortes possíveis
+(inclusive a busca digitada) e o "X" zera todos.
+
+⏳ Não deu para confirmar QUAL filtro estava ligado — o conector do Supabase
+segue fora e o estado é do navegador dele. A correção resolve a classe:
+qualquer que fosse, agora aparece escrito.
+
+## O comercial NÃO tem devolução ao rodízio
+
+Gabriel, no mesmo dia: *"o comercial não vai ter isso, eles podem mandar uma
+mensagem e o contato responder, mas não tem tempo para eles retornarem"*.
+
+A regra é boa e vale entender o porquê: a devolução mede a espera do CLIENTE e
+pressupõe um prazo para responder. Numa negociação isso não existe — a conversa
+vai e volta no ritmo do cliente, e tirar o lead do vendedor que está negociando
+é pior do que deixá-lo parado.
+
+🔴 **A `202609081346` estava escrita para religar TODOS os setores**
+(`where devolver_apos_min = 0`) e teria ligado a devolução no comercial no
+instante em que fosse aplicada. Corrigida ANTES de aplicar: agora é
+`where name = 'Secretaria'`.
+
+⚠️ **Filtrar pelo VALOR não servia**, e é a parte que importa: o zero foi posto à
+mão em 08/09 para estancar o laço, então "está zerado" não distingue "desligado
+de propósito" do "desligado às pressas". Só o nome do setor separa os dois.
+
+O Financeiro fica de fora por outro motivo: tem `usa_rodizio = false`, então a
+devolução nem seria alcançada — religar ali só poria um número enganoso na tela
+do departamento.

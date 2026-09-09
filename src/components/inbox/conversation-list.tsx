@@ -269,6 +269,58 @@ export function ConversationList({
     [selected, todas]
   );
 
+  /**
+   * Tudo que está recortando a lista AGORA, em texto.
+   *
+   * 🔴 A barra anunciava só escopo, pilha e visualização salva — os QUATRO
+   * seletores (número, responsável, etiquetas, lead) ficavam de fora, e o "X"
+   * não os limpava. Resultado relatado em 2026-09-09: conversa aberta e
+   * atribuída "sumindo da caixa", enquanto o Relatório (mesma store, sem esses
+   * recortes) a mostrava normalmente.
+   *
+   * ⚠️ Filtro que esconde linha TEM de se anunciar. Dois deles entraram hoje
+   * (etiquetas e lead), o que triplicou a chance de alguém deixar um ligado sem
+   * perceber — e "some sem explicação" é indistinguível de defeito.
+   */
+  const recortesAtivos = useMemo(() => {
+    const r: string[] = [];
+    if (activeView) r.push(`Visualização · ${activeView.name}`);
+    if (scope !== "group") r.push(scopeLabel[scope]);
+    if (status !== "abertas") r.push(statusLabel[status]);
+    if (channelFilter) {
+      const c = channels.find((x) => x.id === channelFilter);
+      r.push(`Número · ${c?.phoneE164 || c?.name || "selecionado"}`);
+    }
+    if (userFilter === "__none__") r.push("Sem responsável");
+    else if (userFilter) {
+      r.push(`Responsável · ${members.find((m) => m.userId === userFilter)?.name ?? "—"}`);
+    }
+    if (tagFilter.length) r.push(`Etiquetas · ${tagFilter.join(", ")}`);
+    if (tempFilter) r.push(`Lead · ${tempFilter === "frio" ? "Frio" : "Quente"}`);
+    if (query.trim()) r.push(`Busca · "${query.trim()}"`);
+    return r;
+  }, [
+    activeView,
+    scope,
+    status,
+    channelFilter,
+    userFilter,
+    tagFilter,
+    tempFilter,
+    query,
+    channels,
+    members,
+  ]);
+
+  /** O "X" limpa TUDO — inclusive os seletores, que o `reset` da store não vê. */
+  const limparTudo = () => {
+    reset();
+    setChannelFilter(null);
+    setUserFilter(null);
+    setTagFilter([]);
+    setTempFilter(null);
+  };
+
   const q = query.trim().toLowerCase();
   const visible = q
     ? sorted.filter((conv) => {
@@ -368,20 +420,17 @@ export function ConversationList({
         </DropdownMenu>
         </div>
       </div>
-      {(scope !== "group" || status !== "abertas" || activeView) && (
+      {recortesAtivos.length > 0 && (
         <div className="flex items-center gap-1.5 border-b bg-indigo-50/60 px-3 py-1.5">
-          <span className="truncate text-[11px] font-medium text-indigo-700">
-            {[
-              activeView ? `Visualização · ${activeView.name}` : null,
-              scope !== "group" ? scopeLabel[scope] : null,
-              status !== "abertas" ? statusLabel[status] : null,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
+          <span
+            className="truncate text-[11px] font-medium text-indigo-700"
+            title={recortesAtivos.join(" · ")}
+          >
+            {recortesAtivos.join(" · ")}
           </span>
           <button
-            onClick={reset}
-            title="Voltar à caixa do grupo"
+            onClick={limparTudo}
+            title="Limpar todos os filtros"
             className="ml-auto flex size-5 shrink-0 items-center justify-center rounded text-indigo-400 hover:bg-indigo-100 hover:text-indigo-700"
           >
             <X className="size-3" />
