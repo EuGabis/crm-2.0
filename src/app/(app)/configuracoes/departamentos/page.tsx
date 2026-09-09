@@ -928,7 +928,11 @@ function DepartmentDialog({
             )}
             <p className="mt-1 text-[10px] leading-tight text-slate-400">
               Leads <strong>quentes</strong> dos números deste departamento vão, em rodízio,
-              para quem estiver <strong>online</strong> (ativo nos últimos 5 min). Desmarque
+              {/* ⚠️ Sai da CONSTANTE. Escrito à mão aqui, este "5 min" era o resto da
+                  divergência que `PRESENCE_MS` veio acabar: a tela prometia uma janela e
+                  o rodízio usava outra. */}
+              para quem estiver <strong>online</strong> (ativo nos últimos{" "}
+              {Math.round(PRESENCE_MS / 60000)} min). Desmarque
               quem não deve receber — ninguém marcado = todos recebem.
             </p>
           </div>
