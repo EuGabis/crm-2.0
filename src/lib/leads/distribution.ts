@@ -8,27 +8,14 @@ import { normalize } from "@/lib/bot/types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-/**
- * Janela de presença: "online" = carimbou `last_seen_at` nos últimos 15 minutos.
- *
- * ⚠️ **Eram 5 minutos, e 5 minutos mede a coisa errada.** O carimbo sai do
- * `session-manager`, que pinga a cada 60 s enquanto houver mouse/teclado/scroll
- * recente — ou seja, ele mede "está mexendo no CRM", não "está trabalhando".
- * Quem lê uma conversa longa, atende o telefone ou vai ao banheiro sai do
- * rodízio. Medido em 2026-09-08, com a equipe em plena operação: o Daniel
- * aparecia OFFLINE com 13 min de último carimbo e a Beatriz com 36 — dos 3
- * atendentes da Secretaria, 1 contava como online.
- *
- * Atendente que o rodízio julga offline não recebe lead, e o lead vai para a
- * fila do setor: a janela curta era uma das causas da fila encher.
- *
- * ⚠️ O risco do outro lado (lead cair em quem saiu de fato) fica coberto por
- * duas peças que a mesma mudança conserta: `devolverInativas` volta a funcionar
- * (devolve em 15 min ÚTEIS sem resposta) e `clear_presence()` apaga a presença
- * no logout — inclusive no logout por inatividade, que para o papel "user"
- * acontece em 10 min e antes deixava `last_seen_at` parado no último clique.
+/*
+ * A janela de presença mora em `@/lib/presence` porque as TELAS também precisam
+ * dela (a de Departamentos mostra quem está recebendo lead), e importar este
+ * módulo no cliente arrastaria o cliente de service role para o navegador.
+ * Reexportada aqui para não quebrar quem já importava daqui.
  */
-export const PRESENCE_MS = 15 * 60 * 1000;
+export { PRESENCE_MS } from "@/lib/presence";
+import { PRESENCE_MS } from "@/lib/presence";
 
 /** Status da oportunidade deduzido do nome da etapa (igual ao pipeline.ts). */
 function statusForStageName(name: string): "open" | "won" | "lost" {

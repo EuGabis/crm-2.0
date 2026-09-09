@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { PRESENCE_MS } from "@/lib/presence";
 import { format, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -78,11 +79,22 @@ function allowedCount(p: ModulePermissions) {
   return MODULE_KEYS.filter((k) => p[k] !== false).length;
 }
 
-/** Online = visto nos últimos 5 min. Senão, "visto há X" (ou "nunca acessou"). */
+/**
+ * "Online" AQUI tem de ser o MESMO "online" do rodízio — esta é a tela onde o
+ * gestor confere quem está recebendo lead.
+ *
+ * ⚠️ Eram dois números: 5 min aqui e `PRESENCE_MS` (15 min) na distribuição.
+ * Quem foi visto há 8 minutos aparecia como "visto há 8 minutos" nesta tela E
+ * recebia lead — duas verdades sobre a mesma pessoa, na mesma operação. Foi o
+ * que fez a investigação de 09/09 começar por "mas ele está online".
+ *
+ * Importa de `@/lib/presence`, a fonte única: copiar o número
+ * criaria a divergência de novo na próxima vez que a janela mudar.
+ */
 function presenceInfo(lastSeen: string | null): { online: boolean; label: string } {
   if (!lastSeen) return { online: false, label: "nunca acessou" };
   const diff = Date.now() - new Date(lastSeen).getTime();
-  if (diff < 5 * 60 * 1000) return { online: true, label: "Online" };
+  if (diff < PRESENCE_MS) return { online: true, label: "Online" };
   return {
     online: false,
     label: `visto ${formatDistanceToNow(new Date(lastSeen), { locale: ptBR, addSuffix: true })}`,
