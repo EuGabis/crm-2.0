@@ -6272,3 +6272,57 @@ no print.
 
 ⏳ `contatos/[id]/page.tsx` já tinha **1 erro de lint** (`react-hooks/set-state-in-effect`,
 linha ~49) na `main`, anterior a esta mudança.
+
+## O comercial NÃO devolve ao rodízio — e a migração pendente faria o contrário
+
+Regra do Gabriel (2026-09-09): *"no comercial, uma vez que cair para ele, não é
+pra devolver ao rodízio — eles podem mandar uma mensagem e o contato responder,
+mas não têm tempo para retornar."*
+
+A devolução por espera nasceu de uma queixa específica: a **fila de espera dos
+alunos na Secretaria**. O trabalho do comercial tem outro ritmo — o vendedor
+manda a proposta e o cliente responde quando puder; tirar a conversa dele por
+"15 minutos sem resposta humana" quebraria o acompanhamento e ainda faria o
+cliente falar com outra pessoa no meio da negociação.
+
+### 🔴 A migração pendente `202609081346` religava em TODOS
+
+```sql
+update public.departments set devolver_apos_min = 15 where devolver_apos_min = 0;
+```
+
+⚠️ **O zero de todos eles não significava a mesma coisa.** Ele veio do
+estancamento de emergência do laço, aplicado EM BLOCO às 13:19 de 08/09 —
+então filtrar por `= 0` trata "desligado às pressas" e "desligado de propósito"
+como a mesma coisa. Corrigida antes de ser aplicada:
+
+```sql
+update public.departments set devolver_apos_min = 15 where name = 'Secretaria';
+update public.departments set devolver_apos_min = 0
+ where name in ('Vendas', 'Comercial', 'Secretaria Backup');
+```
+
+- ⚠️ **Igualdade exata, nunca `ilike '%secretaria%'`:** o departamento do time
+  comercial se chama **"Secretaria Backup"**, e casar por trecho ligaria a
+  devolução exatamente onde ela não pode existir. Este repositório já tropeçou
+  em casar por NOME mais de uma vez (foi assim que o bot da secretaria acabou
+  escrevendo no funil Comercial).
+- **O 0 explícito não é redundância:** "Vendas" nasceu com `devolver_apos_min = 15`
+  na 202609021519, e sem essa linha ele voltaria a devolver no dia em que o
+  número novo fosse vinculado — sem ninguém relacionar as duas coisas.
+- ⚠️ A migração pede para **conferir as linhas afetadas**: se o primeiro update
+  disser 0 linhas, o departamento não se chama exatamente "Secretaria" e a
+  devolução segue desligada — seguro, mas não é o que ela pretende.
+
+⚠️ **A regra continua sendo DADO, não código.** A tentação é um
+`if (dep.name === 'Comercial') return` na devolução; seria a mesma fragilidade
+de nome, e ainda esconderia no código uma decisão que o admin precisa ver e
+mudar. `devolver_apos_min = 0` no diálogo do departamento é a regra, e o próprio
+campo já diz "0 desliga".
+
+### O "5 min" que sobrou na tela
+
+O texto do rodízio no diálogo dizia *"online (ativo nos últimos 5 min)"* escrito
+à mão — o resto exato da divergência que `PRESENCE_MS` veio acabar no mesmo dia:
+a tela prometia uma janela e o rodízio usava outra (15 min). Agora sai da
+constante. **Número que descreve comportamento não se escreve duas vezes.**
