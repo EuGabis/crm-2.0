@@ -657,6 +657,46 @@ async function autor(): Promise<string | null> {
  * migração.** Toda consulta que depende de coluna nova precisa sobreviver à
  * ausência dela.
  */
+/**
+ * O criador precisa nascer como DONO desta conversa?
+ *
+ * 🔴 Sim, quando ele só enxerga o que é dele (`location_members.only_assigned`).
+ * A policy de SELECT de `conversations` exige `assigned_to = auth.uid()` para
+ * quem não tem `sees_all` — então uma conversa criada SEM responsável é
+ * **escondida pela RLS no mesmo instante**, o `.select()` do insert volta vazio
+ * e o `open()` devolve `null`. Na tela: "Não foi possível abrir a conversa".
+ *
+ * ⚠️ E o pior é o que fica para trás: o INSERT **passa** (o `with check` só olha
+ * a empresa) e só o RETURNING é filtrado. A conversa existe no banco, invisível
+ * para quem a criou — e na segunda tentativa a busca do topo também não a
+ * enxerga, então o código tenta inserir de novo e bate no índice único.
+ *
+ * Relatado em 2026-09-09 com o Paulo, e o alcance é exatamente esse: Alberto,
+ * Paulo e Rogério são os únicos com `only_assigned = true`.
+ *
+ * ⚠️ Devolve `null` para quem VÊ TUDO, de propósito. Atribuir a conversa a quem
+ * só queria abri-la foi uma queixa anterior do Gabriel, e a decisão de então
+ * ("a atribuição vem só com o template") continua valendo para essas pessoas —
+ * o que faltava era a exceção de quem não consegue nem ver o que criou.
+ *
+ * ⚠️ `.eq("user_id", uid)` é obrigatório: a policy de `location_members` é por
+ * EMPRESA, então sem o filtro vêm todas as pessoas e o `maybeSingle()` some com
+ * a resposta. Mesma armadilha corrigida em `escolherCanal` em 01/09.
+ */
+async function donoObrigatorio(location: string): Promise<string | null> {
+  const supabase = createClient();
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess?.user?.id ?? null;
+  if (!uid) return null;
+  const { data } = await supabase
+    .from("location_members")
+    .select("only_assigned")
+    .eq("location_id", location)
+    .eq("user_id", uid)
+    .maybeSingle();
+  return (data as { only_assigned: boolean } | null)?.only_assigned ? uid : null;
+}
+
 async function escolherCanal(location: string): Promise<string | null> {
   const supabase = createClient();
 
@@ -1407,6 +1447,8 @@ export const conversationActions = {
      * Melhor não criar e devolver null, que o chamador já sabe tratar.
      */
     if (channel === "whatsapp" && !channelId) return null;
+    // Quem só vê o que é dele precisa nascer como dono — ver `donoObrigatorio`.
+    const dono = assignTo ?? (await donoObrigatorio(location));
     const { data, error } = await supabase
       .from("conversations")
       .insert({
@@ -1414,7 +1456,7 @@ export const conversationActions = {
         contact_id: contactId,
         channel,
         ...(channelId ? { channel_id: channelId } : {}),
-        ...(assignTo ? { assigned_to: assignTo } : {}),
+        ...(dono ? { assigned_to: dono } : {}),
       })
       .select()
       .single();
@@ -1454,9 +1496,18 @@ export const conversationActions = {
       return conv.id;
     };
     if (found) return patchIn(found);
+    // Mesma regra do `open()`: sem isto, quem só vê o que é dele cria uma
+    // conversa que a RLS esconde no mesmo instante.
+    const dono = await donoObrigatorio(location);
     const { data, error } = await supabase
       .from("conversations")
-      .insert({ location_id: location, contact_id: contactId, channel: "whatsapp", channel_id: channelId })
+      .insert({
+        location_id: location,
+        contact_id: contactId,
+        channel: "whatsapp",
+        channel_id: channelId,
+        ...(dono ? { assigned_to: dono } : {}),
+      })
       .select()
       .single();
     if (error || !data) return null;
