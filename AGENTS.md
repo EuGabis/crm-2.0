@@ -5971,3 +5971,30 @@ estava fora):
 
 A checagem é direta: abrir o contato e olhar "Proprietário" no cabeçalho; e no
 banco, `select owner_id from contacts where id = '<id>'`.
+
+### E o nome do contato virando o literal "Contato" (mesmo dia)
+
+Relato: *"na barra lateral não está aparecendo o nome do contato, só está
+aparecendo como Contato"*.
+
+⚠️ **Não é a barra lateral da direita.** `ContactPanel` resolve o contato por id
+(`useDbContact`, que busca no banco quando a store não tem) e faz
+`if (!contact) return null` — ele não escreve "Contato" nunca. Quem escreve é a
+LISTA de conversas, à esquerda:
+
+```ts
+firstName: conv.contactFirstName || "Contato",
+```
+
+E `mapConversation` alimenta isso com `r.contact?.first_name`, que só existe se a
+consulta trouxe o **join** `contact:contacts(first_name, last_name, phone, email)`.
+
+⚠️ **Quatro leituras punham a conversa na store SEM o join** — as duas de
+`open()` e as duas de `openForChannel()`, que são exatamente os caminhos de
+"Nova conversa" e "Abrir conversa". A conversa recém-criada entrava na lista sem
+nome e só ganhava o nome no F5 seguinte, quando o `load()` (que tem o join)
+rodava.
+
+**Regra: toda leitura de `conversations` que entra na store leva o join do
+contato.** O fallback existe para a linha não sumir enquanto carrega — não para
+ser o estado final.

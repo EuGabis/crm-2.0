@@ -1423,7 +1423,7 @@ export const conversationActions = {
     // uma conversa duplicada. Confere no banco antes de inserir.
     const { data: found } = await supabase
       .from("conversations")
-      .select("*")
+      .select("*, contact:contacts(first_name, last_name, phone, email)")
       .eq("contact_id", contactId)
       .eq("channel", channel)
       .order("created_at", { ascending: true })
@@ -1458,7 +1458,13 @@ export const conversationActions = {
         ...(channelId ? { channel_id: channelId } : {}),
         ...(dono ? { assigned_to: dono } : {}),
       })
-      .select()
+      /*
+       * ⚠️ O JOIN do contato é obrigatório em TODA leitura que entra na store.
+       * `mapConversation` lê `r.contact?.first_name`, e a lista mostra
+       * `conv.contactFirstName || "Contato"` — sem o join o nome vira o literal
+       * "Contato" até alguém recarregar a página. Relatado em 2026-09-09.
+       */
+      .select("*, contact:contacts(first_name, last_name, phone, email)")
       .single();
     if (error || !data) return null;
     const conv = mapConversation(data);
@@ -1481,7 +1487,7 @@ export const conversationActions = {
     const supabase = createClient();
     const { data: found } = await supabase
       .from("conversations")
-      .select("*")
+      .select("*, contact:contacts(first_name, last_name, phone, email)")
       .eq("contact_id", contactId)
       .eq("channel_id", channelId)
       .order("created_at", { ascending: true })
@@ -1508,7 +1514,13 @@ export const conversationActions = {
         channel_id: channelId,
         ...(dono ? { assigned_to: dono } : {}),
       })
-      .select()
+      /*
+       * ⚠️ O JOIN do contato é obrigatório em TODA leitura que entra na store.
+       * `mapConversation` lê `r.contact?.first_name`, e a lista mostra
+       * `conv.contactFirstName || "Contato"` — sem o join o nome vira o literal
+       * "Contato" até alguém recarregar a página. Relatado em 2026-09-09.
+       */
+      .select("*, contact:contacts(first_name, last_name, phone, email)")
       .single();
     if (error || !data) return null;
     return patchIn(data);
