@@ -6749,3 +6749,24 @@ sem deixar objeto pela metade.
 - O funil **Comercial segue como `scope=department` do "Secretaria Backup"**. O
   `AGENTS.md` já registra que ele deveria migrar para o departamento **Vendas** —
   continua pendente, junto do número novo.
+
+### O filtro que escondia sem se anunciar
+
+A barra azul da caixa de entrada anunciava só **escopo, pilha e visualização
+salva**. Os quatro seletores — número, responsável, etiquetas e temperatura —
+ficavam de fora, e o "X" não os limpava.
+
+🔴 Foi isso que produziu o relato *"estou assumindo conversas e estão sumindo da
+minha caixa"*: havia um filtro de NÚMERO ligado num número recém-cadastrado,
+onde quase não há conversa. O Relatório, que lê a MESMA store sem esses
+recortes, mostrava tudo normalmente — e essa contradição mandou a investigação
+para o lado errado.
+
+⚠️ **Filtro que esconde linha tem de se anunciar.** Dois deles entraram no mesmo
+dia (etiquetas e temperatura), o que triplicou a chance de alguém deixar um
+ligado sem perceber. "Sumiu sem explicação" é indistinguível de defeito.
+
+⚠️ **E um "X" que limpa metade dos filtros é pior que não ter "X"**: a pessoa
+clica, a lista continua curta, e conclui que as conversas não existem. Os quatro
+seletores são estado local da lista, então o `reset()` da store não os via —
+`limparTudo` zera os dois lados.
