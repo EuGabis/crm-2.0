@@ -39,6 +39,29 @@ interface Lead {
   /** Desfecho do bot. `null` = não concluiu a triagem. */
   resultado: string | null;
   pontos: number | null;
+  /** Com quem o lead está AGORA. `null` = ninguém assumiu. */
+  atendente: string | null;
+  /** O atendimento foi encerrado. */
+  finalizada: boolean;
+  /** A oportunidade vinculada está ganha (ver a ressalva na 202609092130). */
+  ganha: boolean;
+  /** Curso marcado no card. `null` = ninguém marcou. */
+  curso: string | null;
+}
+
+/** Uma linha do quadro "por atendente". */
+interface Carteira {
+  atendente: string | null;
+  recebeu: number;
+  qualificados: number;
+  finalizadas: number;
+  ganhas: number;
+  /** Quantos leads dele têm cada curso marcado. */
+  cursos: Record<string, number>;
+}
+
+function carteira(atendente: string | null): Carteira {
+  return { atendente, recebeu: 0, qualificados: 0, finalizadas: 0, ganhas: 0, cursos: {} };
 }
 
 /** Um balde de agregação — por dia ou por hora, a conta é a mesma. */
@@ -156,11 +179,21 @@ export async function GET(request: Request) {
     return Response.json({ error: `Não foi possível carregar: ${detalhe}` }, { status: 500 });
   }
 
+  /*
+   * ⚠️ Os quatro campos novos usam `??`/`Boolean` e sobrevivem à AUSÊNCIA deles:
+   * neste projeto o código vai ao ar ANTES da migração, então até a 202609092130
+   * ser aplicada a função devolve 5 colunas. Sem essa tolerância a aba inteira
+   * quebraria no intervalo — o defeito que já derrubou o envio em 01/09.
+   */
   const leads: Lead[] = (data ?? []).map((r: any) => ({
     dia: r.dia as string,
     hora: Number(r.hora ?? 0),
     resultado: (r.resultado as string | null) ?? null,
     pontos: r.pontos == null ? null : Number(r.pontos),
+    atendente: (r.atendente as string | null) ?? null,
+    finalizada: r.finalizada === true,
+    ganha: r.ganha === true,
+    curso: (r.curso as string | null) ?? null,
   }));
 
   /*
@@ -192,9 +225,69 @@ export async function GET(request: Request) {
 
   const horas = porHora.map((b, hora) => ({ hora, ...fechar(b) }));
 
+  /*
+   * Carteira por atendente (pedido do Gabriel, 09/09).
+   *
+   * ⚠️ **Agrupa por quem está com o lead AGORA** (`conversations.assigned_to`),
+   * não por quem passou por ele. Conversa devolvida ao rodízio troca de dono, e
+   * o histórico disso vive nos eventos do fio — aqui a pergunta é de carteira.
+   *
+   * ⚠️ **"Sem responsável" É uma linha**, e das mais importantes: lead que
+   * ninguém assumiu sumindo do quadro é justamente o que não pode passar
+   * despercebido. Mesma decisão da aba Atendimento (0079).
+   */
+  /*
+   * 🔴 **A função respondeu com as colunas novas?** Neste projeto o código vai ao
+   * ar ANTES da migração, e aqui a tolerância não podia ser só `?? null`: sem a
+   * coluna `atendente`, TODO lead cairia em "sem responsável" e o quadro
+   * afirmaria que ninguém assumiu nada — uma tela que MENTE é pior que uma tela
+   * que não existe ainda. Enquanto a 202609092130 não for aplicada, o quadro
+   * simplesmente não é enviado e a tela não o desenha.
+   */
+  const temCarteira =
+    (data ?? []).length > 0 &&
+    Object.prototype.hasOwnProperty.call((data as any[])[0], "atendente");
+
+  const porAtendente = new Map<string, Carteira>();
+  const cursosTotal: Record<string, number> = {};
+  for (const l of leads) {
+    const chave = l.atendente ?? "";
+    const c = porAtendente.get(chave) ?? carteira(l.atendente);
+    c.recebeu++;
+    // "Qualificado" só existe onde o bot pontua; no fluxo da secretaria a coluna
+    // fica zerada e a tela não a mostra.
+    if (l.resultado === "quente") c.qualificados++;
+    if (l.finalizada) c.finalizadas++;
+    if (l.ganha) c.ganhas++;
+    if (l.curso) {
+      c.cursos[l.curso] = (c.cursos[l.curso] ?? 0) + 1;
+      cursosTotal[l.curso] = (cursosTotal[l.curso] ?? 0) + 1;
+    }
+    porAtendente.set(chave, c);
+  }
+
+  const carteiras = [...porAtendente.values()].sort(
+    // Quem recebeu mais primeiro; empate desce para "sem responsável" por último,
+    // que é onde ele incomoda menos sem deixar de aparecer.
+    (a, b) => b.recebeu - a.recebeu || (a.atendente ? -1 : 1),
+  );
+
+  const cursos = Object.entries(cursosTotal)
+    .map(([curso, leads]) => ({ curso, leads }))
+    .sort((a, b) => b.leads - a.leads || a.curso.localeCompare(b.curso, "pt-BR"));
+
   return Response.json({
     linhas,
     horas,
+    carteiras: temCarteira ? carteiras : undefined,
+    cursos: temCarteira ? cursos : undefined,
+    /*
+     * ⚠️ Quantos leads NÃO têm curso marcado. Sem este número, um quadro de
+     * cursos com 6 leads sobre 126 pareceria a operação inteira — e a conclusão
+     * ("quase ninguém quer MMA") seria o oposto da verdade ("quase ninguém
+     * marcou o curso").
+     */
+    semCurso: temCarteira ? leads.filter((l) => !l.curso).length : undefined,
     total: fechar(total),
     dias,
     flow,

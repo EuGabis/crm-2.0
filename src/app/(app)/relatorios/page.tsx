@@ -31,6 +31,11 @@ import {
 import { formatBRL } from "@/lib/data/repos/opportunities";
 import { usePipelineDb } from "@/lib/data/repos/db/pipeline";
 import { useMyMembership } from "@/lib/data/repos/db/team";
+import {
+  CarteiraPorAtendente,
+  type Carteira,
+  type CursoContado,
+} from "@/components/reports/leads-por-atendente";
 import { useAiAnalyses } from "@/lib/data/repos/db/ai";
 import { cn } from "@/lib/utils";
 import { useIsSupervisor } from "@/lib/data/repos/db/sector";
@@ -468,6 +473,15 @@ interface Fluxo {
   series: SerieDesfecho[];
   /** Só fluxo com nó de pontuação tem média de pontos para mostrar. */
   mostraPontos: boolean;
+  /**
+   * O fluxo termina em VENDA? Decide as colunas "Qualificados" e "Ganhos" do
+   * quadro por atendente.
+   *
+   * ⚠️ Na secretaria elas seriam uma coluna de zeros — e coluna de zeros não é
+   * informação neutra: ela sugere desempenho ruim onde a régua nem existe. O
+   * atendimento de documentos não fecha venda nenhuma, por desenho.
+   */
+  mostraGanhos: boolean;
   /** Aviso de histórico parcial, quando o dado antigo veio de backfill. */
   historicoParcial?: string;
 }
@@ -501,6 +515,7 @@ const FLUXOS: Fluxo[] = [
       { chave: "frio", rotulo: "Frios", cor: INDIGO },
     ],
     mostraPontos: true,
+    mostraGanhos: true,
   },
   {
     key: "triagem-secretaria",
@@ -518,6 +533,7 @@ const FLUXOS: Fluxo[] = [
       { chave: "outros", rotulo: "Outros", cor: AMBAR },
     ],
     mostraPontos: false,
+    mostraGanhos: false,
     historicoParcial:
       "O histórico anterior a 03/09 foi recuperado das sessões do bot que ainda existiam — a sessão é apagada quando uma conversa finalizada reabre, então alguns dias antigos aparecem com menos desfechos do que realmente houve. A partir de hoje o registro é permanente.",
   },
@@ -604,6 +620,9 @@ function LeadsDoDiaPainel({ dias, fluxo }: { dias: number; fluxo: Fluxo }) {
     linhas: LinhaDia[];
     horas: LinhaHora[];
     total: TotalLeads;
+    carteiras?: Carteira[];
+    cursos?: CursoContado[];
+    semCurso?: number;
   } | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [baixando, setBaixando] = useState(false);
@@ -883,6 +902,15 @@ function LeadsDoDiaPainel({ dias, fluxo }: { dias: number; fluxo: Fluxo }) {
           separava um do outro. */}
       <div className="mt-4">
         <LeadsPorHora horas={dados.horas ?? []} dias={dias} />
+      </div>
+
+      <div className="mt-4">
+        <CarteiraPorAtendente
+          carteiras={dados.carteiras ?? []}
+          cursos={dados.cursos ?? []}
+          semCurso={dados.semCurso ?? 0}
+          mostraGanhos={fluxo.mostraGanhos}
+        />
       </div>
 
       {fluxo.historicoParcial && t.entraram > 0 && (
