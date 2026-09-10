@@ -608,6 +608,13 @@ export type LinhaParada = {
    * inteira.
    */
   ja_respondida?: boolean | null;
+  /**
+   * Minutos ÚTEIS que a conversa está com o responsável ATUAL (202609101830).
+   *
+   * ⚠️ Opcional: até a migração ser aplicada chega `undefined`, e aí a SQL
+   * também não filtra por ela — o comportamento é o de hoje.
+   */
+  minutos_com_atendente?: number | string | null;
 };
 
 /**
@@ -621,7 +628,12 @@ export type LinhaParada = {
  * A pergunta que a SQL já respondeu: "a bola está com a gente há mais de N
  * minutos úteis?" A que sobra aqui é: "e mesmo assim, devo mexer?"
  */
-export function devolvivel(l: LinhaParada, channelIds: string[]): boolean {
+export function devolvivel(
+  l: LinhaParada,
+  channelIds: string[],
+  /** Limite do setor, em minutos úteis. Sem ele, a janela não é conferida aqui. */
+  limiteMin?: number,
+): boolean {
   // Sem dono não é devolução: é fila, e quem cuida dela é `distribuirFilaDoSetor`.
   // Devolver para a fila quem já está na fila seria um evento por tique, para
   // sempre.
@@ -662,6 +674,27 @@ export function devolvivel(l: LinhaParada, channelIds: string[]): boolean {
   if (l.devolvida_em) {
     if (!l.ultima_do_cliente) return false;
     if (new Date(l.devolvida_em) >= new Date(l.ultima_do_cliente)) return false;
+  }
+
+  /*
+   * 🔴 **A JANELA DO ATENDENTE: quem acabou de receber não pode perder.**
+   *
+   * Fio real de 2026-09-10: o lead esperou 3h na fila (ninguém online), foi
+   * entregue à Beatriz às 10:35 e devolvido às 10:36 — ela teve UM MINUTO. A
+   * espera do CLIENTE já era 156 min antes de ela existir na história, e era só
+   * essa conta que a devolução olhava.
+   *
+   * ⚠️ Segunda barreira: a SQL já filtra por `minutos_com_atendente >= limite`.
+   * Está repetido aqui porque o limite é por setor e esta função é a camada
+   * testável — e porque a mesma devolução já misturou "o cliente espera demais"
+   * com "este atendente falhou" uma vez.
+   *
+   * ⚠️ Sem o carimbo (`undefined`/null) NÃO bloqueia: a coluna é nova e, enquanto
+   * a migração não for aplicada, bloquear aqui desligaria a devolução inteira.
+   */
+  if (l.minutos_com_atendente != null && limiteMin != null) {
+    const comAtendente = Number(l.minutos_com_atendente);
+    if (Number.isFinite(comAtendente) && comAtendente < limiteMin) return false;
   }
 
   /*
@@ -821,7 +854,7 @@ export async function devolverInativas(
     }
 
     const parados = (linhas ?? []).filter((l: any) =>
-      devolvivel(l, channelIds),
+      devolvivel(l, channelIds, limite),
     );
     if (!parados.length) continue;
 

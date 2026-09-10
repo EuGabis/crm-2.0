@@ -6770,3 +6770,80 @@ ligado sem perceber. "Sumiu sem explicação" é indistinguível de defeito.
 clica, a lista continua curta, e conclui que as conversas não existem. Os quatro
 seletores são estado local da lista, então o `reset()` da store não os via —
 `limparTudo` zera os dois lados.
+### ⚠️ O quadro por atendente mostrava gente de FORA do setor
+
+Relato do Gabriel (2026-09-10): o Daniel apareceu no quadro do **comercial** com 2
+leads, e ele é da **secretaria**.
+
+O dado é verdadeiro — alguém transferiu duas conversas do número comercial para
+ele. O problema é de recorte: uma linha de fora suja exatamente a comparação que
+o quadro existe para fazer ("quem do comercial recebeu quanto").
+
+⚠️ **Agrupado em "Outros setores", NÃO descartado.** Tirar as linhas faria a soma
+de "Recebeu" deixar de fechar com "Entraram" — e quadro cuja soma não fecha é
+quadro em que ninguém confia. Some 2 hoje; some 40 no dia em que um setor começar
+a socorrer o outro, e ninguém percebe que faltou. Agrupada, a linha ainda responde
+algo útil: **quanto do setor está sendo atendido por fora**.
+
+- **O time sai do vínculo REAL** (`department_channels` → departamento → membros
+  + `lead_pool`), o mesmo caminho que o rodízio usa para decidir a quem entregar.
+  Uma lista de nomes no código divergiria na primeira contratação.
+- ⚠️ **Time vazio não recorta nada**: número sem departamento vinculado (ou fluxo
+  em branco) agruparia o quadro INTEIRO numa linha só. Esconder tudo é pior que
+  mostrar demais.
+- "Sem responsável" e "Outros setores" descem para o fim da tabela: são contexto,
+  e no meio da lista competiriam com a comparação entre atendentes.
+- Corrigido na ROTA, sem migração — o vínculo já existe no banco, e trocar o
+  `returns table` de novo custaria mais um `drop`/`create` por nada.
+
+## 🔴 A devolução tomava a conversa UM MINUTO depois de entregá-la (2026-09-10)
+
+Fio real da Secretaria, no número 11 94767-1223:
+
+```
+07:24  cliente: "Preciso do link de pagamento"
+07:24  resposta automática: "aguarde, em breve iremos te atender"
+07:24  atendente do fluxo offline -> rodízio do setor
+07:24  ninguém no rodízio -> lead aguardando distribuição
+10:35  Atribuída a Beatriz Brito · varredura da fila do setor
+10:36  Devolvida à fila · devolvida: cliente esperava 156 min sem resposta
+10:36  Atribuída a Daniel Messias · redistribuída após 156 min de espera
+```
+
+⚠️ **A Beatriz teve UM MINUTO**, e nada ali foi aleatório: o lead esperou 3h na
+fila (ninguém online antes das 10h30 — correto), então no instante da entrega a
+espera do cliente JÁ era 156 min, muito acima do limite. O tique seguinte olhou a
+mesma conta e devolveu.
+
+🔴 **A causa é uma decisão minha, escrita na 202608280930:** *"o relógio é a
+ESPERA DO CLIENTE, não 'há quanto tempo foi atribuída'"*. Medir a espera do aluno
+é a régua certa para dizer **se ele está esperando demais** — e a régua ERRADA
+para decidir **se ESTE atendente falhou**. Quem acabou de receber não teve como
+falhar em nada.
+
+A regra passa a exigir as DUAS coisas: o cliente espera além do limite **E** o
+atendente ficou com a conversa por mais que o limite.
+
+- **`conversations.atribuida_em`**, preenchida pelo GATILHO que já existe
+  (`marca_quem_atribuiu`) — não por cada um dos oito caminhos que mudam
+  `assigned_to`. É a lição da 202608281530.
+- Volta a NULL quando a conversa volta para a fila: sem dono não há de quem
+  contar o tempo, e o carimbo do dono anterior mentiria.
+- ⚠️ **Minutos ÚTEIS**, pela mesma `business_minutes`: quem recebe às 18h55 não
+  pode perder o lead às 19h15 por vinte minutos fora do expediente.
+- ⚠️ **Sem carimbo NÃO devolve** (`atribuida_em is not null` na SQL): sem ele não
+  há como afirmar que a janela passou, e o lado seguro é não mexer. A conversa
+  volta a ser elegível na primeira troca de mão.
+- ⚠️ **O retroativo usa `now()`.** As alternativas eram piores: NULL tratado como
+  "sem janela" produziria uma RAJADA de devoluções no minuto seguinte à migração
+  — o próprio defeito que ela conserta; NULL como "não devolve" congelaria a
+  devolução até cada conversa trocar de mão. Com `now()`, todos ganham uma janela
+  cheia a partir da aplicação.
+
+⚠️ **ORDEM IMPORTA:** aplicar a **202609101830 ANTES da 202609101430**
+(redistribuição da fila). Ao contrário, a redistribuição entrega dezenas de leads
+cujos clientes já esperam há horas, e o tique seguinte os devolve em bloco —
+exatamente o caso da Beatriz, multiplicado.
+
+`npm run test:rodizio` — 91 asserções; o caso da Beatriz está escrito com os
+números do fio.
