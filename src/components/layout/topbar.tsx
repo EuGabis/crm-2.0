@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { LogOut, Minus, Moon, Plus, SunMedium } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { DisponibilidadeSwitch } from "./disponibilidade-switch";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -54,6 +55,10 @@ export function Topbar() {
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-end gap-2 border-b bg-[#0d1117] px-4">
+      {/* Status do atendente (Online / Ausente). Fica VISÍVEL e não dentro do
+          menu do avatar: é ele que corta a chegada de lead novo, e um status
+          escondido faz a pessoa parar de receber sem saber por quê. */}
+      <DisponibilidadeSwitch />
       <AppearancePopover />
       {/* O sino agora abre a central de verdade (avisos derivados de conversas,
           agenda e agendamentos que falharam), no lugar do toast "chega em breve". */}
