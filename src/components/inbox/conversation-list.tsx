@@ -54,7 +54,7 @@ import { SlaBadge } from "@/components/shared/sla-badge";
 import { contactName } from "@/lib/data/repos/contacts";
 import { TagPicker } from "@/components/contacts/tag-picker";
 import { etiquetasVisiveis, useContactTags } from "@/lib/data/repos/db/tags";
-import { temperaturaDe, useDesfechos } from "@/lib/data/repos/db/bot-desfechos";
+import { temperaturaDe, useDesfechos, type Temperatura } from "@/lib/data/repos/db/bot-desfechos";
 import {
   conversationActions,
   useAutomatedConversationIds,
@@ -77,6 +77,51 @@ const FILTER_TABS: { key: ConversationFilter; label: string }[] = [
 ];
 
 const STATUS_VIEWS: InboxStatusView[] = ["abertas", "finalizadas", "arquivadas", "todas"];
+
+/**
+ * O selo de temperatura do lead na linha da conversa.
+ *
+ * 🔴 **Os DOIS aparecem** (pedido do Gabriel, 2026-09-09). A versão anterior
+ * mostrava só o FRIO, com este argumento: "marcar o quente também faria toda
+ * linha ter um selo, e aí nenhuma se destaca".
+ *
+ * ⚠️ O argumento partia de uma premissa errada — a de que sem o selo a linha
+ * seria "quente". Não é: **a maioria das conversas não tem nota nenhuma.** Só o
+ * fluxo Comercial pontua; o da secretaria decide por assunto e grava
+ * `pontos`/`limiar` nulos. Então nem toda linha ganha selo, e o que a ausência
+ * dele passa a dizer é preciso: *o bot não pontuou esta conversa* — antes ela
+ * misturava isso com "é quente", que são coisas opostas para quem prioriza.
+ *
+ * ⚠️ A distinção é por PALAVRA e por cor, nunca só pela cor: verde e azul a 9px
+ * de altura, num selo de uma palavra, é exatamente o par que a deuteranopia
+ * embaralha. O texto é a codificação secundária.
+ *
+ * As cores são as mesmas do relatório "Leads do dia" (esmeralda = qualificado,
+ * azul = frio) — a caixa e o relatório não podem discordar sobre qual cor é o
+ * lead bom. Todas com remapeamento de dark em `globals.css` (conferido:
+ * `bg-emerald-50`, `text-emerald-700`, `border-emerald-200` e as irmãs em sky).
+ */
+function SeloTemperatura({ t }: { t: Temperatura }) {
+  if (!t) return null;
+  const frio = t === "frio";
+  return (
+    <span
+      title={
+        frio
+          ? "O bot pontuou abaixo do limiar — atenda, mas não é prioridade"
+          : "O bot pontuou na meta ou acima — lead qualificado, priorize"
+      }
+      className={cn(
+        "shrink-0 rounded border px-1 text-[9px] font-semibold uppercase tracking-wide",
+        frio
+          ? "border-sky-200 bg-sky-50 text-sky-700"
+          : "border-emerald-200 bg-emerald-50 text-emerald-700"
+      )}
+    >
+      {frio ? "Frio" : "Quente"}
+    </span>
+  );
+}
 
 /**
  * As etiquetas do contato na linha da conversa.
@@ -703,17 +748,7 @@ export function ConversationList({
                     <span className="truncate text-xs font-semibold text-slate-800">
                       {contactName(contact)}
                     </span>
-                    {/* ⚠️ SÓ o frio ganha selo. Marcar o quente também faria
-                        toda linha ter um selo, e aí nenhuma se destaca — ele
-                        existe para dizer "este pode esperar". */}
-                    {temperaturaDe(desfechos.get(conv.id)) === "frio" && (
-                      <span
-                        title="O bot pontuou abaixo do limiar — atenda, mas não é prioridade"
-                        className="shrink-0 rounded border border-sky-200 bg-sky-50 px-1 text-[9px] font-semibold uppercase tracking-wide text-sky-700"
-                      >
-                        Frio
-                      </span>
-                    )}
+                    <SeloTemperatura t={temperaturaDe(desfechos.get(conv.id))} />
                   </span>
                   <span className="flex shrink-0 items-center gap-1">
                     <SlaBadge days={conv.slaDays} />

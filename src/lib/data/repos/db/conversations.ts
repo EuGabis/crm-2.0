@@ -775,6 +775,50 @@ async function completarContato(id: string): Promise<void> {
   }
 }
 
+/**
+ * Traz UMA conversa para a store, por id.
+ *
+ * 🔴 Existe porque o relatório e a caixa **não leem a mesma coisa**. Para
+ * supervisor (setor colaborativo ou admin), `ConversationsReport` monta as
+ * linhas a partir de `sector_conversations` — uma função que enxerga o setor
+ * INTEIRO, de propósito, passando por cima da RLS da caixa, que é privada por
+ * atendente (0074). Então o relatório lista conversas que a store nunca teve, e
+ * o botão "Abrir conversa" entregava à tela um id impossível de resolver.
+ *
+ * ⚠️ Devolve `false` quando a RLS não deixa ler — e isso NÃO é erro: é o caso
+ * do supervisor de setor colaborativo diante da conversa de um colega, que ele
+ * enxerga no relatório e só pode abrir depois de ASSUMIR. Consulta que não
+ * devolve linha e erro de rede levam a condutas diferentes, e quem chama precisa
+ * dessa distinção — daí o booleano em vez de um `void` silencioso.
+ */
+export async function carregarConversa(id: string): Promise<boolean> {
+  try {
+    await useDbStore.getState().ensureSession();
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("conversations")
+      .select(CONV_SELECT)
+      .eq("id", id)
+      .maybeSingle();
+    if (error) {
+      console.error(`[inbox] falha ao abrir a conversa ${id}: ${error.code ?? "?"} · ${error.message}`);
+      return false;
+    }
+    if (!data) return false;
+    const cheia = mapConversation(data);
+    const s = useConvStore.getState();
+    const tem = s.conversations.some((c) => c.id === id);
+    s.patch({
+      conversations: tem
+        ? s.conversations.map((c) => (c.id === id ? preservarContato(cheia, c) : c))
+        : [cheia, ...s.conversations],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function preservarContato(novo: Conversation, anterior?: Conversation): Conversation {
   if (!anterior) return novo;
   return {

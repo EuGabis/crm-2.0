@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -45,6 +45,7 @@ import { contactName } from "@/lib/data/repos/contacts";
 import { useContactsSearch } from "@/lib/data/repos/db/contacts-search";
 import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
 import {
+  carregarConversa,
   conversationActions,
   scheduleActions,
   snippetActions,
@@ -160,6 +161,36 @@ function ConversasPageInner() {
     if (!selectedId && conversations.length > 0) setSelectedId(conversations[0].id);
   }, [conversations, selectedId]);
 
+  /*
+   * 🔴 Id escolhido que a store NÃO tem: busca a conversa antes de desistir.
+   *
+   * O relatório e a caixa não leem a mesma coisa. Para supervisor, as linhas do
+   * relatório vêm de `sector_conversations`, que enxerga o setor inteiro de
+   * propósito; a caixa é privada por atendente (0074). Então "Abrir conversa"
+   * entregava aqui um id que `useConversation` não resolvia — e o painel abria
+   * uma CASCA: sem cabeçalho, sem fio, sem barra lateral, e com o campo de
+   * digitação funcionando. O mesmo vale para `/conversas?c=<id>` colado numa
+   * aba nova antes de a store carregar.
+   *
+   * ⚠️ Uma tentativa por id (`tentadas`), senão uma conversa que a RLS esconde
+   * viraria uma consulta por render.
+   */
+  const tentadas = useRef<Set<string>>(new Set());
+  const [naoAbriu, setNaoAbriu] = useState<string | null>(null);
+  useEffect(() => {
+    if (!selectedId || selectedConversation) return;
+    if (tentadas.current.has(selectedId)) return;
+    tentadas.current.add(selectedId);
+    const alvo = selectedId;
+    // O `setState` sai da chamada assíncrona, não do corpo do efeito — no corpo
+    // seria renderização em cascata, e o lint acusa.
+    void carregarConversa(alvo).then((ok) => {
+      if (!ok) setNaoAbriu(alvo);
+    });
+  }, [selectedId, selectedConversation]);
+  /* Comparar em vez de limpar num efeito: trocar de conversa já invalida o aviso. */
+  const falhouAoAbrir = !!selectedId && naoAbriu === selectedId;
+
   return (
     <div className="flex h-full flex-col">
       <SubNav tabs={TABS} active={tab} onChange={setTab} />
@@ -188,21 +219,52 @@ function ConversasPageInner() {
             onSelect={setSelectedId}
             onNew={() => setNewOpen(true)}
           />
-          {selectedId ? (
+          {/* ⚠️ Gatilho é a CONVERSA, não o id: com id não resolvido, o painel
+              montava um composer sobre nada — dava para digitar numa conversa
+              que a tela não conseguia mostrar. */}
+          {selectedConversation ? (
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <Thread conversationId={selectedId} onDeleted={() => setSelectedId(null)} />
-              <Composer conversationId={selectedId} />
+              <Thread conversationId={selectedConversation.id} onDeleted={() => setSelectedId(null)} />
+              <Composer conversationId={selectedConversation.id} />
+            </div>
+          ) : selectedId && !falhouAoAbrir ? (
+            <div className="flex flex-1 items-center justify-center bg-slate-50">
+              <p className="text-sm text-slate-400">Abrindo conversa...</p>
             </div>
           ) : (
-            <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-slate-50">
-              <p className="text-sm text-slate-400">
-                {conversations.length === 0
-                  ? "Nenhuma conversa ainda — comece uma com um contato"
-                  : "Selecione uma conversa"}
-              </p>
-              <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setNewOpen(true)}>
-                <Plus className="size-3.5" /> Nova conversa
-              </Button>
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-slate-50 px-6 text-center">
+              {falhouAoAbrir ? (
+                /* Diz o MOTIVO e o caminho. "Selecione uma conversa" numa tela
+                   em que se acabou de clicar em "Abrir conversa" parece defeito. */
+                <>
+                  <p className="max-w-sm text-sm text-slate-500">
+                    Esta conversa não está na sua caixa — ela é de outro atendente.
+                  </p>
+                  <p className="max-w-sm text-xs text-slate-400">
+                    No Relatório, o botão <strong>Assumir</strong> traz a conversa para você
+                    e ela passa a abrir aqui.
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 gap-1.5 text-xs"
+                    onClick={() => setSelectedId(null)}
+                  >
+                    Voltar para a caixa
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-slate-400">
+                    {conversations.length === 0
+                      ? "Nenhuma conversa ainda — comece uma com um contato"
+                      : "Selecione uma conversa"}
+                  </p>
+                  <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setNewOpen(true)}>
+                    <Plus className="size-3.5" /> Nova conversa
+                  </Button>
+                </>
+              )}
             </div>
           )}
           {selectedConversation && (

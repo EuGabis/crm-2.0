@@ -6380,3 +6380,237 @@ mesmo tratamento que policy e trigger já tinham. Quando o tipo de retorno muda
 
 ⏳ **A planilha ainda não tem a aba por atendente** — `leads-xlsx.ts` continua com
 Resumo/Por dia/Por hora. Quem baixar hoje não leva o quadro novo.
+## "Abrir conversa" do Relatório abria uma CASCA (2026-09-09)
+
+Print: a aba trocou para Conversas, a lista à esquerda cheia — e à direita
+apenas o campo de digitação. Sem cabeçalho, sem fio, sem barra lateral do
+contato, e o composer pronto para escrever.
+
+🔴 **A causa é o relatório e a caixa NÃO lerem a mesma coisa**, e vale saber
+antes de mexer em qualquer um dos dois:
+
+| tela | fonte | alcance |
+|---|---|---|
+| caixa de entrada | store, via RLS de `conversations` (0074) | as MINHAS + a fila do setor (sem dono) |
+| Relatório, para supervisor | RPC `sector_conversations` | o setor INTEIRO, por cima da RLS, de propósito |
+
+`ConversationsReport` faz `if (isSupervisor && sectorConvs.length > 0) return
+sectorConvs.map(...)` — para supervisor, TODAS as linhas vêm de lá. Então o
+relatório lista conversas que a store nunca teve, e `onOpen(id)` entregava à
+página um id que `useConversation` não resolve.
+
+⚠️ **E o painel era gated por `selectedId`, não pela CONVERSA:**
+
+```tsx
+{selectedId ? (<><Thread .../><Composer .../></>) : (<>Selecione uma conversa</>)}
+```
+
+Com id não resolvido, `Thread` monta sem achar nada e o `Composer` monta
+inteiro — dava para **digitar numa conversa que a tela não conseguia mostrar**.
+A `ContactPanel` era a única gated por `selectedConversation`, e é por isso que
+ela sumia: o print mostra exatamente essa combinação.
+
+**Duas correções, e a segunda é a que importa:**
+
+1. `carregarConversa(id)` busca a conversa por id (com o `CONV_SELECT`, então
+   nome e etiquetas vêm junto) e a acrescenta à store. Resolve o caso do ADMIN e
+   o de `/conversas?c=<id>` colado numa aba nova antes de a store carregar.
+   ⚠️ Devolve **booleano**: "a RLS não deixa ler" e "a rede caiu" pedem condutas
+   diferentes, e um `void` silencioso devolveria a casca por outro caminho.
+   Uma tentativa por id (`useRef` com os já tentados) — sem isso, conversa que a
+   RLS esconde viraria uma consulta por render.
+2. O painel passou a ser gated por **`selectedConversation`**. Não resolvendo, a
+   tela **diz o motivo**: a conversa é de outro atendente, e o caminho é o botão
+   **Assumir** do próprio relatório (que já existe para supervisor desde a 0080).
+   "Selecione uma conversa" logo depois de clicar em "Abrir conversa" parece
+   defeito — e era.
+
+⚠️ Isto NÃO se conserta apertando `sector_conversations`: enxergar o setor
+inteiro no relatório é o propósito dela, e foi por essa mesma permissividade que
+o roteamento entre setores funciona (ver a seção da 202609041530, onde eu quase
+apertei o lado errado). O que faltava era a tela saber lidar com um id que ela
+tem permissão de LISTAR e não de ABRIR.
+
+⏳ Para supervisor de setor **colaborativo**, abrir a conversa de um colega
+continua exigindo assumir — é a RLS de `messages` da 0074, não esta tela. Se um
+dia a leitura tiver de abrir, muda a policy de SELECT, não este componente.
+
+⏳ `conversas/page.tsx` já tinha **2 erros de lint** (`react-hooks/set-state-in-effect`,
+linhas ~160 e ~270 na `main`) anteriores a esta mudança.
+### O selo QUENTE entrou junto do FRIO (2026-09-09)
+
+Pedido do Gabriel: *"igual aparece essa informação de frio, vamos adicionar em
+quente também"*.
+
+🔴 **Reverte a decisão registrada acima** ("só o frio ganha selo; marcar o quente
+faria toda linha ter um selo, e aí nenhuma se destaca").
+
+⚠️ **Aquele argumento partia de uma premissa errada:** que sem selo a linha seria
+"quente". Não é — **a maioria das conversas não tem nota nenhuma.** Só o fluxo
+Comercial pontua; o da secretaria decide por assunto e grava `pontos`/`limiar`
+nulos. Então nem toda linha ganha selo, e a ausência dele passa a dizer uma coisa
+precisa: *o bot não pontuou esta conversa*. Antes ela misturava isso com "é
+quente", que são conclusões opostas para quem prioriza.
+
+- ⚠️ A distinção é por **palavra e cor**, nunca só pela cor: verde × azul num selo
+  de 9px é exatamente o par que a deuteranopia embaralha. O texto é a codificação
+  secundária, e por isso não pode virar só uma bolinha.
+- As cores são as MESMAS do relatório "Leads do dia" (esmeralda = qualificado,
+  azul = frio): a caixa e o relatório não podem discordar sobre qual cor é o lead
+  bom. Todas com remapeamento de dark conferido em `globals.css`.
+## A devolução vale só ATÉ A PRIMEIRA RESPOSTA (2026-09-09, migração 202609092030)
+
+Regra do Gabriel: *"se um contato manda mensagem é atribuído para o vendedor;
+ele não responde em 15 minutos, passa para outro. Agora se ele foi atribuído e o
+vendedor MANDOU MENSAGEM, ele fica para aquele vendedor e não volta para o
+rodízio."*
+
+🔴 **Isto revisa a decisão do mesmo dia, e para melhor.** A saída anterior para o
+comercial foi desligar a devolução inteira (`devolver_apos_min = 0`), porque ela
+arrancava do vendedor uma negociação em andamento. Com a régua da primeira
+resposta, o problema deixa de existir na raiz — e a devolução **volta a valer no
+comercial**, o que resolve o outro lado da queixa: o lead que cai num vendedor
+ausente e não é visto por mais ninguém.
+
+⚠️ **A pergunta mudou de "respondeu depois da última mensagem do cliente?" para
+"respondeu ALGUMA VEZ?".** A diferença é o caso do dia a dia: proposta enviada,
+o cliente responde três dias depois, o vendedor está em outro atendimento — com
+a régua antiga a conversa era tirada dele no meio da negociação.
+
+- ⚠️ **A regra mora em `devolvivel()`, não no `where` da SQL.** O contrato entre
+  as duas camadas já estava escrito: a SQL responde *"a bola está com a gente há
+  mais de N minutos úteis?"* e o TypeScript responde *"e mesmo assim, devo
+  mexer?"*. "Já respondeu alguma vez" é do segundo tipo — e lá ela ganha TESTE,
+  que é o que falta a uma condição escondida num `where`. A coluna
+  `ja_respondida` é devolvida e **não muda o volume de linhas**: conversa
+  respondida em que o cliente voltou a escrever já vinha na lista — era
+  justamente ela que era arrancada do vendedor.
+- ⚠️ **O campo é OPCIONAL no TypeScript.** O código vai ao ar antes da migração,
+  então até ela ser aplicada ele chega `undefined` — e `undefined` cai no
+  comportamento de hoje em vez de travar a devolução inteira. Está escrito como
+  teste.
+- Nota interna e resposta do BOT não contam como resposta (a SQL exclui
+  `automated` e `internal`), senão toda conversa pareceria atendida em segundos
+  pelo auto-responder.
+
+### `drop` + `create` foi seguro aqui — e não foi na 202609081345
+
+A coluna nova troca o tipo de retorno, e `create or replace` é proibido nesse
+caso (`42P13`). O que muda entre os dois casos:
+
+| | 202609081345 | esta |
+|---|---|---|
+| o que mudava | o COMPORTAMENTO (âncora errada) | uma coluna A MAIS |
+| código no ar | chamava a função e seria atropelado | lê por nome de campo, não percebe |
+| saída | nome novo, os dois coexistem | `drop` + `create` na mesma transação |
+
+⚠️ **A guarda de migração aprendeu isso**: `create function` prececido de
+`drop function if exists` deixou de ser erro (mesmo tratamento que policy e
+trigger já tinham). Não é conveniência — quando o tipo de retorno muda, o
+`create or replace` é PROIBIDO e o drop é o único caminho; a guarda estava
+obrigando o impossível, e checagem que obriga o impossível é checagem que alguém
+aprende a ignorar.
+
+⚠️ E como o `drop` recria os privilégios do zero, o par `revoke`/`grant` **tem**
+de ser repetido — aqui não é redundância.
+## 🔴 O rodízio dividia por VEZ, não por CARGA — e o Paulo levou 90 leads
+
+Relato do Gabriel (2026-09-10): *"o Paulo é o primeiro a logar e tinha mais de 90
+leads esperando para ser distribuídos. No comercial temos a regra de distribuir
+igualmente os leads para todos os vendedores."*
+
+⚠️ **O cursor girava — mas girava sobre uma lista de UMA pessoa.** `distributeOne`
+fazia `list[cursor % list.length]` sobre os disponíveis; com um só online, isso é
+despejo com aparência de rodízio. E a varredura da fila entrega até 25 por tique,
+a cada minuto.
+
+### A fórmula veio da própria frase dele
+
+*"Dividir igual: 30 pro Paulo, 30 para o Alberto quando logar e mais 30 para o
+Rogério quando logar."*
+
+```
+cota = teto( (carga de TODOS do pool + fila) / tamanho do pool )
+```
+
+- ⚠️ **A soma inclui quem está OFFLINE, e é isso que faz a divisão funcionar.**
+  Contando só os online, 90 ÷ 1 = 90 — o despejo de novo. Com o pool inteiro no
+  denominador, o Paulo recebe até 30 e para; os outros 60 esperam os donos.
+- ⚠️ **Teto e não piso.** No dia a dia (cargas 10/10/10 e 1 lead novo) o piso
+  daria 10, ninguém estaria abaixo da própria cota e o lead ficaria parado com
+  três vendedores livres. O teto dá 11 e o lead sai.
+- **Ninguém abaixo da cota = o lead FICA NA FILA**, visível a todos. É a
+  diferença entre "dividir igualmente" e "entregar a quem logou".
+- **Carga** = conversas ABERTAS atribuídas à pessoa nos números do setor. Uma
+  consulta por setor, num mapa **mutável** compartilhado pelo laço da varredura:
+  sem incrementar a cada atribuição, dez leads do mesmo tique iriam todos para
+  quem estava mais leve na primeira leitura.
+- ⚠️ Empate desempata pelo **cursor**: com três zerados, escolher o primeiro do
+  array faria o primeiro da lista receber tudo — o rodízio deixaria de girar
+  justamente no caso mais comum.
+
+⚠️ **`departments.dividir_igualmente` é POR SETOR, e a Secretaria fica de fora**
+(confirmado pelo Gabriel: *"não vamos mudar na secretaria"*). Ligar em todo mundo
+mudaria lá num sentido perigoso: o problema que originou o rodízio foi lead
+PARADO na fila, e a cota é exatamente o que segura lead quando falta gente. A
+proteção da Secretaria contra despejo é outra e já existe — o ritmo
+(`intervalo_fila_min`, 1 a cada 7 min).
+
+`npm run test:rodizio` — 79 asserções, e o caso dos 90 está escrito passo a passo:
+Paulo sozinho recebe até 30 e a fila SEGURA; Alberto loga zerado e os próximos vão
+para ele; segura de novo em 30; Rogério loga e leva o resto.
+
+## Status "Online / Ausente" do atendente (migração 202609101100)
+
+Pedido: *"os vendedores ficam no CRM pós expediente para responder os leads, mas
+não querem receber leads novos."*
+
+⚠️ **O status separa duas coisas que estavam coladas em `last_seen_at`:** ESTAR no
+CRM e QUERER lead novo. Até aqui a única forma de parar de receber era fechar o
+CRM — e aí a pessoa também parava de responder quem já estava com ela, que é
+justamente o que ela ficou fazendo.
+
+- **Ausente não recebe NADA pelo rodízio** — nem lead do bot, nem devolução de
+  colega. Regra do Gabriel: *"apenas se for transferência de outro atendente"*, e
+  a transferência é ação de PESSOA, não passa pelo rodízio. A exceção sai de
+  graça.
+- ⚠️ `estaOnline` (o nó de atendente FIXO do fluxo) também passou a respeitar o
+  status. Se só o rodízio respeitasse, o nó de assunto entregaria ao ausente
+  justamente o que o rodízio foi proibido de entregar — e o status pareceria não
+  funcionar em metade dos leads, sem erro nenhum.
+- ⚠️ O default é `'online'`: quem nunca tocou no seletor recebe como sempre. Um
+  default `'ausente'` pararia o rodízio da empresa inteira ao nascer da coluna.
+- ⚠️ **`definir_disponibilidade` é `security definer` porque UPDATE em
+  `location_members` é admin-only** (a tabela guarda papel, permissões e
+  departamento). A linha é decidida por `auth.uid()`, NUNCA por parâmetro —
+  recebendo o id de fora, qualquer autenticado tiraria um colega do rodízio.
+  `npm run db:check` acusa "definer sem checagem de empresa" aqui e é falso
+  positivo: `where user_id = auth.uid()` já restringe a uma linha.
+- **O seletor fica VISÍVEL na barra superior, não escondido no menu do avatar.**
+  Um status que corta a chegada de lead e não aparece é uma armadilha: quem
+  esquecer marcado como Ausente para de receber e não descobre por quê. O rótulo
+  escrito ao lado do ponto é o que evita isso — ponto colorido sozinho não diz
+  nada a quem não conhece o código de cores, e some na deuteranopia.
+
+⚠️ Este é o ÚNICO ponto global desta leva, e ele é inerte até alguém usar: com
+todos em `'online'`, nada muda em setor nenhum.
+
+### A devolução do comercial: 20 minutos e só com o time inteiro
+
+- `devolver_apos_min = 20` **só no comercial**; a Secretaria fica em 15 — a régua
+  dela nasceu de outra queixa, e um `update` sem `where` teria arrastado as duas
+  para o mesmo número.
+- `devolver_so_com_todos_online = true` no comercial: tirar o lead de um vendedor
+  quando falta gente não resolve nada — ele muda de mão para cair em quem já está
+  segurando o setor sozinho, que é o despejo por outro caminho.
+- ⚠️ "Todos online" aqui é presença **E** status: quem está no CRM como AUSENTE
+  não conta como um par de mãos. Se contasse, a devolução ligaria com base em
+  alguém que o rodízio nem pode escolher, e a conversa voltaria para a fila sem
+  destino.
+- Continua em minutos ÚTEIS (`private.business_minutes`): o relógio congela fora
+  do expediente, então o "pós expediente" do pedido não vira devolução de
+  madrugada. O status Ausente cobre o resto.
+
+⏳ Se um vendedor entrar de férias sem sair do pool, `devolver_so_com_todos_online`
+desliga a devolução do setor até ele voltar. A saída é tirá-lo do `lead_pool` (ou
+desligar a coluna) — está aqui para não virar mistério.
