@@ -7284,3 +7284,74 @@ deliberada: aquele upload é `internal: true`, ou seja guarda o documento no CRM
 sendo gasta, então pedir um segundo clique só somaria atrito. Continua em série
 (o papel `authenticated` tem `statement_timeout = 8s`) e com uma releitura só no
 fim, não uma por arquivo.
+
+## Transferir às cegas: o menu não dizia quem está online (2026-09-10)
+
+Relato do Gabriel, com print: *"ao clicar para transferir, não aparece se a
+pessoa está online ou não"*. A lista dava dez nomes iguais.
+
+⚠️ **E transferir para quem não está lá não tem conserto automático nenhum.** A
+devolução por espera só age no que o RODÍZIO entregou — `assigned_by is null`,
+princípio da 0090 ("decisão humana não se desfaz", 202609081345). Uma conversa
+transferida à mão para quem saiu às 18h fica na caixa dele até alguém perceber.
+
+Sem migração: o dado já existia. `usePresence()` (recarga a cada 30 s) e
+`TeamMember.lastSeenAt` estavam ali; só não eram desenhados no menu.
+
+### São TRÊS estados, não dois
+
+| estado | significa | recebe do rodízio | recebe transferência |
+|---|---|---|---|
+| **online** | carimbo dentro de `PRESENCE_MS` | sim | sim |
+| **ausente** | está no CRM, marcou "Ausente" na barra superior | **não** | **sim** |
+| **offline** | carimbo velho, ou nunca acessou | não | sim, mas ninguém vê |
+
+⚠️ **"Ausente" não é offline, e a diferença importa justamente aqui.** A regra do
+Gabriel (202609101100) é *"ausente ele não recebe nada, apenas se for
+transferência de outro atendente"* — ou seja a pessoa está disponível para
+exatamente esta ação. Mostrar as duas como a mesma coisa faria o atendente
+evitar um colega que está ali e pode receber.
+
+⚠️ **A ordem das checagens não é livre:** presença PRIMEIRO. Quem marcou
+"ausente" e foi embora há três horas está **offline**, não ausente — o carimbo é
+o que diz se a pessoa está lá.
+
+### `lib/presence.ts` virou a fonte única do estado, não só do número
+
+`estadoDePresenca(lastSeen, disponibilidade)` e `rotuloDePresenca(estado)` moram
+lá, junto de `PRESENCE_MS`. Antes só o NÚMERO era compartilhado e cada tela
+reescrevia a comparação — que é como nasceram os 5 min × 15 min que fizeram a
+investigação de 09/09 começar por "mas ele está online".
+
+- `usePresence()` passou a devolver `{ lastSeenAt, disponibilidade }` por pessoa,
+  em vez de só a data. ⚠️ O `select` **refaz sem `disponibilidade`** se falhar:
+  neste projeto o código chega à produção antes da migração, e pedir coluna
+  inexistente faz o PostgREST recusar a consulta INTEIRA — aqui isso apagaria
+  junto a presença, que já funcionava.
+- ⚠️ **`session-manager.tsx` tinha um TERCEIRO `PRESENCE_MS`** (5 min) com o
+  comentário "online (distribuição) = ativo nos últimos 5 min", falso desde
+  08/09. Ele nunca foi a janela de presença: é o tempo de inatividade que ainda
+  vale um recarimbo. Renomeado para `ATIVIDADE_MS`. Dois números com o mesmo
+  nome, um descrevendo errado o outro, é armadilha pura.
+
+### Onde aparece
+
+- **Menu de transferência** (`thread.tsx`): ponto colorido + a palavra, por
+  pessoa. Menu de `w-52` para `w-64` — o rótulo não cabia ao lado do nome.
+- **Relatório** (`conversations-report.tsx`): os dois seletores que decidem para
+  quem vai a conversa (o alvo da distribuição e o "Atribuir…" da linha). São
+  `<select>` nativos, então o estado entra como TEXTO (`Alberto · online`).
+- **Configurações → Departamentos**: ganhou o estado "Ausente" de graça, e o selo
+  do topo passou de "N online agora" para **"N recebendo lead"** — ⚠️ o ausente
+  saiu da conta de propósito: aquela tela existe para o gestor ver quem está
+  recebendo, e o ausente está no CRM justamente para não receber.
+
+### Duas decisões de tela
+
+- ⚠️ **A palavra, nunca só o ponto.** Verde × âmbar × cinza num ponto de 8px é o
+  par que a deuteranopia embaralha — mesma razão de os selos FRIO/QUENTE da caixa
+  de entrada carregarem o texto.
+- ⚠️ **A ordem do menu continua a da equipe, não "online primeiro".** A lista é
+  curta e as pessoas já sabem onde cada nome fica; reordenar por presença faria o
+  nome pular de lugar entre uma abertura e outra, e transferir para o colega
+  errado é pior que rolar dois nomes.

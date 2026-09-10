@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { PRESENCE_MS } from "@/lib/presence";
+import { PRESENCE_MS, estadoDePresenca, type EstadoPresenca } from "@/lib/presence";
 import { format, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -47,6 +47,7 @@ import {
   teamActions,
   useMyMembership,
   usePresence,
+  type PresencaAoVivo,
   useTeam,
   type Department,
   type MemberRole,
@@ -91,12 +92,24 @@ function allowedCount(p: ModulePermissions) {
  * Importa de `@/lib/presence`, a fonte única: copiar o número
  * criaria a divergência de novo na próxima vez que a janela mudar.
  */
-function presenceInfo(lastSeen: string | null): { online: boolean; label: string } {
-  if (!lastSeen) return { online: false, label: "nunca acessou" };
-  const diff = Date.now() - new Date(lastSeen).getTime();
-  if (diff < PRESENCE_MS) return { online: true, label: "Online" };
+function presenceInfo(
+  aoVivo: PresencaAoVivo | null | undefined,
+  doMembro: string | null
+): { online: boolean; estado: EstadoPresenca; label: string } {
+  const lastSeen = aoVivo?.lastSeenAt ?? doMembro;
+  const estado = estadoDePresenca(lastSeen, aoVivo?.disponibilidade);
+  /*
+   * ⚠️ **"Ausente" NÃO conta como online aqui**, e a mudança é deliberada: esta
+   * tela existe para o gestor conferir quem está RECEBENDO LEAD, e o ausente
+   * está no CRM justamente para não receber. Somá-lo no "N online agora" faria
+   * o selo prometer uma capacidade de atendimento que o rodízio não vai usar.
+   */
+  if (estado === "online") return { online: true, estado, label: "Online" };
+  if (estado === "ausente") return { online: false, estado, label: "Ausente" };
+  if (!lastSeen) return { online: false, estado, label: "nunca acessou" };
   return {
     online: false,
+    estado,
     label: `visto ${formatDistanceToNow(new Date(lastSeen), { locale: ptBR, addSuffix: true })}`,
   };
 }
@@ -307,8 +320,8 @@ export default function DepartamentosPage() {
       <h2 className="mb-2 mt-6 flex items-center gap-2 text-sm font-bold text-slate-900">
         Usuários
         <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-          {members.filter((m) => presenceInfo(presence[m.userId] ?? m.lastSeenAt).online).length} online
-          agora
+          {members.filter((m) => presenceInfo(presence[m.userId], m.lastSeenAt).online).length}{" "}
+          recebendo lead
         </span>
       </h2>
       <div className="overflow-x-auto rounded-xl border bg-white">
@@ -333,7 +346,7 @@ export default function DepartamentosPage() {
               const allowed = MODULE_KEYS.filter((k) =>
                 canAccess(k, m, departments)
               ).length;
-              const pres = presenceInfo(presence[m.userId] ?? m.lastSeenAt);
+              const pres = presenceInfo(presence[m.userId], m.lastSeenAt);
               return (
                 <tr key={m.userId} className="border-b last:border-0">
                   <td className="px-4 py-2.5">
@@ -357,10 +370,22 @@ export default function DepartamentosPage() {
                       <span
                         className={cn(
                           "size-2 shrink-0 rounded-full",
-                          pres.online ? "bg-emerald-500" : "bg-slate-300"
+                          pres.estado === "online"
+                            ? "bg-emerald-500"
+                            : pres.estado === "ausente"
+                              ? "bg-amber-500"
+                              : "bg-slate-300"
                         )}
                       />
-                      <span className={pres.online ? "font-semibold text-emerald-600" : "text-slate-500"}>
+                      <span
+                        className={
+                          pres.estado === "online"
+                            ? "font-semibold text-emerald-600"
+                            : pres.estado === "ausente"
+                              ? "font-semibold text-amber-600"
+                              : "text-slate-500"
+                        }
+                      >
                         {pres.label}
                       </span>
                     </span>

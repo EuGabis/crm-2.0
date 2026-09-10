@@ -6,7 +6,16 @@ import { useMyMembership } from "@/lib/data/repos/db/team";
 import { useMyDepartment } from "@/lib/data/repos/db/sector";
 import { hasBrowserSession, clearBrowserSession } from "@/lib/auth/session-marker";
 
-const PRESENCE_MS = 5 * 60 * 1000; // online (distribuição) = ativo nos últimos 5 min
+/*
+ * ⚠️ Isto NÃO é a janela de presença — é quanto tempo de INATIVIDADE ainda conta
+ * como "mexendo no CRM" para valer a pena recarimbar `last_seen_at`.
+ *
+ * Chamava-se `PRESENCE_MS`, o mesmo nome da janela real (`@/lib/presence`, 15
+ * min), com o comentário "online = ativo nos últimos 5 min" — que já era falso
+ * desde 08/09. Dois números com o mesmo nome, um deles descrevendo errado o
+ * outro, é o que fez a investigação de 09/09 começar por "mas ele está online".
+ */
+const ATIVIDADE_MS = 5 * 60 * 1000;
 const IDLE_LOGOUT_MS = 10 * 60 * 1000; // desloga por inatividade após 10 min (papel "user")
 const WARN_BEFORE_MS = 60 * 1000; // avisa na tela 1 min antes de deslogar
 const ACTIVITY = ["mousemove", "mousedown", "keydown", "scroll", "touchstart", "click"];
@@ -76,8 +85,9 @@ export function SessionManager() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Parte 3 — presença: carimba last_seen_at enquanto o usuário está ativo. É o que
-  // define quem está "online" para receber leads no rodízio (visto ≤ 5 min).
+  // Parte 3 — presença: carimba last_seen_at enquanto o usuário está ativo. Quem
+  // decide o que é "online" a partir desse carimbo é `PRESENCE_MS` em
+  // `@/lib/presence` (15 min), não o número daqui.
   useEffect(() => {
     const supabase = createClient();
     let lastAct = Date.now();
@@ -89,7 +99,7 @@ export function SessionManager() {
     // chamada REALMENTE ir ao banco. Sem isso o last_seen_at nunca era gravado e
     // todo mundo aparecia offline (a distribuição caía sempre no "todos offline").
     const ping = async () => {
-      if (Date.now() - lastAct <= PRESENCE_MS) {
+      if (Date.now() - lastAct <= ATIVIDADE_MS) {
         try {
           await supabase.rpc("touch_presence");
         } catch {
