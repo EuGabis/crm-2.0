@@ -43,8 +43,13 @@ export interface Pipeline {
   scope?: PipelineScope;
   /** Preenchido quando scope = "department". */
   departmentId?: string | null;
-  /** Preenchido quando scope = "user". */
+  /** Preenchido quando scope = "user" — quem ADMINISTRA o funil. */
   ownerId?: string | null;
+  /**
+   * Quem mais VÊ o funil, no escopo "user" (202609110900). O dono também vê,
+   * então a lista salva o inclui — quem lê não precisa lembrar da exceção.
+   */
+  viewerIds?: string[];
 }
 
 export interface Opportunity {
