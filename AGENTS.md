@@ -6885,3 +6885,64 @@ alguém escrever a frase certa.
 A **202609102030** rebalanceia com esse critério. Determinística (round-robin
 sobre o conjunto ordenado por espera), então reexecutar dá o mesmo resultado —
 é o que substitui a idempotência que a versão anterior tirava do texto do motivo.
+
+### 🔴 A pílula cinza contava como resposta humana — as DUAS redistribuições foram no-op
+
+Relato do Gabriel: *"o Paulo ainda continua com a disparidade"*, depois de a
+202609102030 rodar "com sucesso".
+
+O critério "ninguém respondeu" que escrevi nas duas migrações filtra
+`direction = 'out'` + não `automated` + não `internal` — e **falta
+`type <> 'event'`**. Os EVENTOS do fio ("Atribuída a X · pelo sistema · rodízio
+do bot") são inseridos exatamente assim: `direction = 'out'`, `type = 'event'`,
+**sem `automated`** — pelo gatilho `log_atribuicao` (202608281530) e pelo
+`botLogEvent` do motor.
+
+⚠️ **Toda conversa que o rodízio já tocou tem um desses.** O `not exists` dava
+falso em todas e o `update` casou ZERO linhas. Nas duas vezes, por dois motivos
+diferentes (a primeira pelo texto do `assign_reason`, a segunda por isto).
+
+🔴 **E o predicado CERTO estava ao lado.** `conversas_paradas` exclui
+`type = 'event'`, com comentário explicando. Eu reescrevi a mesma pergunta em
+outro arquivo em vez de reusar, e as cópias divergiram justamente na linha que
+importava — o erro que este arquivo documenta desde a primeira semana, cometido
+três vezes num dia.
+
+**A pergunta agora tem UM lugar: `private.respondida_por_humano(conv)`**
+(202609102300). Três exclusões, cada uma com um defeito atrás:
+`automated` (o bot não é atendimento), `internal` (nota não sai do CRM) e
+`type = 'event'` (a pílula cinza).
+
+⚠️ **A 0090 tem o mesmo furo** e já está aplicada. Ali o efeito foi CONSERVADOR
+(moveu menos do que devia, 2 de 3 conversas), então não há o que desfazer — mas
+não copie aquele `not exists` como referência.
+
+### ⚠️ Variável `plpgsql` de uma letra colide com alias de tabela
+
+A primeira versão da 202609102300 declarava `d record` e, no relatório do fim,
+fazia `join public.departments d`. O Postgres respondeu
+`42702: column reference "d.id" is ambiguous ... could refer to either a PL/pgSQL
+variable or a table column`.
+
+⚠️ **E o estrago não foi a mensagem: `do $$ ... $$` é UMA instrução.** A exceção
+estourou no relatório, que roda DEPOIS do update — e o rollback levou o update
+junto. A migração parecia ter falhado só no fim e na verdade **não aplicou nada**.
+Foi a terceira vez no dia que um "erro cosmético" custou uma rodada inteira de
+produção.
+
+Regra: nome de variável com uma letra em `plpgsql` é armadilha. `setor` e `dp`
+custam nada.
+
+⚠️ E ao consertar isso, um `sed` meu sobre o bloco inteiro trocou também as
+referências da TABELA (`d.name` → `setor.name`), deixando o relatório com um join
+sem restrição. **Renomeação por regex em bloco de SQL precisa ser conferida linha
+por linha** — o compilador não existe aqui para avisar.
+
+### ⚠️ Zero linhas afetadas não é sucesso
+
+As duas migrações responderam "sucesso" tendo mexido em nada, e quem descobriu
+foi o Gabriel olhando a tela — duas vezes. **Migração que altera dado tem de
+DIZER quantas linhas mexeu**, e o `raise notice` da 202609102300 imprime o
+resultado por atendente. É o mesmo princípio que já valia para função
+`security definer` ("zero linhas por guarda de RLS não é prova de que funciona"),
+agora aplicado a `update`.
