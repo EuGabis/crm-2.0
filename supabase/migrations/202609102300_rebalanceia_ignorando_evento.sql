@@ -30,6 +30,21 @@
 -- Por isso aqui a pergunta ganha UM lugar: `private.respondida_por_humano`.
 -- ============================================================
 set check_function_bodies = off;
+/*
+ * ⚠️ **A variável de registro NÃO se chama `d`, e isso não é estilo.** A primeira
+ * versão declarava `d record` e, no relatório do fim, fazia
+ * `join public.departments d` — o Postgres respondeu
+ * `42702: column reference "d.id" is ambiguous ... could refer to either a
+ * PL/pgSQL variable or a table column`.
+ *
+ * ⚠️ E o estrago não foi só a mensagem: `do $$ ... $$` é UMA instrução, então a
+ * exceção no relatório (que roda DEPOIS do update) desfez o update junto. A
+ * migração parecia ter falhado no fim e na verdade não aplicou nada.
+ *
+ * Regra: em `plpgsql`, nome de variável com uma letra colide com alias de
+ * tabela. `setor` e `dp` custam nada e tornam a colisão impossível.
+ */
+
 
 /**
  * Alguém RESPONDEU esta conversa? (a definição canônica)
@@ -80,8 +95,8 @@ revoke execute on function private.respondida_por_humano(uuid) from public, anon
  *   from public.conversations cv
  *   join public.profiles p on p.id = cv.assigned_to
  *   join public.department_channels dc on dc.channel_id = cv.channel_id
- *   join public.departments d on d.id = dc.department_id
- *  where d.name in ('Secretaria Backup', 'Vendas', 'Comercial')
+ *   join public.departments dp on dp.id = dc.department_id
+ *  where dp.name in ('Secretaria Backup', 'Vendas', 'Comercial')
  *    and cv.closed_at is null and cv.archived_at is null
  *  group by 1 order by 2 desc;
  *
@@ -92,13 +107,13 @@ revoke execute on function private.respondida_por_humano(uuid) from public, anon
 
 do $$
 declare
-  d record;
+  setor record;
   n_pool int;
   movidas int;
   total int := 0;
   linha record;
 begin
-  for d in
+  for setor in
     select dep.id, dep.location_id, dep.name,
            coalesce(
              nullif(dep.lead_pool, '{}'::uuid[]),
@@ -113,7 +128,7 @@ begin
      where dep.name in ('Secretaria Backup', 'Vendas', 'Comercial')
        and dep.usa_rodizio is true
   loop
-    n_pool := coalesce(array_length(d.pool, 1), 0);
+    n_pool := coalesce(array_length(setor.pool, 1), 0);
     if n_pool < 2 then
       continue;
     end if;
@@ -126,10 +141,10 @@ begin
              ((row_number() over (order by cv.last_message_at nulls last, cv.id) - 1)
                % n_pool) + 1 as fatia
         from public.conversations cv
-       where cv.location_id = d.location_id
+       where cv.location_id = setor.location_id
          and cv.channel_id in (
            select dc.channel_id from public.department_channels dc
-            where dc.department_id = d.id
+            where dc.department_id = setor.id
          )
          and cv.assigned_to is not null
          -- O SISTEMA atribuiu. Decisão de PESSOA não se desfaz (princípio da
@@ -143,7 +158,7 @@ begin
          and not private.respondida_por_humano(cv.id)
     )
     update public.conversations cv
-       set assigned_to = d.pool[alvo.fatia],
+       set assigned_to = setor.pool[alvo.fatia],
            assign_reason = 'rebalanceamento dos leads não atendidos (10/09 23h)',
            -- Episódio novo: carimbo antigo bloquearia a primeira devolução
            -- legítima do dono novo. E `atribuida_em` é regravada pelo gatilho
@@ -152,11 +167,11 @@ begin
            devolvida_em = null
       from alvo
      where cv.id = alvo.id
-       and cv.assigned_to is distinct from d.pool[alvo.fatia];
+       and cv.assigned_to is distinct from setor.pool[alvo.fatia];
 
     get diagnostics movidas = row_count;
     total := total + movidas;
-    raise notice 'setor % (pool de %): % conversa(s) movida(s)', d.name, n_pool, movidas;
+    raise notice 'setor % (pool de %): % conversa(s) movida(s)', setor.name, n_pool, movidas;
   end loop;
 
   raise notice '--- total rebalanceado: % ---', total;
@@ -175,8 +190,9 @@ begin
       from public.conversations cv
       join public.profiles p on p.id = cv.assigned_to
       join public.department_channels dc on dc.channel_id = cv.channel_id
-      join public.departments d on d.id = dc.department_id
-     where d.name in ('Secretaria Backup', 'Vendas', 'Comercial')
+      -- Alias `dp`: `d` colidiria com a variável de registro do laço (42702).
+      join public.departments dp on dp.id = dc.department_id
+     where dp.name in ('Secretaria Backup', 'Vendas', 'Comercial')
        and cv.closed_at is null and cv.archived_at is null
      group by 1 order by 3 desc
   loop

@@ -6917,6 +6917,27 @@ três vezes num dia.
 (moveu menos do que devia, 2 de 3 conversas), então não há o que desfazer — mas
 não copie aquele `not exists` como referência.
 
+### ⚠️ Variável `plpgsql` de uma letra colide com alias de tabela
+
+A primeira versão da 202609102300 declarava `d record` e, no relatório do fim,
+fazia `join public.departments d`. O Postgres respondeu
+`42702: column reference "d.id" is ambiguous ... could refer to either a PL/pgSQL
+variable or a table column`.
+
+⚠️ **E o estrago não foi a mensagem: `do $$ ... $$` é UMA instrução.** A exceção
+estourou no relatório, que roda DEPOIS do update — e o rollback levou o update
+junto. A migração parecia ter falhado só no fim e na verdade **não aplicou nada**.
+Foi a terceira vez no dia que um "erro cosmético" custou uma rodada inteira de
+produção.
+
+Regra: nome de variável com uma letra em `plpgsql` é armadilha. `setor` e `dp`
+custam nada.
+
+⚠️ E ao consertar isso, um `sed` meu sobre o bloco inteiro trocou também as
+referências da TABELA (`d.name` → `setor.name`), deixando o relatório com um join
+sem restrição. **Renomeação por regex em bloco de SQL precisa ser conferida linha
+por linha** — o compilador não existe aqui para avisar.
+
 ### ⚠️ Zero linhas afetadas não é sucesso
 
 As duas migrações responderam "sucesso" tendo mexido em nada, e quem descobriu
