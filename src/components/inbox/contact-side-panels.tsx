@@ -604,7 +604,17 @@ export function FilesPanel({ contactId }: { contactId: string }) {
     [files, tab, query],
   );
 
-  const upload = async (file: File) => {
+  /**
+   * Sobe um ou vários arquivos.
+   *
+   * ⚠️ Aqui NÃO há fila de confirmação, ao contrário do composer, e a diferença
+   * é intencional: `internal: true` guarda o documento no CRM **sem despachar
+   * nada ao cliente**. Não há ação irreversível para trás nem cota de número
+   * sendo gasta, então pedir um segundo clique só somaria atrito. Quem entrega
+   * no WhatsApp é o composer, pela rota send-media.
+   */
+  const upload = async (arquivos: File[]) => {
+    if (!arquivos.length) return;
     setBusy(true);
     const conversationId = (await conversationActions.openForContact(contactId)).id;
     if (!conversationId) {
@@ -612,21 +622,34 @@ export function FilesPanel({ contactId }: { contactId: string }) {
       toast.error("Não foi possível abrir a conversa deste contato");
       return;
     }
-    // `internal: true`: sobe o documento SEM despachar para o cliente. Quem
-    // entrega no WhatsApp é o composer, pela rota send-media.
-    const res = await conversationActions.sendMedia(conversationId, {
-      file,
-      kind: kindOf(file),
-      channel: "whatsapp",
-      internal: true,
-    });
+    // Em série: o upload passa pelo Storage e por um insert cada, e em rajada o
+    // `statement_timeout` de 8s do papel `authenticated` derruba parte do lote.
+    let enviados = 0;
+    const falhas: string[] = [];
+    for (const file of arquivos) {
+      const res = await conversationActions.sendMedia(conversationId, {
+        file,
+        kind: kindOf(file),
+        channel: "whatsapp",
+        internal: true,
+      });
+      if (res.ok) enviados++;
+      else falhas.push(`${file.name}: ${res.error ?? "falhou"}`);
+    }
     setBusy(false);
-    if (!res.ok) {
-      toast.error(res.error ?? "Não foi possível enviar o arquivo");
+    // Uma releitura só no fim, não uma por arquivo.
+    if (enviados) await reload();
+    if (falhas.length) {
+      toast.error(
+        `${enviados} de ${arquivos.length} anexados. ${falhas.slice(0, 3).join(" · ")}`
+      );
       return;
     }
-    await reload();
-    toast.success("Arquivo anexado (interno — o cliente não recebeu)");
+    toast.success(
+      enviados === 1
+        ? "Arquivo anexado (interno — o cliente não recebeu)"
+        : `${enviados} arquivos anexados (internos — o cliente não recebeu)`
+    );
   };
 
   /** O bucket é privado: a URL é assinada na hora do clique. */
@@ -653,11 +676,14 @@ export function FilesPanel({ contactId }: { contactId: string }) {
       <input
         ref={inputRef}
         type="file"
+        multiple
         hidden
         onChange={(e) => {
-          const f = e.target.files?.[0];
+          // `FileList` não é array — sem o `Array.from` o `for...of` até anda,
+          // mas `.length`/`slice` no resumo de falhas quebrariam.
+          const fs = Array.from(e.target.files ?? []);
           e.target.value = ""; // permite subir o mesmo arquivo de novo
-          if (f) void upload(f);
+          void upload(fs);
         }}
       />
       <div className="mb-2 flex gap-1">

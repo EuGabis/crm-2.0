@@ -224,18 +224,41 @@ export function Composer({ conversationId }: { conversationId: string }) {
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
-  // Imagem colada (Ctrl+V) aguardando confirmação — mostra a prévia e só envia
-  // no botão Enviar (usando o texto como legenda).
-  const [pendingImage, setPendingImage] = useState<File | null>(null);
-  const pendingUrl = useMemo(
-    () => (pendingImage ? URL.createObjectURL(pendingImage) : null),
-    [pendingImage]
+  /*
+   * Anexos aguardando confirmação — mostra a prévia e só envia no Enviar.
+   *
+   * 🔴 Era UM arquivo (`pendingImage`), alimentado só pelo Ctrl+V. Virou FILA
+   * porque o clipe passou a aceitar vários e o composer passou a aceitar
+   * arrastar, e três caminhos com comportamentos diferentes seriam três coisas
+   * para o atendente decorar.
+   *
+   * ⚠️ **Arrastar NÃO envia na hora**, e é o cuidado central desta mudança:
+   * mídia enviada vai para o celular do cliente e não tem desfazer. Um arrasto é
+   * fácil de fazer sem querer — bem mais que abrir o seletor e escolher —, e com
+   * vários arquivos ninguém consegue conferir o que saiu depois de sair. A fila
+   * é a confirmação, e é também o que o WhatsApp Web faz.
+   */
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  /*
+   * ⚠️ O `URL.createObjectURL` só vale para IMAGEM. Criar para PDF/vídeo geraria
+   * um blob que nada consome e que ficaria vazando até a aba fechar — o
+   * `revoke` abaixo é por isso que existe.
+   */
+  const previas = useMemo(
+    () =>
+      pendingFiles.map((f) => ({
+        file: f,
+        url: f.type.startsWith("image/") ? URL.createObjectURL(f) : null,
+      })),
+    [pendingFiles]
   );
   useEffect(() => {
     return () => {
-      if (pendingUrl) URL.revokeObjectURL(pendingUrl);
+      for (const p of previas) if (p.url) URL.revokeObjectURL(p.url);
     };
-  }, [pendingUrl]);
+  }, [previas]);
+  // Realce da área ao arrastar por cima.
+  const [arrastando, setArrastando] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recSecs, setRecSecs] = useState(0);
   const [templateOpen, setTemplateOpen] = useState(false);
@@ -320,11 +343,28 @@ export function Composer({ conversationId }: { conversationId: string }) {
 
   const fmtSecs = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
-  const uploadFile = async (file: File, caption?: string) => {
+  /**
+   * Manda UM arquivo: grava no inbox e, no WhatsApp, entrega ao cliente.
+   *
+   * ⚠️ Devolve resultado em vez de só avisar na tela. Em lote, cinco arquivos
+   * dariam até dez toasts empilhados e o atendente não leria nenhum — quem
+   * chama junta tudo num aviso só. `emLote` silencia os avisos individuais; o
+   * MOTIVO da falha continua voltando, senão o resumo diria "2 falharam" sem
+   * dizer por quê, que é o defeito que este projeto já pagou caro no áudio.
+   */
+  const uploadFile = async (
+    file: File,
+    caption?: string,
+    opts?: { emLote?: boolean }
+  ): Promise<{ ok: boolean; motivo?: string }> => {
+    const soLote = opts?.emLote === true;
+    const falhar = (motivo: string) => {
+      if (!soLote) toast.error(motivo);
+      return { ok: false, motivo };
+    };
     // Conversa finalizada/arquivada: mídia também não sai (clipe e colar).
     if (conversation?.closedAt || conversation?.archivedAt) {
-      toast.error("Reabra a conversa (ou envie um template) para enviar mídia.");
-      return;
+      return falhar("Reabra a conversa (ou envie um template) para enviar mídia.");
     }
     const isImg = file.type.startsWith("image/");
     const EXT_VIDEO = [".mp4", ".3gp", ".3gpp", ".mov", ".webm", ".mkv"];
@@ -363,31 +403,33 @@ export function Composer({ conversationId }: { conversationId: string }) {
       EXT_AUDIO.some((e) => name.endsWith(e)) ||
       (file.type.startsWith("audio/") && !EXT_VIDEO.some((e) => name.endsWith(e)));
     if (!isImg && !isVideo && !isDoc && !isAudio) {
-      toast.error("Aceito imagem, vídeo, áudio, PDF ou DOCX");
-      return;
+      // Em lote o nome do arquivo entra no resumo — sem ele, "1 falhou" num
+      // arrasto de oito arquivos não diz QUAL recusar.
+      return falhar(`${file.name}: aceito imagem, vídeo, áudio, PDF ou DOCX`);
     }
     // Áudio ANTES de vídeo — ver o aviso em `isAudio`.
     const kind = isImg ? "image" : isAudio ? "audio" : isVideo ? "video" : "file";
-    setUploading(true);
+    // ⚠️ Quem liga/desliga `uploading` é `enviarArquivos`: aqui dentro, num lote
+    // de cinco, o clipe piscaria entre habilitado e desabilitado cinco vezes.
     const res = await conversationActions.sendMedia(conversationId, {
       file,
       kind,
       channel,
     });
-    setUploading(false);
     if (res.ok) {
       // ⚠️ "Enviada" aqui é no INBOX. A entrega ao cliente é a chamada abaixo, e
       // o toast de sucesso dela vem depois — foi um defeito real dizer "enviado"
       // antes de tentar entregar.
-      toast.success(
-        isImg
-          ? "Imagem no inbox"
-          : isVideo
-            ? "Vídeo no inbox"
-            : isAudio
-              ? "Áudio no inbox"
-              : "Arquivo no inbox"
-      );
+      if (!soLote)
+        toast.success(
+          isImg
+            ? "Imagem no inbox"
+            : isVideo
+              ? "Vídeo no inbox"
+              : isAudio
+                ? "Áudio no inbox"
+                : "Arquivo no inbox"
+        );
       if (
         isWhatsapp &&
         res.messageId &&
@@ -406,16 +448,103 @@ export function Composer({ conversationId }: { conversationId: string }) {
           caption: caption?.trim() || undefined,
         });
         if (!wa.ok) {
-          toast.error(
+          /*
+           * ⚠️ Isto é FALHA, e no lote precisa contar como tal. A mensagem ficou
+           * no inbox mas NÃO chegou ao cliente — tratá-la como sucesso faria o
+           * resumo dizer "5 arquivos enviados" com dois nunca entregues, que é
+           * exatamente a mentira que este projeto já corrigiu no áudio ("gravar
+           * no inbox não é entregar").
+           */
+          return falhar(
             wa.needsTemplate
               ? "Janela de 24h fechada — envie um template antes."
-              : wa.error ?? "A mídia ficou no inbox, mas falhou ao enviar no WhatsApp."
+              : wa.error ?? `${file.name}: ficou no inbox, mas falhou ao enviar no WhatsApp.`
           );
         }
       }
-    } else {
-      toast.error(res.error ?? "Não foi possível enviar");
+      return { ok: true };
     }
+    return falhar(res.error ?? `${file.name}: não foi possível enviar`);
+  };
+
+  /**
+   * Teto de anexos por vez.
+   *
+   * ⚠️ Não é desempenho: cada arquivo é um upload MAIS um envio pela Cloud API,
+   * e os dois contam no limite diário do número. Arrastar uma pasta de fotos sem
+   * querer queimaria a cota do número e derrubaria as mensagens de verdade do
+   * resto do dia. Dez cobre o uso real com folga.
+   */
+  const MAX_ANEXOS = 10;
+
+  /** Põe arquivos na fila (clipe, arrastar, colar) sem enviar nada ainda. */
+  const enfileirar = (novos: File[]) => {
+    if (!novos.length) return;
+    if (internal) {
+      toast.info("Nota interna não leva anexo — desmarque a nota para enviar mídia.");
+      return;
+    }
+    if (blockedClosed) {
+      toast.error("Reabra a conversa (ou envie um template) para enviar mídia.");
+      return;
+    }
+    /*
+     * ⚠️ Fora da janela de 24h o clipe nem é DESENHADO (a barra inteira some),
+     * mas a área de soltar é a raiz do composer e continua alcançável. Sem esta
+     * guarda o arquivo entraria numa fila que a Cloud API vai recusar, e o
+     * atendente só descobriria no erro do Enviar.
+     */
+    if (blocked) {
+      toast.error("Fora da janela de 24h — envie um template para retomar.");
+      return;
+    }
+    setPendingFiles((atuais) => {
+      const cabem = MAX_ANEXOS - atuais.length;
+      if (cabem <= 0) {
+        toast.info(`Máximo de ${MAX_ANEXOS} arquivos por vez.`);
+        return atuais;
+      }
+      if (novos.length > cabem) {
+        toast.info(`Máximo de ${MAX_ANEXOS} por vez — os demais ficaram de fora.`);
+      }
+      return [...atuais, ...novos.slice(0, cabem)];
+    });
+  };
+
+  /**
+   * Envia a fila, UM DE CADA VEZ.
+   *
+   * ⚠️ **Em série, não em paralelo** — mesma decisão do disparo de template em
+   * lote: a rota valida canal, janela de 24h e limite diário por chamada, e em
+   * rajada o limite devolveria 429 para metade da lista sem controle nenhum. Em
+   * série as mensagens também chegam ao cliente na ordem em que foram escolhidas.
+   *
+   * ⚠️ **A legenda vai só no PRIMEIRO.** A Cloud API tem uma legenda por mídia;
+   * repetir o texto em cada uma mandaria a mesma frase cinco vezes ao cliente.
+   */
+  const enviarArquivos = async (arquivos: File[], caption?: string) => {
+    if (!arquivos.length) return;
+    setUploading(true);
+    const falhas: string[] = [];
+    let enviados = 0;
+    for (let i = 0; i < arquivos.length; i++) {
+      const r = await uploadFile(arquivos[i], i === 0 ? caption : undefined, {
+        emLote: arquivos.length > 1,
+      });
+      if (r.ok) enviados++;
+      else falhas.push(r.motivo ?? `${arquivos[i].name}: falhou`);
+    }
+    setUploading(false);
+    // Um arquivo já avisou por conta própria, com o texto específico do tipo.
+    if (arquivos.length === 1) return;
+    if (!falhas.length) {
+      toast.success(`${enviados} arquivos no inbox`);
+      return;
+    }
+    toast.error(
+      `${enviados} de ${arquivos.length} enviados. ${falhas.slice(0, 3).join(" · ")}` +
+        (falhas.length > 3 ? ` · e mais ${falhas.length - 3}` : "")
+    );
   };
 
   const startRec = async () => {
@@ -610,13 +739,15 @@ export function Composer({ conversationId }: { conversationId: string }) {
       toast.error("Reabra a conversa (ou envie um template) para responder.");
       return;
     }
-    // Imagem colada aguardando: o Enviar manda a imagem (texto = legenda).
-    if (pendingImage && !internal && !scheduledFor) {
-      const file = pendingImage;
+    // Anexos na fila: o Enviar manda todos (o texto vira legenda do primeiro).
+    if (pendingFiles.length && !internal && !scheduledFor) {
+      const arquivos = pendingFiles;
       const caption = body;
-      setPendingImage(null);
+      // Limpa ANTES de enviar: o envio em série leva segundos, e a fila na tela
+      // convidaria a clicar em Enviar de novo e mandar tudo duas vezes.
+      setPendingFiles([]);
       setBody("");
-      await uploadFile(file, caption);
+      await enviarArquivos(arquivos, caption);
       return;
     }
     /*
@@ -725,8 +856,41 @@ export function Composer({ conversationId }: { conversationId: string }) {
     );
   };
 
+  /*
+   * ⚠️ `dataTransfer.types` inclui "Files" SÓ quando o que vem é arquivo.
+   * Arrastar texto selecionado da própria conversa também dispara `dragover`, e
+   * sem essa checagem o composer piscaria a moldura de anexo para uma seleção de
+   * texto — e o `preventDefault` roubaria o arrasto de texto do navegador.
+   */
+  const temArquivo = (e: React.DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
+
   return (
-    <div className={cn("border-t bg-white p-3", internal && "bg-amber-50/60")}>
+    <div
+      className={cn(
+        "relative border-t bg-white p-3",
+        internal && "bg-amber-50/60",
+        arrastando && "bg-indigo-50/70 outline-2 outline-dashed outline-indigo-400 -outline-offset-4"
+      )}
+      onDragOver={(e) => {
+        if (!temArquivo(e)) return;
+        // Sem o preventDefault o navegador ABRE o arquivo numa aba, e o drop
+        // nunca chega até aqui — é o padrão que faz "arrastar não funcionar".
+        e.preventDefault();
+        if (!arrastando) setArrastando(true);
+      }}
+      onDragLeave={(e) => {
+        // ⚠️ `dragleave` dispara ao passar sobre cada FILHO. Sem conferir para
+        // onde o ponteiro foi, a moldura piscaria o arrasto inteiro.
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        setArrastando(false);
+      }}
+      onDrop={(e) => {
+        if (!temArquivo(e)) return;
+        e.preventDefault();
+        setArrastando(false);
+        enfileirar(Array.from(e.dataTransfer.files));
+      }}
+    >
       <div className="mb-2 flex items-center gap-2">
         <Select value={channel} onValueChange={(v) => v && setChannel(v as Channel)}>
           <SelectTrigger className="h-7 w-[130px] text-xs" size="sm">
@@ -863,28 +1027,65 @@ export function Composer({ conversationId }: { conversationId: string }) {
           </button>
         </div>
       )}
-      {pendingImage && pendingUrl && (
-        <div className="mb-2 flex items-start gap-3 rounded-lg border border-indigo-200 bg-indigo-50/60 p-2">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={pendingUrl}
-            alt="Prévia"
-            className="max-h-28 max-w-[160px] rounded-md border object-contain"
-          />
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold text-slate-700">Imagem colada</p>
-            <p className="mt-0.5 text-[11px] text-slate-500">
-              Adicione uma legenda no campo abaixo (opcional) e clique em{" "}
-              <strong>Enviar</strong>.
+      {pendingFiles.length > 0 && (
+        <div className="mb-2 rounded-lg border border-indigo-200 bg-indigo-50/60 p-2">
+          <div className="flex items-center gap-2">
+            <p className="text-xs font-semibold text-slate-700">
+              {pendingFiles.length === 1
+                ? "1 arquivo para enviar"
+                : `${pendingFiles.length} arquivos para enviar`}
             </p>
+            <button
+              onClick={() => setPendingFiles([])}
+              className="ml-auto rounded px-1.5 py-0.5 text-[11px] font-medium text-slate-500 hover:bg-white hover:text-slate-700"
+            >
+              Descartar todos
+            </button>
           </div>
-          <button
-            onClick={() => setPendingImage(null)}
-            title="Descartar imagem"
-            className="flex size-6 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-200 hover:text-slate-600"
-          >
-            <X className="size-3.5" />
-          </button>
+          {/* ⚠️ Rola na horizontal no próprio container: dez anexos empurrariam
+              o campo de texto para fora da tela numa barra lateral estreita. */}
+          <div className="mt-1.5 flex gap-2 overflow-x-auto pb-1">
+            {previas.map((p, i) => (
+              <div
+                key={`${p.file.name}-${i}`}
+                className="relative flex w-24 shrink-0 flex-col items-center gap-1 rounded-md border bg-white p-1.5"
+                title={p.file.name}
+              >
+                {p.url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={p.url} alt="" className="h-12 w-full rounded object-cover" />
+                ) : (
+                  <div className="flex h-12 w-full items-center justify-center rounded bg-slate-100">
+                    <Paperclip className="size-4 text-slate-400" />
+                  </div>
+                )}
+                {/* `truncate` + `w-full`: nome longo não pode esticar o cartão. */}
+                <span className="w-full truncate text-center text-[10px] text-slate-600">
+                  {p.file.name}
+                </span>
+                <button
+                  onClick={() => setPendingFiles((atuais) => atuais.filter((_, j) => j !== i))}
+                  title="Remover"
+                  className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full border bg-white text-slate-500 shadow-sm hover:bg-slate-100 hover:text-slate-700"
+                >
+                  <X className="size-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            {pendingFiles.length > 1 ? (
+              <>
+                Escreva uma legenda abaixo (opcional — ela vai no{" "}
+                <strong>primeiro</strong> arquivo) e clique em <strong>Enviar</strong>.
+              </>
+            ) : (
+              <>
+                Adicione uma legenda no campo abaixo (opcional) e clique em{" "}
+                <strong>Enviar</strong>.
+              </>
+            )}
+          </p>
         </div>
       )}
       <Textarea
@@ -910,8 +1111,10 @@ export function Composer({ conversationId }: { conversationId: string }) {
           e.preventDefault();
           const ext = (imgItem.type.split("/")[1] || "png").replace("jpeg", "jpg");
           const file = new File([blob], `print.${ext}`, { type: imgItem.type });
-          // Não envia direto: mostra a prévia e espera o Enviar.
-          setPendingImage(file);
+          // Não envia direto: entra na fila e espera o Enviar. Colar duas vezes
+          // agora ACUMULA, em vez de a segunda imagem substituir a primeira em
+          // silêncio — que era o comportamento com um arquivo só.
+          enfileirar([file]);
         }}
         placeholder={
           blockedClosed
@@ -970,22 +1173,25 @@ export function Composer({ conversationId }: { conversationId: string }) {
             </PopoverContent>
           </Popover>
 
-          {/* Anexo (imagem, vídeo, PDF ou DOCX) */}
+          {/* Anexo (imagem, vídeo, áudio, PDF ou DOCX) — vários de uma vez */}
           <input
             ref={fileRef}
+            multiple
             type="file"
             accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/3gpp,audio/mpeg,audio/mp4,audio/aac,audio/ogg,audio/amr,.mp3,.m4a,.aac,.ogg,.opus,.amr,application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             className="hidden"
             onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void uploadFile(f);
+              // ⚠️ `FileList` não é array — sem o `Array.from` o `.length` existe
+              // mas `map`/`slice` não, e a fila quebraria em runtime.
+              enfileirar(Array.from(e.target.files ?? []));
+              // Zera para o mesmo arquivo poder ser escolhido de novo depois.
               e.target.value = "";
             }}
           />
           <button
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
-            title="Anexar imagem, vídeo, PDF ou DOCX"
+            title="Anexar arquivos (imagem, vídeo, áudio, PDF ou DOCX) — dá para escolher vários"
             className="flex size-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50"
           >
             {uploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
