@@ -6847,3 +6847,41 @@ exatamente o caso da Beatriz, multiplicado.
 
 `npm run test:rodizio` — 91 asserções; o caso da Beatriz está escrito com os
 números do fio.
+
+### 🔴 A redistribuição pegou UM SÉTIMO dos leads — o marcador era texto livre
+
+Relato do Gabriel, logo depois de aplicar a 202609101430: *"o Paulo está com mais
+de 67 leads e os outros comerciais com quase metade disso, não distribuiu ainda."*
+
+A causa é o marcador que eu escolhi: `assign_reason = 'varredura da fila do
+setor'`. Esse é **UM dos SETE** motivos que o código grava:
+
+```
+"atribuída pelo bot (origem não informada)"      (padrão de assignLeadTo)
+"rodízio do bot"                                 (nó distribute do fluxo)
+"rodízio (atendente do fluxo offline)"
+"atendente do fluxo"                             (nó de atendente fixo)
+"varredura da fila do setor"                     <- o único que o filtro pegou
+"devolvida: cliente esperava N min sem resposta"
+"redistribuída após N min de espera"
+```
+
+Os leads da manhã vieram em boa parte pelo BOT, não pela varredura — o filtro
+não os viu.
+
+⚠️ **E isto contradiz uma regra que eu mesmo havia escrito na 202609081345:**
+*"decidir por `assign_reason` (texto) foi REJEITADO: bastaria alguém escrever um
+motivo novo para a devolução voltar a atropelar transferência humana, em
+silêncio."* Lá o risco era casar DEMAIS; aqui foi casar DE MENOS. A lição é a
+mesma nas duas direções: **texto livre não é chave de decisão.** Vale para
+`assign_reason` como já valia para nome de setor e nome de pipeline — três casos
+neste repositório, o mesmo erro.
+
+O critério certo é o que a devolução já usava e não menciona motivo nenhum:
+**o SISTEMA atribuiu (`assigned_by is null`) e ninguém respondeu.** Um é coluna
+booleana de fato, o outro é a existência de uma mensagem — nenhum depende de
+alguém escrever a frase certa.
+
+A **202609102030** rebalanceia com esse critério. Determinística (round-robin
+sobre o conjunto ordenado por espera), então reexecutar dá o mesmo resultado —
+é o que substitui a idempotência que a versão anterior tirava do texto do motivo.
