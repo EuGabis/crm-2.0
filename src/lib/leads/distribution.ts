@@ -277,6 +277,23 @@ async function leadsPipelineId(
   if (pipelineName) {
     const byName = pipelines.find((p: any) => normalize(p.name).includes(normalize(pipelineName)));
     if (byName) return byName.id;
+    /*
+     * 🔴 **Aqui era onde o rodízio escrevia no funil errado.** Pedia "Controle
+     * de Leads", que não existia, caía na heurística de etapa (que casou
+     * "quente" com "Perdido Quente" do Comercial) e, no limite, em
+     * `pipelines[0]` — também o Comercial. Assim a atendente da Secretaria
+     * virava dona de card no funil do time comercial, num funil que ela não
+     * pode nem ver: 82% dos cards com dono ali eram de fora do time.
+     *
+     * Nome configurado que não resolve devolve `null`, e `assignLeadTo` apenas
+     * NÃO mexe em card nenhum — a conversa continua sendo atribuída
+     * normalmente, que é o que importa para o atendimento.
+     */
+    console.warn(
+      `[rodizio] funil "${pipelineName}" não existe — dono do card não foi escrito ` +
+        `(nenhum palpite feito). A atribuição da conversa segue normal.`,
+    );
+    return null;
   }
   const { data: stages } = await db
     .from("stages")
