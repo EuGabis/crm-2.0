@@ -7197,3 +7197,90 @@ contato), para corrigir à mão as que importam.
 regressão, e metade dos casos novos vigia o lado oposto: `donoAnterior` vazio ou
 nulo **não** pode virar curinga, senão todo card com dono volta a ser sobrescrito
 por uma comparação frouxa.
+
+## Anexo: vários arquivos de uma vez, e arrastar para o composer (2026-09-10)
+
+Pedido do Gabriel: *"na opção de anexo, adicione a opção de selecionar mais de 1
+arquivo, e ao arrastar uma foto ou arquivo, ele aceitar."*
+
+Sem migração e sem env: o `input` ganhou `multiple`, a raiz do composer virou
+área de soltar, e os três caminhos de anexo (colar, clipe, arrastar) passaram a
+terminar no MESMO lugar.
+
+### 🔴 Arrastar NÃO envia na hora — a fila é a confirmação
+
+O caminho curto seria mandar direto ao soltar, como o clipe fazia. Foi recusado
+por duas razões que se somam:
+
+- **mídia enviada não tem desfazer.** Ela vai para o celular do cliente, e a
+  Cloud API não tem delete (ver "Editar e apagar mensagem"). Um arrasto é fácil
+  de fazer sem querer — bem mais que abrir o seletor e escolher;
+- **com vários arquivos, ninguém confere o que saiu depois de sair.** Cinco
+  envios disparados de uma vez viram cinco balões e cinco toasts, e o erro só
+  aparece no fio do cliente.
+
+Então `pendingImage: File | null` virou **`pendingFiles: File[]`**, com uma tira
+de prévias acima do campo (miniatura para imagem, clipe + nome para o resto, X
+em cada um e "Descartar todos"). É também o que o WhatsApp Web faz, e o padrão
+que já existia neste arquivo para o Ctrl+V — o que mudou é ele passar a valer
+para os três caminhos em vez de um.
+
+⚠️ **Mudança de comportamento assumida no clipe:** antes ele enviava assim que
+você escolhia; agora enfileira e espera o Enviar. É um clique a mais, e em troca
+o anexo do clipe passa a aceitar LEGENDA, que antes era impossível (só a imagem
+colada tinha). Colar duas vezes também passou a ACUMULAR, em vez de a segunda
+imagem substituir a primeira em silêncio.
+
+### Decisões que valem não refazer
+
+- ⚠️ **Envio em SÉRIE, nunca em paralelo.** Mesma decisão do disparo de template
+  em lote: a rota valida canal, janela de 24h e limite diário por chamada, e em
+  rajada o limite devolve 429 para metade da lista sem controle. Em série as
+  mensagens ainda chegam ao cliente na ordem em que foram escolhidas.
+- ⚠️ **`MAX_ANEXOS = 10`, e não é desempenho.** Cada arquivo é um upload MAIS um
+  envio pela Cloud API, e os dois contam no limite diário do número — arrastar
+  uma pasta de fotos sem querer queimaria a cota e derrubaria as mensagens de
+  verdade do resto do dia.
+- ⚠️ **A legenda vai só no PRIMEIRO arquivo.** A Cloud API tem uma legenda por
+  mídia; repetir o texto em cada uma mandaria a mesma frase cinco vezes ao
+  cliente. A tira diz isso quando há mais de um.
+- ⚠️ **`uploadFile` devolve resultado em vez de só avisar na tela.** Cinco
+  arquivos davam até dez toasts empilhados, que ninguém lê; agora `emLote`
+  silencia os individuais e o chamador junta num aviso só. O **motivo** continua
+  voltando — "2 falharam" sem dizer por quê é o defeito que custou quinze
+  rodadas na investigação do áudio.
+- ⚠️ **Falha de ENTREGA conta como falha no resumo.** A mídia ficar no inbox sem
+  chegar ao cliente não pode ser somada como sucesso: seria a mesma mentira que
+  o composer já cometeu ao dizer "áudio enviado" antes de tentar entregar.
+- ⚠️ **A fila é limpa ANTES de enviar**, não depois: o envio em série leva
+  segundos, e a tira ainda na tela convidaria a clicar em Enviar de novo e
+  mandar tudo duas vezes.
+- ⚠️ **`URL.createObjectURL` só para IMAGEM.** Criar para PDF ou vídeo geraria um
+  blob que nada consome e que vaza até a aba fechar.
+
+### As armadilhas do arrastar
+
+- ⚠️ **Sem `preventDefault` no `dragover` o navegador ABRE o arquivo numa aba** e
+  o `drop` nunca chega ao componente. É o motivo nº 1 de "arrastar não funciona".
+- ⚠️ **`dataTransfer.types` tem `"Files"` só quando o que vem é arquivo.** Sem
+  essa checagem, arrastar TEXTO selecionado da própria conversa piscaria a
+  moldura de anexo — e o `preventDefault` roubaria do navegador o arrasto de
+  texto.
+- ⚠️ **`dragleave` dispara ao passar sobre cada FILHO.** Sem conferir para onde o
+  ponteiro foi (`currentTarget.contains(relatedTarget)`), a moldura pisca o
+  arrasto inteiro.
+- ⚠️ **`FileList` não é array.** `.length` existe, `map`/`slice` não — daí o
+  `Array.from` nos dois `onChange` e no `drop`.
+- ⚠️ **Fora da janela de 24h o clipe nem é DESENHADO** (a barra some inteira),
+  mas a área de soltar é a raiz do composer e continua alcançável. Sem a guarda,
+  o arquivo entraria numa fila que a Cloud API vai recusar e o atendente só
+  descobriria no erro do Enviar.
+
+### O painel Arquivos também aceita vários — e ali NÃO há fila
+
+`contact-side-panels.tsx` ganhou `multiple` no mesmo pedido. A diferença é
+deliberada: aquele upload é `internal: true`, ou seja guarda o documento no CRM
+**sem despachar nada ao cliente**. Não há ação irreversível nem cota de número
+sendo gasta, então pedir um segundo clique só somaria atrito. Continua em série
+(o papel `authenticated` tem `statement_timeout = 8s`) e com uma releitura só no
+fim, não uma por arquivo.
