@@ -102,6 +102,13 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
   const isSupervisor = useIsSupervisor();
   const { rows: sectorConvs, reload: reloadSector } = useSectorConversations();
   const [distributing, setDistributing] = useState(false);
+  /*
+   * Para QUEM distribuir. Vazio = rodízio entre os disponíveis (o de sempre).
+   * Pedido do Gabriel (2026-09-10): poder escolher.
+   */
+  const [alvoDistribuicao, setAlvoDistribuicao] = useState("");
+  /** Atribuição de UMA conversa a uma pessoa, direto da linha. */
+  const [atribuindo, setAtribuindo] = useState<string | null>(null);
   const [assuming, setAssuming] = useState<string | null>(null);
 
   const assumir = async (row: Row) => {
@@ -122,6 +129,34 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
     setAssuming(null);
   };
 
+  /**
+   * Atribui a conversa a alguém escolhido na própria linha.
+   *
+   * ⚠️ Usa `conversationActions.assign`, que passa por `transfer_conversation`
+   * (SECURITY DEFINER): reatribuir por UPDATE direto esbarra no WITH CHECK da
+   * RLS — a linha nova com outro dono é recusada. E a função já registra o
+   * evento no fio pelo gatilho, então quem receber entende de onde veio.
+   */
+  const atribuir = async (row: Row, valor: string) => {
+    if (!valor) return;
+    setAtribuindo(row.id);
+    const paraFila = valor === "__fila__";
+    const ok = await conversationActions.assign(row.id, paraFila ? null : valor);
+    setAtribuindo(null);
+    if (!ok) {
+      toast.error("Não foi possível atribuir esta conversa");
+      return;
+    }
+    toast.success(
+      paraFila
+        ? "Conversa devolvida à fila do setor"
+        : `Conversa atribuída a ${memberMap.get(valor) ?? "atendente"}`,
+    );
+    // O supervisor lê de `sector_conversations`, que não é a store — sem isto a
+    // linha continuaria mostrando o dono antigo até um F5.
+    if (isSupervisor) await reloadSector();
+  };
+
   const awaitingCount = useMemo(
     () => conversations.filter((c) => c.awaitingDistribution).length,
     [conversations],
@@ -133,14 +168,26 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
       const res = await fetch("/api/leads/distribute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pct }),
+        body: JSON.stringify({ pct, userId: alvoDistribuicao || undefined }),
       });
       const json = await res.json().catch(() => ({}));
       if (res.ok) {
         const n = json.distributed ?? 0;
-        n > 0
-          ? toast.success(`${n} lead(s) distribuído(s) para quem está online`)
-          : toast.info("Ninguém online no pool agora — nada distribuído");
+        const nome = alvoDistribuicao ? memberMap.get(alvoDistribuicao) : null;
+        if (n > 0) {
+          toast.success(
+            nome ? `${n} lead(s) para ${nome}` : `${n} lead(s) distribuído(s) para quem está online`,
+          );
+        } else if (json.alvoForaDoPool) {
+          /* ⚠️ Zero com alvo escolhido tem causa DIFERENTE de zero sem alvo, e
+             a conduta também: aqui não é "ninguém online", é "essa pessoa não
+             atende nenhum setor com fila". */
+          toast.error(
+            `${nome ?? "Essa pessoa"} não está no rodízio de nenhum setor com fila — nada distribuído`,
+          );
+        } else {
+          toast.info("Ninguém online no pool agora — nada distribuído");
+        }
       } else {
         toast.error(json.error ?? "Não foi possível distribuir");
       }
@@ -310,6 +357,23 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
           </p>
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] text-amber-700">Distribuir agora:</span>
+            {/* ⚠️ "Rodízio" é o PADRÃO e vem primeiro: escolher pessoa é a
+                exceção deliberada, e um seletor que nascesse com um nome
+                escolhido faria o admin entregar a fila a uma pessoa sem querer. */}
+            <select
+              value={alvoDistribuicao}
+              onChange={(e) => setAlvoDistribuicao(e.target.value)}
+              disabled={distributing}
+              title="Para quem distribuir"
+              className="h-7 max-w-[190px] rounded-md border border-amber-300 bg-white px-1.5 text-[11px] text-slate-700"
+            >
+              <option value="">Rodízio (quem está online)</option>
+              {members.map((m) => (
+                <option key={m.userId} value={m.userId}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
             {[
               { label: "Todos", pct: 100 },
               { label: "50%", pct: 50 },
@@ -517,6 +581,37 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
                         <LayoutTemplate className="size-3.5" /> Template
                       </Link>
                     )}
+                    {/*
+                      Atribuir a UMA pessoa, direto da linha (pedido do Gabriel,
+                      2026-09-10). `<select>` nativo e não menu: com ~10 nomes ele
+                      dá busca por digitação e a rolagem do sistema de graça — a
+                      mesma escolha do seletor de curso, pelo mesmo motivo.
+
+                      ⚠️ Volta para o placeholder depois de atribuir. Se ficasse
+                      no nome escolhido, a linha passaria a AFIRMAR um responsável
+                      que a coluna "Atendente" ao lado talvez ainda não mostre —
+                      duas versões da mesma verdade na mesma linha.
+                    */}
+                    <select
+                      value=""
+                      disabled={atribuindo === r.id}
+                      onChange={(e) => void atribuir(r, e.target.value)}
+                      title="Atribuir esta conversa a alguém"
+                      className="h-6 max-w-[92px] rounded border bg-white px-1 text-[10px] text-slate-500 disabled:opacity-50"
+                    >
+                      <option value="">Atribuir…</option>
+                      {members
+                        .filter((m) => m.userId !== r.assignedToId)
+                        .map((m) => (
+                          <option key={m.userId} value={m.userId}>
+                            {m.name}
+                          </option>
+                        ))}
+                      {/* Devolver à fila é a outra metade da ação: sem isto, a
+                          única forma de tirar o dono é transferir para outra
+                          pessoa. */}
+                      {r.assignedToId && <option value="__fila__">Devolver à fila</option>}
+                    </select>
                     {isSupervisor && r.assignedToId !== me?.userId && (
                       <button
                         type="button"

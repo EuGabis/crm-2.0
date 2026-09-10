@@ -6982,3 +6982,47 @@ depende é como o envio quebrou em 01/09.
    ⚠️ **O instrumento para esses é o rebalanceamento** (202609102300), não a
    devolução. Duas ferramentas, dois casos — quem procurar a devolução para
    resolver backlog vai concluir que ela está quebrada.
+## Distribuir e atribuir ESCOLHENDO a pessoa (Conversas → Relatório)
+
+Pedido do Gabriel (2026-09-10): na faixa de distribuição, poder escolher para
+quem vai a fila; e na linha de cada contato, poder atribuir a uma pessoa
+determinada.
+
+### A faixa: "Rodízio" continua sendo o padrão
+
+O seletor nasce em **"Rodízio (quem está online)"** e a escolha de pessoa é a
+exceção. ⚠️ Um seletor que nascesse com um nome faria o admin entregar a fila
+inteira a alguém sem querer — e a fila é justamente o que não pode cair num só.
+
+- ⚠️ **A escolha do admin passa por cima da presença E do status "Ausente".**
+  Quem clica está decidindo; um botão que recusa em silêncio a escolha de quem
+  clicou é pior que não ter o botão. O evento no fio continua marcando
+  "(estava offline)" quando for o caso, para a decisão ficar legível depois.
+- ⚠️ **O `rr_cursor` NÃO avança** quando há alvo escolhido: não houve rodízio, e
+  avançá-lo puniria a próxima pessoa da vez por uma entrega que ela não recebeu.
+- ⚠️ **O alvo é validado contra o POOL de cada setor**, dentro de
+  `distributeDepartment`. A rota roda com a service role, então a RLS não
+  protege: sem essa checagem o admin atribuiria lead de um setor a quem não o
+  atende. Setor onde a pessoa não está no pool devolve 0 sem escrever nada.
+- **`alvoForaDoPool` volta na resposta** para a tela poder explicar o zero. Sem
+  ele, escolher alguém fora de todos os pools daria "0 distribuídos" com cara de
+  botão quebrado — e a conduta é diferente de "ninguém online".
+
+### A linha: `<select>` "Atribuir…"
+
+Chama `conversationActions.assign` → `transfer_conversation` (definer): o UPDATE
+direto esbarraria no WITH CHECK da RLS, que recusa a linha nova com outro dono.
+O gatilho já registra o evento no fio, então quem recebe entende de onde veio.
+
+- **`<select>` nativo e não menu**: com ~10 nomes ele dá busca por digitação e a
+  rolagem do sistema de graça — mesma escolha do seletor de curso.
+- ⚠️ **Volta ao placeholder depois de atribuir.** Ficando no nome escolhido, a
+  linha AFIRMARIA um responsável que a coluna "Atendente" ao lado talvez ainda
+  não mostre — duas versões da mesma verdade na mesma linha.
+- **"Devolver à fila" é a outra metade**: sem essa opção, a única forma de tirar
+  o dono seria transferir para outra pessoa.
+- Para supervisor, recarrega `sector_conversations` — aquela lista **não é a
+  store**, então sem isso a linha continuaria mostrando o dono antigo até um F5.
+
+⏳ `conversations-report.tsx` já tinha **2 erros de lint** (`react-hooks/purity` e
+memoização, ~linhas 208 e 229) na `main`, anteriores a esta mudança.
