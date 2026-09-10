@@ -13,7 +13,8 @@ import {
   useTemplateIntentStore,
 } from "@/lib/data/repos/db/conversations";
 import { useIsSupervisor, useSectorConversations, sectorActions } from "@/lib/data/repos/db/sector";
-import { useMyMembership, useTeam } from "@/lib/data/repos/db/team";
+import { useMyMembership, usePresence, useTeam } from "@/lib/data/repos/db/team";
+import { estadoDePresenca, rotuloDePresenca } from "@/lib/presence";
 import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
 import { channelLabel } from "@/components/shared/channel-icon";
 import { cn } from "@/lib/utils";
@@ -95,6 +96,18 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
   const conversations = useConversations("all");
   const { channels } = useWhatsappChannels();
   const { members } = useTeam();
+  const presence = usePresence();
+  /*
+   * ⚠️ Mesmo ponto cego do menu de transferência: os dois seletores desta tela
+   * decidem PARA QUEM vai a conversa e não diziam quem está lá. Aqui é
+   * `<select>` nativo, então o estado entra como TEXTO — não dá para pôr o ponto
+   * colorido, e a palavra é o que a acessibilidade pede de qualquer forma.
+   */
+  const comPresenca = (m: { userId: string; name: string; lastSeenAt: string | null }) => {
+    const vivo = presence[m.userId];
+    const estado = estadoDePresenca(vivo?.lastSeenAt ?? m.lastSeenAt, vivo?.disponibilidade);
+    return `${m.name} · ${rotuloDePresenca(estado)}`;
+  };
   const { isAdmin, me } = useMyMembership();
   const messages = useConvStore((s) => s.messages);
   // Supervisor (setor colaborativo/admin) vê TODAS as conversas do setor — vindas
@@ -370,7 +383,7 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
               <option value="">Rodízio (quem está online)</option>
               {members.map((m) => (
                 <option key={m.userId} value={m.userId}>
-                  {m.name}
+                  {comPresenca(m)}
                 </option>
               ))}
             </select>
@@ -604,7 +617,7 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
                         .filter((m) => m.userId !== r.assignedToId)
                         .map((m) => (
                           <option key={m.userId} value={m.userId}>
-                            {m.name}
+                            {comPresenca(m)}
                           </option>
                         ))}
                       {/* Devolver à fila é a outra metade da ação: sem isto, a

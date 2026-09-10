@@ -55,7 +55,8 @@ import {
   useReplyStore,
 } from "@/lib/data/repos/db/conversations";
 import { whatsappActions } from "@/lib/data/repos/db/whatsapp";
-import { useMyMembership, useTeam } from "@/lib/data/repos/db/team";
+import { useMyMembership, usePresence, useTeam } from "@/lib/data/repos/db/team";
+import { estadoDePresenca, rotuloDePresenca } from "@/lib/presence";
 import { useConfirm } from "@/components/shared/confirm";
 import { useDbStore } from "@/lib/data/repos/db/contacts";
 import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
@@ -73,7 +74,22 @@ function AssignPicker({
 }) {
   const { members } = useTeam();
   const { me } = useMyMembership();
+  const presence = usePresence();
   const owner = members.find((m) => m.userId === conversation.assignedTo) ?? null;
+
+  /*
+   * ⚠️ **Transferir às cegas era o defeito:** a lista dava dez nomes iguais, sem
+   * dizer quem está lá. Transferir para quem saiu às 18h prende a conversa numa
+   * caixa que ninguém abre até o dia seguinte — e a devolução por espera só age
+   * no que o RODÍZIO entregou, nunca no que uma pessoa transferiu (é decisão
+   * humana, princípio da 0090). Ou seja: transferência para offline não tem
+   * conserto automático nenhum.
+   */
+  const estadoDe = (userId: string) => {
+    const membro = members.find((m) => m.userId === userId);
+    const vivo = presence[userId];
+    return estadoDePresenca(vivo?.lastSeenAt ?? membro?.lastSeenAt ?? null, vivo?.disponibilidade);
+  };
 
   // Transferência para OUTRA pessoa passa pelo resumo primeiro. Assumir para si
   // ou devolver para a caixa do grupo não pede: não há "próximo atendente" a
@@ -156,23 +172,62 @@ function AssignPicker({
           </>
         )}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-52">
+      {/* w-64: o rótulo de presença não cabe ao lado do nome em w-52. */}
+      <DropdownMenuContent align="end" className="w-64">
         {me && conversation.assignedTo !== me.userId && (
           <DropdownMenuItem className="text-xs" onClick={() => void set(me.userId)}>
             Atribuir a mim
           </DropdownMenuItem>
         )}
+        {/*
+          ⚠️ A ordem continua a da equipe, NÃO "online primeiro". A lista é curta
+          e as pessoas já sabem onde cada nome fica; reordenar por presença faria
+          o nome pular de lugar entre uma abertura e outra, e transferir para o
+          colega errado é pior que rolar dois nomes.
+        */}
         {members
           .filter((m) => m.userId !== me?.userId)
-          .map((m) => (
-            <DropdownMenuItem
-              key={m.userId}
-              className="text-xs"
-              onClick={() => setPendente({ userId: m.userId, nome: m.name })}
-            >
-              {m.name}
-            </DropdownMenuItem>
-          ))}
+          .map((m) => {
+            const estado = estadoDe(m.userId);
+            return (
+              <DropdownMenuItem
+                key={m.userId}
+                className="text-xs"
+                onClick={() => setPendente({ userId: m.userId, nome: m.name })}
+              >
+                <span className="flex w-full items-center gap-2">
+                  <span
+                    className={cn(
+                      "size-2 shrink-0 rounded-full",
+                      estado === "online"
+                        ? "bg-emerald-500"
+                        : estado === "ausente"
+                          ? "bg-amber-500"
+                          : "bg-slate-300"
+                    )}
+                  />
+                  <span className="truncate">{m.name}</span>
+                  {/*
+                    ⚠️ A PALAVRA, não só o ponto. Verde × âmbar × cinza num ponto
+                    de 8px é o par que a deuteranopia embaralha — mesma razão de
+                    os selos FRIO/QUENTE da caixa carregarem o texto.
+                  */}
+                  <span
+                    className={cn(
+                      "ml-auto shrink-0 text-[10px]",
+                      estado === "online"
+                        ? "text-emerald-600"
+                        : estado === "ausente"
+                          ? "text-amber-600"
+                          : "text-slate-400"
+                    )}
+                  >
+                    {rotuloDePresenca(estado)}
+                  </span>
+                </span>
+              </DropdownMenuItem>
+            );
+          })}
         {conversation.assignedTo && (
           <DropdownMenuItem className="text-xs text-slate-500" onClick={() => void set(null)}>
             Remover responsável

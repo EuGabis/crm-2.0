@@ -5,6 +5,7 @@ import { create } from "zustand";
 import { createClient } from "@/lib/supabase/client";
 import { useDbStore } from "./contacts";
 import { canAccess } from "@/lib/auth/module-access";
+import type { Disponibilidade } from "@/lib/presence";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -208,25 +209,58 @@ export function useTeam() {
   return store;
 }
 
+export interface PresencaAoVivo {
+  lastSeenAt: string | null;
+  /** O que a pessoa escolheu na barra superior (202609101100). */
+  disponibilidade: Disponibilidade | null;
+}
+
 /**
- * Presença ao vivo (last_seen_at) por user_id — recarrega a cada 30s. O componente
- * decide online/offline (≤ 5 min = online). Cai no que veio no membro se ainda não
- * recarregou.
+ * Presença ao vivo por user_id — recarrega a cada 30s. Quem decide o estado é
+ * `estadoDePresenca` (`lib/presence.ts`), a fonte única: a janela de 15 min já
+ * foi copiada para dentro de uma tela uma vez e produziu duas verdades sobre a
+ * mesma pessoa. Cai no que veio no membro se ainda não recarregou.
+ *
+ * ⚠️ Traz `disponibilidade` junto porque "está no CRM" e "quer lead novo" são
+ * coisas diferentes, e quem transfere precisa das duas: o ausente PODE receber
+ * uma transferência, só não recebe do rodízio.
  */
-export function usePresence(): Record<string, string | null> {
-  const [seen, setSeen] = useState<Record<string, string | null>>({});
+export function usePresence(): Record<string, PresencaAoVivo> {
+  const [seen, setSeen] = useState<Record<string, PresencaAoVivo>>({});
   useEffect(() => {
     let active = true;
     const load = async () => {
       const loc = useDbStore.getState().locationId;
       if (!loc) return;
       const supabase = createClient();
-      const { data } = await supabase
-        .from("location_members")
-        .select("user_id, last_seen_at")
-        .eq("location_id", loc);
-      if (active && data) {
-        setSeen(Object.fromEntries(data.map((r: any) => [r.user_id, r.last_seen_at ?? null])));
+      const consultar = (cols: string) =>
+        supabase.from("location_members").select(cols).eq("location_id", loc);
+      /*
+       * ⚠️ Refaz SEM `disponibilidade` se a consulta falhar. Neste projeto o
+       * código chega à produção ANTES da migração, e pedir coluna inexistente faz
+       * o PostgREST recusar a consulta INTEIRA — aqui isso apagaria também a
+       * presença, que já funcionava. Foi assim que o envio quebrou em 01/09.
+       */
+      let linhas: any[] | null = null;
+      const r = await consultar("user_id, last_seen_at, disponibilidade");
+      if (r.error) {
+        const semColuna = await consultar("user_id, last_seen_at");
+        linhas = (semColuna.data as any[]) ?? null;
+      } else {
+        linhas = (r.data as any[]) ?? null;
+      }
+      if (active && linhas) {
+        setSeen(
+          Object.fromEntries(
+            linhas.map((r: any) => [
+              r.user_id,
+              {
+                lastSeenAt: r.last_seen_at ?? null,
+                disponibilidade: (r.disponibilidade as Disponibilidade) ?? null,
+              },
+            ])
+          )
+        );
       }
     };
     void load();
