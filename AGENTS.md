@@ -6946,3 +6946,39 @@ DIZER quantas linhas mexeu**, e o `raise notice` da 202609102300 imprime o
 resultado por atendente. É o mesmo princípio que já valia para função
 `security definer` ("zero linhas por guarda de RLS não é prova de que funciona"),
 agora aplicado a `update`.
+## 🔴 "Só com todos online" CONGELAVA a devolução (2026-09-10, urgente)
+
+Relato: leads da noite anterior parados com um vendedor que não responde, e a
+devolução não agia.
+
+A regra pedida em 10/09 foi *"deixar a devolução apenas quando os 3 vendedores
+estiverem online"*, e a INTENÇÃO continua certa: não tirar a conversa de alguém
+quando não há para quem dar — senão ela muda de mão para cair em quem já está
+segurando o setor sozinho.
+
+⚠️ **Mas exigir o time INTEIRO faz a regra depender de três presenças
+coincidirem.** Um de férias, um em reunião, um que fechou o CRM mais cedo — e a
+devolução não roda mais, **sem erro e sem aviso**. Eu tinha escrito esse risco no
+próprio commit ("se um vendedor entrar de férias sem sair do pool, a devolução
+fica desligada") e ainda assim entreguei a condição na forma que congela.
+
+A condição passa a ser a intenção literal: **existe OUTRA pessoa disponível para
+receber?** (`disponiveis.length >= 2`). Com dois trabalhando, funciona; com um
+só, para — que é o caso em que ela não resolveria nada.
+
+⏳ **O NOME da coluna virou dívida:** `devolver_so_com_todos_online` já não
+descreve o que ela faz. Não foi renomeada no meio de um incidente — ela é o
+interruptor liga/desliga da trava, e renomear coluna da qual o código no ar
+depende é como o envio quebrou em 01/09.
+
+### As três travas que podem parar a devolução, para diagnosticar em ordem
+
+1. **`disponiveis.length < 2`** — era esta.
+2. **`atribuida_em`** (202609101830): o retroativo pôs `now()` em todo mundo,
+   então cada conversa ganhou uma janela nova a partir da aplicação. Correto, mas
+   é preciso somar o limite do setor (20 min úteis) antes de esperar ação.
+3. **`DEVOLVER_TETO_MIN = 660`** — passado UM DIA ÚTIL de espera, a devolução não
+   toca mais: aquilo é backlog, e reatribuir só move um abandono entre pessoas.
+   ⚠️ **O instrumento para esses é o rebalanceamento** (202609102300), não a
+   devolução. Duas ferramentas, dois casos — quem procurar a devolução para
+   resolver backlog vai concluir que ela está quebrada.

@@ -812,10 +812,34 @@ export async function devolverInativas(
      * É uma COLUNA e não o nome do setor no código — casar por nome já confundiu
      * setor neste projeto mais de uma vez.
      */
+    /*
+     * 🔴 **"Só com todos online" CONGELAVA a devolução** (medido em 2026-09-10,
+     * relatado como urgente: leads da noite anterior parados com um vendedor que
+     * não respondia, e nada acontecia).
+     *
+     * A regra do Gabriel era *"deixar a devolução apenas quando os 3 vendedores
+     * estiverem online"*, e a INTENÇÃO dela é clara e continua valendo: não tirar
+     * a conversa de alguém quando não há para quem dar — senão ela só muda de mão
+     * para cair em quem já está segurando o setor sozinho.
+     *
+     * ⚠️ Mas exigir o time INTEIRO faz a regra depender da coincidência de três
+     * presenças ao mesmo tempo. Um de férias, um em reunião, um que fechou o CRM
+     * mais cedo — e a devolução não roda mais nunca, sem erro, sem aviso. Foi
+     * exatamente o que aconteceu.
+     *
+     * A condição passa a ser a intenção literal: **existe OUTRA pessoa
+     * disponível para receber?** Com dois trabalhando a devolução funciona; com
+     * um só, ela para (que é o caso em que ela não resolveria nada mesmo).
+     *
+     * ⏳ O NOME da coluna virou dívida — `devolver_so_com_todos_online` já não
+     * descreve o que ela faz. Não foi renomeada no meio de um incidente: ela
+     * segue sendo o interruptor liga/desliga desta trava, e renomear coluna
+     * quando o código no ar depende dela é como o envio quebrou em 01/09.
+     */
     if (dep.devolver_so_com_todos_online === true) {
       const { pool } = await departmentPool(db, locationId, dep.id);
       const disponiveis = await disponiveisOrdered(db, locationId, pool);
-      if (!pool.length || disponiveis.length < pool.length) continue;
+      if (disponiveis.length < 2) continue;
     }
 
     const { data: dcs } = await db
