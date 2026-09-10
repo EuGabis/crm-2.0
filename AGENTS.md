@@ -6770,3 +6770,28 @@ ligado sem perceber. "Sumiu sem explicação" é indistinguível de defeito.
 clica, a lista continua curta, e conclui que as conversas não existem. Os quatro
 seletores são estado local da lista, então o `reset()` da store não os via —
 `limparTudo` zera os dois lados.
+### ⚠️ O quadro por atendente mostrava gente de FORA do setor
+
+Relato do Gabriel (2026-09-10): o Daniel apareceu no quadro do **comercial** com 2
+leads, e ele é da **secretaria**.
+
+O dado é verdadeiro — alguém transferiu duas conversas do número comercial para
+ele. O problema é de recorte: uma linha de fora suja exatamente a comparação que
+o quadro existe para fazer ("quem do comercial recebeu quanto").
+
+⚠️ **Agrupado em "Outros setores", NÃO descartado.** Tirar as linhas faria a soma
+de "Recebeu" deixar de fechar com "Entraram" — e quadro cuja soma não fecha é
+quadro em que ninguém confia. Some 2 hoje; some 40 no dia em que um setor começar
+a socorrer o outro, e ninguém percebe que faltou. Agrupada, a linha ainda responde
+algo útil: **quanto do setor está sendo atendido por fora**.
+
+- **O time sai do vínculo REAL** (`department_channels` → departamento → membros
+  + `lead_pool`), o mesmo caminho que o rodízio usa para decidir a quem entregar.
+  Uma lista de nomes no código divergiria na primeira contratação.
+- ⚠️ **Time vazio não recorta nada**: número sem departamento vinculado (ou fluxo
+  em branco) agruparia o quadro INTEIRO numa linha só. Esconder tudo é pior que
+  mostrar demais.
+- "Sem responsável" e "Outros setores" descem para o fim da tabela: são contexto,
+  e no meio da lista competiriam com a comparação entre atendentes.
+- Corrigido na ROTA, sem migração — o vínculo já existe no banco, e trocar o
+  `returns table` de novo custaria mais um `drop`/`create` por nada.

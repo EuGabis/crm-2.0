@@ -40,6 +40,31 @@ export interface CursoContado {
  * passa de mil linhas, e este quadro tem regra de leitura própria o bastante
  * para ser lido sozinho.
  */
+/**
+ * A chave que a rota usa para agrupar quem NÃO é do time do setor.
+ *
+ * 🔴 Existe porque o Daniel — da secretaria — apareceu no quadro do comercial
+ * com 2 leads: alguém transferiu duas conversas daquele número para ele. O dado é
+ * verdadeiro, e mesmo assim uma linha de fora suja a comparação que o quadro
+ * existe para fazer.
+ *
+ * ⚠️ **Agrupado, e não descartado**: sem essa linha, a soma de "Recebeu"
+ * deixaria de fechar com "Entraram" — e quadro cuja soma não fecha é quadro em
+ * que ninguém confia. De quebra ela responde algo útil: quanto do setor está
+ * sendo atendido por fora.
+ */
+const FORA = "__fora__";
+
+const ehPessoa = (id: string | null) => !!id && id !== FORA;
+
+function rotulo(id: string | null, nomes: Map<string, string>): string {
+  if (!id) return "Sem responsável";
+  if (id === FORA) return "Outros setores";
+  // "Carregando..." e não "—": os dois são coisas diferentes, e o mesmo texto
+  // faria a linha COM atendente parecer sem nenhum enquanto a equipe não volta.
+  return nomes.get(id) ?? "Carregando...";
+}
+
 export function CarteiraPorAtendente({
   carteiras,
   cursos,
@@ -68,7 +93,8 @@ export function CarteiraPorAtendente({
       <div className="rounded-xl border bg-white p-4">
         <h3 className="text-xs font-semibold text-slate-700">Por atendente</h3>
         <p className="mb-3 text-[11px] text-slate-400">
-          Onde os leads do período estão hoje.
+          Onde os leads do período estão hoje. Quem não é do setor entra em{" "}
+          <strong>Outros setores</strong>.
           {mostraGanhos && " “Ganhos” vem da oportunidade mais recente do contato."}
         </p>
         {/* Tabela larga rola no PRÓPRIO container — o corpo da página nunca
@@ -94,10 +120,10 @@ export function CarteiraPorAtendente({
                       <span
                         className={cn(
                           "font-medium",
-                          c.atendente ? "text-slate-800" : "text-slate-400"
+                          ehPessoa(c.atendente) ? "text-slate-800" : "text-slate-400"
                         )}
                       >
-                        {c.atendente ? (nomes.get(c.atendente) ?? "Carregando...") : "Sem responsável"}
+                        {rotulo(c.atendente, nomes)}
                       </span>
                       {/* A barra é do MESMO número da coluna ao lado: realce de
                           grandeza, não uma segunda medida — por isso não tem

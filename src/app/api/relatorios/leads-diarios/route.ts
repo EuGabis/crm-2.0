@@ -248,11 +248,73 @@ export async function GET(request: Request) {
     (data ?? []).length > 0 &&
     Object.prototype.hasOwnProperty.call((data as any[])[0], "atendente");
 
+  /*
+   * 🔴 **O TIME do recorte: quem é dos departamentos que atendem estes números.**
+   *
+   * Relato do Gabriel (2026-09-10): o Daniel apareceu no quadro do COMERCIAL com
+   * 2 leads, e ele é da secretaria. O dado é real — alguém transferiu duas
+   * conversas do número comercial para ele —, mas ele não faz parte do time, e
+   * uma linha de fora suja exatamente a comparação que o quadro existe para
+   * fazer ("quem do comercial recebeu quanto").
+   *
+   * ⚠️ **Agrupado, não descartado.** Tirar as linhas faria a soma de "Recebeu"
+   * deixar de fechar com "Entraram", e um quadro cuja soma não fecha é um quadro
+   * em que ninguém confia — some 2 hoje, some 40 quando um setor começar a
+   * socorrer o outro, e ninguém percebe que faltou. Elas viram UMA linha
+   * "Outros setores", que de quebra responde algo útil: quanto do comercial está
+   * sendo atendido por fora.
+   *
+   * O time sai do vínculo REAL (`department_channels` → departamento → membros +
+   * `lead_pool`), o mesmo caminho que o rodízio usa para saber a quem entregar.
+   * Uma lista fixa de nomes divergiria na primeira contratação.
+   */
+  const doTime = new Set<string>();
+  if (flow) {
+    const { data: chs } = await supabase
+      .from("whatsapp_channels")
+      .select("id")
+      .eq("location_id", membership.location_id)
+      .eq("bot_flow", flow);
+    const chIds = (chs ?? []).map((c: any) => c.id);
+    if (chIds.length) {
+      const { data: dcs } = await supabase
+        .from("department_channels")
+        .select("department_id")
+        .in("channel_id", chIds);
+      const depIds = [...new Set((dcs ?? []).map((d: any) => d.department_id))];
+      if (depIds.length) {
+        const { data: mem } = await supabase
+          .from("location_members")
+          .select("user_id")
+          .eq("location_id", membership.location_id)
+          .in("department_id", depIds);
+        for (const m of mem ?? []) doTime.add((m as any).user_id);
+        // `lead_pool` pode listar quem recebe lead sem estar no departamento —
+        // é a mesma fonte que `departmentPool` consulta primeiro.
+        const { data: pools } = await supabase
+          .from("departments")
+          .select("lead_pool")
+          .in("id", depIds);
+        for (const d of pools ?? []) {
+          for (const u of ((d as any).lead_pool ?? []) as string[]) doTime.add(u);
+        }
+      }
+    }
+  }
+  /*
+   * ⚠️ Time vazio = **não recorta nada**. Sem número vinculado a departamento
+   * (ou com o fluxo em branco), agrupar todos como "outros setores" transformaria
+   * o quadro inteiro numa linha só — esconder tudo é pior que mostrar demais.
+   */
+  const recortaTime = doTime.size > 0;
+  const FORA = "__fora__";
+
   const porAtendente = new Map<string, Carteira>();
   const cursosTotal: Record<string, number> = {};
   for (const l of leads) {
-    const chave = l.atendente ?? "";
-    const c = porAtendente.get(chave) ?? carteira(l.atendente);
+    const fora = !!l.atendente && recortaTime && !doTime.has(l.atendente);
+    const chave = fora ? FORA : (l.atendente ?? "");
+    const c = porAtendente.get(chave) ?? carteira(fora ? FORA : l.atendente);
     c.recebeu++;
     // "Qualificado" só existe onde o bot pontua; no fluxo da secretaria a coluna
     // fica zerada e a tela não a mostra.
@@ -266,11 +328,18 @@ export async function GET(request: Request) {
     porAtendente.set(chave, c);
   }
 
-  const carteiras = [...porAtendente.values()].sort(
-    // Quem recebeu mais primeiro; empate desce para "sem responsável" por último,
-    // que é onde ele incomoda menos sem deixar de aparecer.
-    (a, b) => b.recebeu - a.recebeu || (a.atendente ? -1 : 1),
-  );
+  /*
+   * Quem recebeu mais primeiro, e as duas linhas que NÃO são pessoas ("sem
+   * responsável" e "outros setores") vão para o fim: elas são contexto, e no meio
+   * da lista competiriam com a comparação entre atendentes.
+   */
+  const naoEhPessoa = (c: Carteira) => !c.atendente || c.atendente === FORA;
+  const carteiras = [...porAtendente.values()].sort((a, b) => {
+    const fa = naoEhPessoa(a) ? 1 : 0;
+    const fb = naoEhPessoa(b) ? 1 : 0;
+    if (fa !== fb) return fa - fb;
+    return b.recebeu - a.recebeu;
+  });
 
   const cursos = Object.entries(cursosTotal)
     .map(([curso, leads]) => ({ curso, leads }))
