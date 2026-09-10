@@ -526,10 +526,46 @@ export async function distributeDepartment(
   deptId: string,
   convs: { id: string; contact_id: string }[],
   fraction: number,
+  /**
+   * Entregar TUDO a uma pessoa específica, em vez de girar o rodízio.
+   *
+   * Pedido do Gabriel (2026-09-10): poder escolher para quem vai a fila no botão
+   * do Relatório. É ação DELIBERADA de administrador, então ela passa por cima
+   * da presença E do status "Ausente" — quem clica está decidindo, e um botão
+   * que recusa em silêncio a escolha de quem clicou é pior que não ter o botão.
+   * O evento no fio continua marcando "(estava offline)" quando for o caso, para
+   * a decisão ficar legível depois.
+   *
+   * ⚠️ Se a pessoa não estiver no pool DESTE setor, devolve 0 sem escrever nada:
+   * distribuir lead de um setor para quem não o atende seria pior que não
+   * distribuir. Quem chama soma os zeros e avisa na tela.
+   */
+  paraUsuario?: string | null,
 ): Promise<number> {
   if (!convs.length) return 0;
   const { pool, cursor } = await departmentPool(db, locationId, deptId);
   const online = await onlineOrdered(db, locationId, pool);
+  if (paraUsuario) {
+    if (!pool.includes(paraUsuario)) return 0;
+    const take = Math.min(convs.length, Math.max(1, Math.ceil(convs.length * fraction)));
+    for (let i = 0; i < take; i++) {
+      await assignLeadTo(
+        db,
+        {
+          conversationId: convs[i].id,
+          contactId: convs[i].contact_id,
+          locationId,
+          pipelineName: "Controle de Leads",
+          reason: "escolha do administrador no relatório",
+        },
+        paraUsuario,
+        !online.includes(paraUsuario),
+      );
+    }
+    // ⚠️ O cursor NÃO avança: não houve rodízio. Avançá-lo puniria a próxima
+    // pessoa da vez por uma entrega que ela não recebeu.
+    return take;
+  }
   // Departamento que distribui mesmo offline (0083) usa o pool inteiro; senão,
   // só os online (e não distribui nada se ninguém online).
   const { data: dep } = await db

@@ -31,6 +31,14 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   const pct = Math.min(100, Math.max(1, Number(body?.pct) || 100));
   const fraction = pct / 100;
+  /*
+   * `userId` opcional: entrega a fila a uma pessoa escolhida em vez de girar o
+   * rodízio. ⚠️ Validado contra o POOL de cada setor lá dentro — aceitar um id
+   * qualquer aqui deixaria o admin atribuir lead de um setor a quem não o
+   * atende, e a RLS não protege disso (a rota roda com a service role).
+   */
+  const paraUsuario =
+    typeof body?.userId === "string" && body.userId.trim() ? body.userId.trim() : null;
   const locationId = membership.location_id;
 
   let db: any;
@@ -67,8 +75,23 @@ export async function POST(request: Request) {
     const { prontas } = await filaProntaDoSetor(db, locationId, channelIds, 1000);
     if (!prontas.length) continue;
 
-    distributed += await distributeDepartment(db, locationId, dep.id, prontas, fraction);
+    distributed += await distributeDepartment(
+      db,
+      locationId,
+      dep.id,
+      prontas,
+      fraction,
+      paraUsuario,
+    );
   }
 
-  return Response.json({ distributed });
+  /*
+   * ⚠️ `alvoForaDoPool` existe para a tela poder explicar um zero. Sem ele,
+   * escolher alguém que não está no pool de nenhum setor com fila devolveria
+   * "0 distribuídos" e pareceria defeito do botão.
+   */
+  return Response.json({
+    distributed,
+    alvoForaDoPool: !!paraUsuario && distributed === 0,
+  });
 }
