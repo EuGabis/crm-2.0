@@ -291,6 +291,22 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
                     <p className="mt-0.5 text-[11px] text-slate-400">
                       Fonte: {o.source} · Status:{" "}
                       {o.status === "open" ? "Aberta" : o.status === "won" ? "Ganha" : "Perdida"}
+                      {" · "}
+                      {/*
+                        ⚠️ O responsável é a informação que faltava aqui (pedido
+                        do Gabriel, 2026-09-10): sem ele, quem abre o contato vê
+                        em que fase o lead está e não vê COM QUEM ele está — e é
+                        essa a pergunta de quem atende o cliente que ligou.
+
+                        "Sem responsável" é escrito, não omitido: um lead do funil
+                        sem dono é justamente o que precisa aparecer.
+                      */}
+                      Responsável:{" "}
+                      <span className={o.ownerId ? "text-slate-600" : "text-amber-600"}>
+                        {o.ownerId
+                          ? (team.find((u) => u.id === o.ownerId)?.name ?? "Carregando...")
+                          : "sem responsável"}
+                      </span>
                     </p>
                   </li>
                 );

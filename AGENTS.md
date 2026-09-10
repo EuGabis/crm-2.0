@@ -7026,3 +7026,69 @@ O gatilho já registra o evento no fio, então quem recebe entende de onde veio.
 
 ⏳ `conversations-report.tsx` já tinha **2 erros de lint** (`react-hooks/purity` e
 memoização, ~linhas 208 e 229) na `main`, anteriores a esta mudança.
+## "Quem vê este pipeline": VÁRIAS pessoas (migração 202609110900)
+
+Pedido do Gabriel (2026-09-10): ao escolher "Uma pessoa", poder escolher mais de
+uma. A 0039 modelou o escopo `user` com UM `owner_id`, então dois vendedores
+dividirem um funil só era possível promovendo-o a `department` — o que entrega o
+funil ao departamento INTEIRO, o oposto do que se quer.
+
+`pipelines.viewer_ids uuid[]`, e a regra passa a ser **`owner_id` ∪ `viewer_ids`**.
+
+- ⚠️ **`owner_id` NÃO sai de cena: ele é quem ADMINISTRA** (renomeia, mexe nas
+  fases, muda quem vê). `pipeline_manageable` não foi tocada. O diálogo se chama
+  "Quem VÊ" — dar administração a todos os escolhidos seria decidir uma segunda
+  coisa que ninguém pediu, e tirá-la de quem já tem seria pior. Na tela, quem
+  administra é o **primeiro marcado**, e isso está escrito ali para a ordem não
+  ser um detalhe invisível.
+- ⚠️ **O retroativo põe o dono dentro de `viewer_ids`** para o modelo ficar
+  uniforme — nenhuma consulta precisa lembrar que o dono é um caso especial.
+- ⚠️ **A policy de SELECT de `pipelines` repete a regra em SQL puro** (não chama
+  `pipeline_visible`) desde a 0039, para o planner não perder o índice num
+  `exists` opaco. Repetida, ela tem de ser mantida em SINCRONIA com a função:
+  divergir faria o funil aparecer na lista e as fases dele não.
+- **`membros criam`/`membros editam` ficam intocadas.** Se a escrita aceitasse
+  `viewer_ids`, um dos escolhidos se removeria da lista ou renomearia o funil de
+  outra pessoa; e o `with check` do UPDATE é o que impede um usuário comum
+  promover o próprio funil a `empresa`.
+- **Caixas, não `Select` múltiplo**: o `Select` do projeto é de valor único (Base
+  UI), e o que importa é VER quem já está marcado sem abrir menu.
+- ⚠️ `addPipeline`/`setPipelineScope` **refazem a escrita sem `viewer_ids`** se a
+  coluna não existir: o código vai ao ar antes da migração, e pedir coluna
+  inexistente faz o PostgREST recusar a consulta inteira — criar funil pararia de
+  funcionar na janela.
+
+## Ler todas as conversas, por pessoa (migração 202609110930)
+
+Pedido: *"para o usuário Cibelle Paiva, quero que ela consiga abrir a conversa lá
+em contatos para visualizar as mensagens."*
+
+Ela abre pelo contato (o RPC acha o id de propósito) e o fio vem VAZIO — a RLS de
+`messages` só entrega a conversa atribuída a ela ou a fila sem dono do próprio
+setor.
+
+⚠️ **`sees_all` não resolve**: em conversas, a 0074 recortou de propósito —
+`sees_all` vê as suas + a FILA do setor, e conversa COM dono é privada do dono
+(pedido explícito: "ao transferir, tem que sumir"). ⚠️ **`colaborativo` (0080)
+também não**: é por DEPARTAMENTO e alcança só os números daquele setor, e ela
+precisa abrir o contato que ligou seja por qual número for.
+
+Daí `location_members.le_todas_conversas` — a permissão é exatamente o que foi
+pedido e nada mais: **ler**. Não assume, não responde, não transfere.
+
+- ⚠️ **Só as policies de SELECT mudam.** UPDATE/INSERT ficam intocadas: quem lê
+  tudo não passa a responder por ninguém.
+- ⚠️ **O corpo é o da 0074 palavra por palavra, mais UM `or`.** As policies de
+  conversas foram recriadas em 0035, 0053, 0062, 0063 e 0074, cada uma somando
+  uma condição — reescrever "do zero" perderia `channel_allowed`,
+  `conv_with_bot` ou o recorte do pool.
+- **Liga por E-MAIL, não por nome** (nome repete e muda). ⚠️ Se o `update` disser
+  0 linhas, o e-mail é outro neste banco e a permissão fica DESLIGADA — o lado
+  seguro. A consulta para descobrir o certo está no arquivo.
+
+### E o responsável da oportunidade no detalhe do contato
+
+Pedido no mesmo minuto. O card mostrava "Fonte · Status" e não COM QUEM o lead
+está — que é a pergunta de quem atende o cliente que acabou de ligar.
+"sem responsável" é escrito em âmbar, não omitido: lead de funil sem dono é
+justamente o que precisa aparecer.

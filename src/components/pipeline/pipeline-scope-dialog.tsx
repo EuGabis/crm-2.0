@@ -34,7 +34,17 @@ export function scopeBadge(
     return { label: name, className: "bg-violet-100 text-violet-700" };
   }
   if (pipeline.scope === "user") {
-    const name = team.find((u) => u.id === pipeline.ownerId)?.name ?? "Pessoal";
+    // A lista salva já inclui o dono (202609110900); funil antigo sem lista cai
+    // no dono, que é o comportamento de antes.
+    const ids = pipeline.viewerIds?.length
+      ? pipeline.viewerIds
+      : pipeline.ownerId
+        ? [pipeline.ownerId]
+        : [];
+    if (ids.length > 1) {
+      return { label: `${ids.length} pessoas`, className: "bg-amber-100 text-amber-700" };
+    }
+    const name = team.find((u) => u.id === ids[0])?.name ?? "Pessoal";
     return { label: `Só ${name}`, className: "bg-amber-100 text-amber-700" };
   }
   return { label: "Empresa", className: "bg-slate-100 text-slate-600" };
@@ -69,7 +79,12 @@ export function PipelineScopeDialog({
   const [name, setName] = useState("");
   const [scope, setScope] = useState<PipelineScope>("user");
   const [departmentId, setDepartmentId] = useState("");
-  const [ownerId, setOwnerId] = useState("");
+  /*
+   * ⚠️ Uma LISTA, não um id (202609110900). `ownerId` continua existindo como
+   * "quem administra" e é o PRIMEIRO da lista — o diálogo se chama "Quem vê", e
+   * dar administração a todos os escolhidos seria decidir outra coisa.
+   */
+  const [pessoas, setPessoas] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
   // Espelha o pipeline em edição ao (re)abrir. Ajuste durante o render em vez
@@ -82,17 +97,31 @@ export function PipelineScopeDialog({
     setName(mode === "edit" ? (pipeline?.name ?? "") : "");
     setScope(mode === "edit" ? (pipeline?.scope ?? "empresa") : isAdmin ? "empresa" : "user");
     setDepartmentId(pipeline?.departmentId ?? "");
-    setOwnerId(pipeline?.ownerId ?? myUserId ?? "");
+    /*
+     * O dono entra na lista mesmo em funil antigo, cujo `viewerIds` ainda está
+     * vazio (o retroativo da migração cobre o banco, isto cobre a tela até ela
+     * ser aplicada).
+     */
+    const salvas = pipeline?.viewerIds ?? [];
+    const dono = pipeline?.ownerId ?? myUserId ?? "";
+    setPessoas(
+      salvas.length ? salvas : dono ? [dono] : [],
+    );
   }
 
   const invalid =
     (scope === "department" && !departmentId) ||
-    (scope === "user" && !ownerId) ||
+    (scope === "user" && pessoas.length === 0) ||
     (mode === "create" && !name.trim());
 
   const submit = async () => {
     setSaving(true);
-    const visibility = { scope, departmentId, ownerId };
+    /*
+     * ⚠️ O `ownerId` é o PRIMEIRO da lista, e a ordem importa: é ele quem
+     * administra o funil. Mandar a lista sem eleger um dono deixaria o funil sem
+     * ninguém que pode renomeá-lo ou mudar quem vê.
+     */
+    const visibility = { scope, departmentId, ownerId: pessoas[0] ?? null, viewerIds: pessoas };
     const ok =
       mode === "create"
         ? await pipelineActions.addPipeline(name.trim(), visibility)
@@ -191,21 +220,58 @@ export function PipelineScopeDialog({
 
           {isAdmin && scope === "user" && (
             <div className="space-y-1">
-              <Label className="text-xs">Pessoa</Label>
-              <Select value={ownerId} onValueChange={(v) => setOwnerId(v ?? "")}>
-                <SelectTrigger className="h-8 w-full text-xs">
-                  <SelectValue>
-                    {team.find((u) => u.id === ownerId)?.name ?? "Selecionar"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {team.map((u) => (
-                    <SelectItem key={u.id} value={u.id} className="text-xs">
-                      {u.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label className="text-xs">
+                Pessoas{pessoas.length > 0 && ` (${pessoas.length})`}
+              </Label>
+              {/*
+                ⚠️ Lista com caixas, e não um `Select` de múltipla escolha: o
+                `Select` do projeto é de valor único (Base UI), e o que importa
+                aqui é VER quem já está marcado sem abrir menu — é a informação
+                que o diálogo existe para mostrar.
+              */}
+              <div className="max-h-48 space-y-0.5 overflow-y-auto rounded-md border p-1 [scrollbar-width:thin]">
+                {team.length === 0 ? (
+                  <p className="px-1 py-2 text-[11px] text-slate-400">Nenhuma pessoa na equipe.</p>
+                ) : (
+                  team.map((u) => {
+                    const marcada = pessoas.includes(u.id);
+                    return (
+                      <label
+                        key={u.id}
+                        className={
+                          "flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-slate-50" +
+                          (marcada ? " bg-indigo-50/60" : "")
+                        }
+                      >
+                        <input
+                          type="checkbox"
+                          checked={marcada}
+                          onChange={() =>
+                            setPessoas((atual) =>
+                              atual.includes(u.id)
+                                ? atual.filter((x) => x !== u.id)
+                                : [...atual, u.id],
+                            )
+                          }
+                          className="size-3.5 accent-indigo-500"
+                        />
+                        <span className="min-w-0 flex-1 truncate">{u.name}</span>
+                        {/* Quem administra é o primeiro escolhido — dito na tela
+                            para a ordem não ser um detalhe invisível. */}
+                        {marcada && pessoas[0] === u.id && (
+                          <span className="shrink-0 rounded bg-indigo-100 px-1 text-[9px] font-semibold text-indigo-700">
+                            administra
+                          </span>
+                        )}
+                      </label>
+                    );
+                  })
+                )}
+              </div>
+              <p className="text-[10px] text-slate-400">
+                Todos os marcados veem o funil, as fases e os leads. Quem{" "}
+                <strong>administra</strong> (renomeia, muda quem vê) é o primeiro marcado.
+              </p>
             </div>
           )}
 

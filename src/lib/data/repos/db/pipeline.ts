@@ -79,6 +79,7 @@ async function fetchPipelineState(): Promise<
       scope: (p.scope ?? "empresa") as PipelineScope,
       departmentId: p.department_id ?? null,
       ownerId: p.owner_id ?? null,
+      viewerIds: (p.viewer_ids as string[] | null) ?? [],
     })),
     opportunities: (opps.data ?? []).map(mapOpportunity),
   };
@@ -271,6 +272,30 @@ export const oppActions = {
   },
 };
 
+/**
+ * Quem vê um pipeline.
+ *
+ * ⚠️ **`ownerId` é quem ADMINISTRA; `viewerIds` é quem VÊ** (202609110900). Os
+ * dois existem porque o diálogo se chama "Quem vê": dar administração a todos os
+ * escolhidos seria decidir uma segunda coisa que ninguém pediu, e tirá-la de quem
+ * já tem seria pior. O dono também vê — a união é feita no banco.
+ */
+export interface Visibilidade {
+  scope: PipelineScope;
+  departmentId?: string | null;
+  ownerId?: string | null;
+  /** Todas as pessoas escolhidas no diálogo, o dono incluído. */
+  viewerIds?: string[];
+}
+
+/** A lista de quem vê, sempre com o dono dentro e sem repetição. */
+function quemVe(v: Visibilidade, donoPadrao?: string | null): string[] {
+  if (v.scope !== "user") return [];
+  const dono = v.ownerId ?? donoPadrao ?? null;
+  const todos = [...(v.viewerIds ?? []), ...(dono ? [dono] : [])];
+  return [...new Set(todos.filter(Boolean))];
+}
+
 export const pipelineActions = {
   /**
    * Cria um pipeline com escopo (0039). Usuário comum só consegue criar
@@ -279,14 +304,12 @@ export const pipelineActions = {
    */
   async addPipeline(
     name: string,
-    visibility: { scope: PipelineScope; departmentId?: string | null; ownerId?: string | null } = {
-      scope: "user",
-    }
+    visibility: Visibilidade = { scope: "user" }
   ): Promise<boolean> {
     const location = loc();
     if (!location) return false;
     const supabase = createClient();
-    const { data, error } = await supabase
+    const primeira = await supabase
       .from("pipelines")
       .insert({
         location_id: location,
@@ -297,10 +320,29 @@ export const pipelineActions = {
         owner_id:
           visibility.scope === "user" ? (visibility.ownerId ?? uid()) : null,
         created_by: uid(),
+        viewer_ids: quemVe(visibility, uid()),
       })
       .select()
       .single();
-    if (error || !data) return false;
+    let data = primeira.data;
+    // Mesma tolerância do `setPipelineScope`: sem a coluna, cria com uma pessoa.
+    if (primeira.error) {
+      const r2 = await supabase
+        .from("pipelines")
+        .insert({
+          location_id: location,
+          name,
+          position: state().pipelines.length,
+          scope: visibility.scope,
+          department_id: visibility.scope === "department" ? visibility.departmentId : null,
+          owner_id: visibility.scope === "user" ? (visibility.ownerId ?? uid()) : null,
+          created_by: uid(),
+        })
+        .select()
+        .single();
+      data = r2.data;
+    }
+    if (!data) return false;
     const s = state();
     s.patch({
       pipelines: [
@@ -312,6 +354,7 @@ export const pipelineActions = {
           scope: data.scope ?? "empresa",
           departmentId: data.department_id ?? null,
           ownerId: data.owner_id ?? null,
+          viewerIds: (data.viewer_ids as string[] | null) ?? [],
         },
       ],
     });
@@ -321,19 +364,37 @@ export const pipelineActions = {
   /** Troca o escopo (só admin — a RLS recusa para os demais). */
   async setPipelineScope(
     id: string,
-    visibility: { scope: PipelineScope; departmentId?: string | null; ownerId?: string | null }
+    visibility: Visibilidade
   ): Promise<boolean> {
     const supabase = createClient();
-    const { data, error } = await supabase
+    const base = {
+      scope: visibility.scope,
+      department_id: visibility.scope === "department" ? visibility.departmentId : null,
+      owner_id: visibility.scope === "user" ? visibility.ownerId : null,
+    };
+    let { data, error } = await supabase
       .from("pipelines")
-      .update({
-        scope: visibility.scope,
-        department_id: visibility.scope === "department" ? visibility.departmentId : null,
-        owner_id: visibility.scope === "user" ? visibility.ownerId : null,
-      })
+      .update({ ...base, viewer_ids: quemVe(visibility) })
       .eq("id", id)
       .select()
       .maybeSingle();
+    /*
+     * ⚠️ **Refaz sem `viewer_ids` se a coluna ainda não existir.** Neste projeto
+     * o código chega à produção ANTES da migração, e pedir coluna inexistente faz
+     * o PostgREST recusar a consulta INTEIRA — mudar quem vê pararia de funcionar
+     * na janela entre o deploy e o SQL. Sem a coluna vale o comportamento antigo:
+     * uma pessoa só, a do `ownerId`.
+     */
+    if (error) {
+      const r2 = await supabase
+        .from("pipelines")
+        .update(base)
+        .eq("id", id)
+        .select()
+        .maybeSingle();
+      data = r2.data;
+      error = r2.error;
+    }
     // `data` nulo sem erro = RLS recusou. Sem checar, a tela diria "salvo".
     if (error || !data) return false;
     const s = state();
@@ -345,6 +406,7 @@ export const pipelineActions = {
               scope: data.scope,
               departmentId: data.department_id ?? null,
               ownerId: data.owner_id ?? null,
+              viewerIds: (data.viewer_ids as string[] | null) ?? [],
             }
           : p
       ),
