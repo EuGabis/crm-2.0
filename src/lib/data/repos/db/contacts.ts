@@ -530,7 +530,26 @@ export const dbContactActions = {
     patch: Partial<
       Pick<
         Contact,
-        "firstName" | "lastName" | "email" | "phone" | "doc" | "company" | "customFields"
+        | "firstName"
+        | "lastName"
+        | "email"
+        | "phone"
+        | "doc"
+        | "company"
+        | "customFields"
+        /**
+         * Proprietário do contato — o vendedor que cuida dele.
+         *
+         * ⚠️ Passou a ser editável porque a transferência de conversa DEIXOU de
+         * reescrevê-lo (202609111030). Sem um jeito de trocar na tela, o campo
+         * ficaria congelado em quem inseriu o contato — e o pedido do Gabriel é
+         * justamente poder dizer que o dono é o vendedor, não quem está
+         * conversando agora.
+         *
+         * String vazia LIMPA o dono (a coluna é anulável e `mapContact` traduz
+         * null para ""), então "sem proprietário" é um estado alcançável.
+         */
+        | "ownerId"
       >
     >
   ): Promise<boolean> {
@@ -552,6 +571,8 @@ export const dbContactActions = {
     if (patch.doc !== undefined) row.doc = patch.doc?.trim() || null;
     if (patch.company !== undefined) row.company = patch.company || null;
     if (patch.customFields !== undefined) row.custom_fields = patch.customFields;
+    // `|| null` e não `?? null`: "" é ausência de dono, não um dono de id vazio.
+    if (patch.ownerId !== undefined) row.owner_id = patch.ownerId || null;
     const { data, error } = await supabase
       .from("contacts")
       .update(row)

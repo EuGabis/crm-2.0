@@ -315,6 +315,40 @@ async function leadsPipelineId(
   return (bestScore > 0 ? best : pipelines[0]).id;
 }
 
+/**
+ * O card do funil pode trocar de dono nesta atribuição?
+ *
+ * 🔴 **Regra do Gabriel (2026-09-10): propriedade NÃO segue a conversa.** O
+ * comercial fechou a venda e passou o aluno para a Secretaria falar de
+ * documentos — e o "proprietário" virou quem estava atendendo, não quem vendeu.
+ * A frase dele é a regra inteira: *"o proprietário é o comercial Rogerio, mas
+ * esse contato pode estar conversando com outro"*.
+ *
+ * ⚠️ **Card SEM dono grava; card COM dono não é sobrescrito.** É a primeira
+ * atribuição que define o proprietário; depois dela, só uma PESSOA troca, no
+ * seletor do card. Mesmo princípio da 0090 ("decisão humana não se desfaz"),
+ * agora valendo também contra a decisão automática que já registrou um dono.
+ *
+ * ⚠️ **A exceção da DEVOLUÇÃO existe para não congelar um dado falso.** Quando o
+ * rodízio tira a conversa de quem não respondeu, aquela pessoa nunca trabalhou o
+ * lead — deixar o card no nome dela seria gravar como proprietário justamente
+ * quem não atendeu, e ainda distorceria o "Ganhos por atendente" do relatório.
+ * Então sobrescreve, mas SÓ quando o dono do card é exatamente quem está
+ * perdendo a conversa.
+ *
+ * ⚠️ `donoAnterior` é parâmetro PRÓPRIO e não o `excluir` do `distributeOne`,
+ * que por acaso hoje carrega o mesmo id. Reaproveitar um valor que já tem outro
+ * significado é o erro que fez `last_seen_at = NULL` querer dizer três coisas
+ * incompatíveis (ver a 202609091100 no AGENTS.md).
+ */
+export function podeTrocarDonoDoCard(
+  donoDoCard: string | null | undefined,
+  donoAnterior?: string | null,
+): boolean {
+  if (!donoDoCard) return true;
+  return !!donoAnterior && donoDoCard === donoAnterior;
+}
+
 /** Atribui o lead ao atendente: conversa + dono do card no funil de leads. */
 export async function assignLeadTo(
   db: any,
@@ -325,6 +359,14 @@ export async function assignLeadTo(
     pipelineName?: string;
     /** Vai para `conversations.assign_reason` e aparece no evento do fio. */
     reason?: string;
+    /**
+     * Quem estava com a conversa ANTES desta atribuição.
+     *
+     * Só a devolução por inatividade preenche: é o que autoriza sobrescrever o
+     * dono do card, porque quem está saindo não trabalhou o lead. Ver
+     * `podeTrocarDonoDoCard`.
+     */
+    donoAnterior?: string | null;
   },
   userId: string,
   offline = false,
@@ -362,13 +404,21 @@ export async function assignLeadTo(
   if (!pid) return;
   const { data: opp } = await db
     .from("opportunities")
-    .select("id, stage_id, name")
+    .select("id, owner_id")
     .eq("contact_id", p.contactId)
     .eq("pipeline_id", pid)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (opp) await db.from("opportunities").update({ owner_id: userId }).eq("id", opp.id);
+  /*
+   * 🔴 Antes era `if (opp) update({ owner_id: userId })` — SEM ler o dono atual.
+   * Toda atribuição da conversa reescrevia o proprietário do card, então o
+   * vendedor que fechou a venda perdia o lead no instante em que o aluno foi
+   * passado para a Secretaria. Ver `podeTrocarDonoDoCard`.
+   */
+  if (opp && podeTrocarDonoDoCard(opp.owner_id, p.donoAnterior)) {
+    await db.from("opportunities").update({ owner_id: userId }).eq("id", opp.id);
+  }
 }
 
 /**
@@ -408,6 +458,15 @@ export async function distributeOne(
     fila?: number;
     /** Números do setor, para medir a carga. Sem eles, a carga é lida do zero. */
     channelIds?: string[];
+    /**
+     * Quem estava com a conversa antes — repassado ao `assignLeadTo`.
+     *
+     * ⚠️ NÃO é derivado de `excluir`, embora a devolução passe o mesmo id nos
+     * dois: `excluir` responde "quem não pode receber" e este responde "de quem
+     * estou tirando". Colar os dois faria qualquer exclusão futura (alguém de
+     * férias, por exemplo) autorizar a troca do proprietário sem querer.
+     */
+    donoAnterior?: string | null;
   },
 ): Promise<string | null> {
   const { pool, cursor } = await departmentPool(db, args.locationId, args.deptId);
@@ -509,6 +568,7 @@ export async function distributeOne(
       locationId: args.locationId,
       pipelineName: args.pipelineName,
       reason: args.reason,
+      donoAnterior: args.donoAnterior,
     },
     user,
     offline,
@@ -974,6 +1034,13 @@ export async function devolverInativas(
         // respondeu — o cursor não sabe de onde a conversa veio, e o resultado
         // seria um evento de transferência a cada tique, para sempre.
         excluir: [anterior],
+        /*
+         * ⚠️ Autoriza o card a trocar de dono NESTE caso e só nele: quem não
+         * respondeu não trabalhou o lead, e deixar o card no nome dela gravaria
+         * como proprietário exatamente quem não atendeu. Ver
+         * `podeTrocarDonoDoCard`.
+         */
+        donoAnterior: anterior,
         channelIds,
       });
       if (novo) redistribuidas++;

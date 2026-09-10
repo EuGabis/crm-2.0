@@ -25,9 +25,10 @@ import { formatBRL } from "@/lib/data/repos/opportunities";
 export default function ContactDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
-  const { contact, loading } = useDbContact(id);
+  const { contact, loading, refresh } = useDbContact(id);
   const team = useDbTeam();
   const [openingChat, setOpeningChat] = useState(false);
+  const [salvandoDono, setSalvandoDono] = useState(false);
   const { fields } = useContactsModule();
   const { pipelines, opportunities } = usePipelineDb();
   const contactOpps = opportunities.filter((o) => o.contactId === id);
@@ -78,6 +79,35 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const owner = team.find((u) => u.id === contact.ownerId);
+
+  /*
+   * 🔴 Trocar o proprietário passou a ser AÇÃO DE PESSOA, e é o outro lado da
+   * 202609111030: a transferência de conversa deixou de reescrever este campo,
+   * então sem um seletor aqui ele ficaria congelado em quem inseriu o contato.
+   *
+   * ⚠️ Não é admin-only: a RLS de `contacts` autoriza qualquer membro a editar
+   * (UPDATE olha só `location_id`), e transferir conversa também é de qualquer
+   * um desde a 202609041530 — travar só a tela daria a impressão de proteção
+   * sem proteger nada.
+   *
+   * ⚠️ `refresh()` no fim não é enfeite: nesta tela o contato quase nunca vem da
+   * store (o inbox parou de carregar os 40 mil), então o `setContacts` do repo
+   * atualiza um array que ninguém aqui está lendo — foi exatamente assim que a
+   * etiqueta gravava no banco e o seletor continuava mostrando o valor antigo.
+   */
+  const trocarDono = async (novoDono: string) => {
+    if (novoDono === (contact.ownerId ?? "")) return;
+    setSalvandoDono(true);
+    const ok = await dbContactActions.update(contact.id, { ownerId: novoDono });
+    setSalvandoDono(false);
+    if (!ok) {
+      toast.error("Não foi possível trocar o proprietário");
+      return;
+    }
+    const nome = team.find((u) => u.id === novoDono)?.name;
+    toast.success(nome ? `Proprietário: ${nome}` : "Proprietário removido");
+    refresh();
+  };
 
   const save = async () => {
     if (!form.firstName.trim()) {
@@ -153,9 +183,41 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
           </Avatar>
           <div>
             <h1 className="text-lg font-bold text-slate-900">{contactName(contact)}</h1>
-            <p className="flex items-center gap-2 text-xs text-slate-500">
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
               <ChannelIcon channel={contact.lastActivityChannel} size={14} />
-              {contact.company ?? "Sem empresa"} · Proprietário: {owner?.name ?? "—"}
+              <span>{contact.company ?? "Sem empresa"} ·</span>
+              <span className="inline-flex items-center gap-1">
+                Proprietário:
+                {/*
+                  ⚠️ `<select>` nativo, como no "Atribuir…" do Relatório e no
+                  seletor de curso: são dezenas de nomes, e o nativo dá busca por
+                  digitação e a rolagem do sistema de graça.
+                */}
+                <select
+                  value={contact.ownerId ?? ""}
+                  onChange={(e) => void trocarDono(e.target.value)}
+                  disabled={salvandoDono}
+                  title="O vendedor que cuida deste contato. Não muda quando a conversa é transferida para outro setor."
+                  className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-xs font-medium text-slate-700 disabled:opacity-60"
+                >
+                  <option value="">sem proprietário</option>
+                  {/*
+                    ⚠️ O dono ATUAL entra na lista mesmo que a equipe ainda não
+                    tenha carregado. Sem isto o `value` não casaria com nenhuma
+                    opção, o React desenharia "sem proprietário" num contato que
+                    TEM dono, e a tela mentiria sobre o dado — a mesma armadilha
+                    de campo controlado que o seletor de lead do calendário teve.
+                  */}
+                  {contact.ownerId && !owner ? (
+                    <option value={contact.ownerId}>Carregando...</option>
+                  ) : null}
+                  {team.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+              </span>
             </p>
           </div>
         </div>
