@@ -6326,3 +6326,57 @@ O texto do rodízio no diálogo dizia *"online (ativo nos últimos 5 min)"* escr
 à mão — o resto exato da divergência que `PRESENCE_MS` veio acabar no mesmo dia:
 a tela prometia uma janela e o rodízio usava outra (15 min). Agora sai da
 constante. **Número que descreve comportamento não se escreve duas vezes.**
+
+## "Leads do dia" por ATENDENTE, e os cursos marcados (migração 202609092130)
+
+Pedido do Gabriel (2026-09-09): quantos leads cada atendente do número do time
+comercial recebeu, quantos ele fechou e finalizou, e identificar os cursos
+quando o atendente marcar.
+
+**Continua UMA linha por lead** (`triagem_leads` ganhou quatro colunas), e quem
+agrega é a rota — não uma segunda função que agrupa por atendente. É a mesma
+decisão da 202609041015: o predicado de "entrou" existe em UM lugar, senão os
+quadros da mesma tela se contradizem e ninguém sabe qual está certo.
+
+- ⚠️ **"Recebeu" é com quem o lead está AGORA** (`assigned_to`), não quantos
+  passaram pela mão dele. Conversa devolvida ao rodízio troca de dono, e esse
+  histórico vive nos eventos do fio. A pergunta do quadro é de carteira.
+- ⚠️ **"Sem responsável" é uma LINHA**, não uma omissão — lead que ninguém
+  assumiu sumindo do quadro é o que mais precisa aparecer.
+- ⚠️ **"Ganhos" é uma APROXIMAÇÃO, e está dito na tela.** Não existe
+  `opportunities.conversation_id`: o card do bot nasce por CONTATO (`ensureCard`
+  procura por `contact_id` antes de criar), então a função toma a oportunidade
+  MAIS RECENTE do contato. Para lead novo — o universo deste relatório — é a
+  criada na triagem; para quem já comprou antes e voltou, pode ser a antiga.
+  ⏳ O vínculo exato pediria uma coluna nova em `opportunities`, gravada pelo bot
+  e pelo "Enviar para pipeline".
+- ⚠️ `left join lateral ... limit 1`: um contato pode ter vários cards (a escola
+  vende Célula, Aviônica e GMP separados) e sem o `limit` o mesmo lead viraria
+  duas linhas — quebrando a soma que faz as fatias fecharem com "entraram".
+- **As colunas "Qualificados" e "Ganhos" só aparecem no fluxo comercial.** Na
+  secretaria seriam uma coluna de zeros, e coluna de zeros não é neutra: sugere
+  desempenho ruim onde a régua nem existe (atendimento de documentos não fecha
+  venda, por desenho).
+- ⚠️ **No card de cursos, o "sem marcação" vem PRIMEIRO.** Sem ele, 6 leads em
+  MMA sobre 126 pareceriam a operação inteira, e a leitura ("quase ninguém quer
+  MMA") seria o oposto da verdade ("quase ninguém marcou o curso"). Enquanto a
+  equipe não marcar, o quadro mede o PREENCHIMENTO, não a demanda.
+
+### 🔴 A tolerância que não podia ser só `?? null`
+
+O código vai ao ar antes da migração. Sem a coluna `atendente`, todo lead cairia
+em "sem responsável" e o quadro afirmaria que ninguém assumiu nada — **uma tela
+que mente é pior que uma tela que ainda não existe**. Por isso a rota verifica se
+a função devolveu a coluna (`hasOwnProperty`) e, enquanto não devolver, **não
+manda o bloco**; a tela não o desenha. É mais forte que os `?? []` habituais
+porque aqui o valor ausente tem um significado plausível e errado.
+
+### A guarda de migração aprendeu `drop` + `create`
+
+`create function` precedido de `drop function if exists` deixou de ser erro —
+mesmo tratamento que policy e trigger já tinham. Quando o tipo de retorno muda
+(coluna nova em `returns table`), `create or replace` é PROIBIDO pelo Postgres
+(`42P13`) e o drop é o único caminho: a guarda estava obrigando o impossível.
+
+⏳ **A planilha ainda não tem a aba por atendente** — `leads-xlsx.ts` continua com
+Resumo/Por dia/Por hora. Quem baixar hoje não leva o quadro novo.
