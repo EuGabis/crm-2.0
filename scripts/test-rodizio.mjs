@@ -456,10 +456,58 @@ const linha = (over = {}) => ({
   ultima_do_cliente: "2026-09-08T13:00:00Z",
   espera_util_min: 30,
   passou_pelo_bot: true,
+  ja_respondida: false,
+  // Carimbo novo (202609101830): minutos UTEIS com o responsavel atual.
+  minutos_com_atendente: 60,
   ...over,
 });
 
 eq("sistema atribuiu e ninguem respondeu -> devolve", devolvivel(linha(), CANAIS), true);
+
+/* -1) A JANELA DO ATENDENTE — o defeito medido em 10/09.
+
+   Fio real: o lead esperou 3h na fila (ninguem online), foi entregue a Beatriz
+   as 10:35 e devolvido as 10:36. Ela teve UM MINUTO. A espera do CLIENTE ja era
+   156 min antes de ela existir na historia, e era so essa conta que a devolucao
+   olhava. */
+eq(
+  "[real] recebeu ha 1 min, cliente esperando 156 -> NAO devolve",
+  devolvivel(linha({ espera_util_min: 156, minutos_com_atendente: 1 }), CANAIS, 15),
+  false,
+);
+eq(
+  "recebeu ha 14 min com limite 15 -> ainda e dele",
+  devolvivel(linha({ espera_util_min: 200, minutos_com_atendente: 14 }), CANAIS, 15),
+  false,
+);
+eq(
+  "recebeu ha 15 min (no limite) -> devolve",
+  devolvivel(linha({ espera_util_min: 200, minutos_com_atendente: 15 }), CANAIS, 15),
+  true,
+);
+eq(
+  "limite de 20 (comercial): 19 min com o atendente -> ainda e dele",
+  devolvivel(linha({ espera_util_min: 300, minutos_com_atendente: 19 }), CANAIS, 20),
+  false,
+);
+/* ⚠️ Sem o carimbo (migracao nao aplicada) NAO bloqueia: bloquear aqui
+   desligaria a devolucao inteira na janela entre o deploy e a migracao. */
+eq(
+  "sem carimbo -> nao bloqueia (comportamento de hoje)",
+  devolvivel(linha({ minutos_com_atendente: null }), CANAIS, 15),
+  true,
+);
+eq(
+  "sem o limite informado -> nao confere a janela aqui (a SQL ja filtrou)",
+  devolvivel(linha({ minutos_com_atendente: 1 }), CANAIS),
+  true,
+);
+/* PostgREST devolve numeric como STRING. */
+eq(
+  "carimbo como string funciona",
+  devolvivel(linha({ espera_util_min: 200, minutos_com_atendente: "3" }), CANAIS, 15),
+  false,
+);
 
 /* 0) PRIMEIRA RESPOSTA (regra do Gabriel, 09/09): o lead que ninguem respondeu
    circula; o que o atendente JA respondeu e dele e nao volta ao rodizio.
