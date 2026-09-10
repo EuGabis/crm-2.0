@@ -25,6 +25,7 @@ import {
   cotaPorAtendente,
   escolherPorCarga,
   limiteDoTique,
+  podeTrocarDonoDoCard,
   PRESENCE_MS,
 } from "../src/lib/leads/distribution.ts";
 
@@ -821,5 +822,53 @@ eq(
   "paulo",
 );
 eq("pool de tamanho 0 -> cota 0", cotaPorAtendente([], 10, 0), 0);
+/* ------------------------------------------------------------------
+   O PROPRIETARIO do card nao segue quem esta conversando (202609111030)
+
+   Regra do Gabriel: o comercial fechou a venda, o aluno foi para a Secretaria
+   falar de documentos, e o "proprietario" virou quem estava atendendo. A frase
+   dele e a regra inteira: "o proprietario e o comercial Rogerio, mas esse
+   contato pode estar conversando com outro".
+
+   Funcao pura e exportada SO para ter teste: a regra tem duas linhas, e o
+   estrago dela nao da erro nenhum — aparece semanas depois como o nome errado
+   no card de uma venda fechada, que e o pior tipo de defeito para revisar.
+   ------------------------------------------------------------------ */
+console.log("");
+console.log("proprietario do card - nao segue a conversa");
+
+eq("card SEM dono -> a primeira atribuicao grava", podeTrocarDonoDoCard(null, undefined), true);
+eq("card SEM dono (string vazia) -> grava", podeTrocarDonoDoCard("", undefined), true);
+eq("card SEM dono, com devolucao -> grava", podeTrocarDonoDoCard(null, "paulo"), true);
+
+/* O caso do relato, escrito como regressao: o card e do Rogerio (vendeu) e a
+   conversa foi distribuida ao Daniel (Secretaria). Antes isto era um update
+   cego, e o Rogerio perdia a venda no instante do primeiro atendimento. */
+eq(
+  "[real] card do Rogerio + rodizio entregando ao Daniel -> NAO troca",
+  podeTrocarDonoDoCard("rogerio", undefined),
+  false,
+);
+
+/* A excecao, e so ela: a devolucao tira de quem nao respondeu. Deixar o card no
+   nome dessa pessoa gravaria como proprietario justamente quem nao atendeu. */
+eq("devolucao de quem esta com o card -> troca", podeTrocarDonoDoCard("paulo", "paulo"), true);
+eq(
+  "devolucao, mas o card e de OUTRA pessoa -> NAO troca",
+  podeTrocarDonoDoCard("rogerio", "paulo"),
+  false,
+);
+
+/* Vigia o lado oposto: `donoAnterior` vazio/nulo nao pode virar curinga. Sem o
+   `!!donoAnterior`, todo card com dono voltaria a ser sobrescrito — o defeito
+   original de volta por uma comparacao frouxa. */
+eq("donoAnterior nulo nao autoriza troca", podeTrocarDonoDoCard("rogerio", null), false);
+eq("donoAnterior vazio nao autoriza troca", podeTrocarDonoDoCard("rogerio", ""), false);
+eq(
+  "dono e anterior ambos ausentes -> grava (card livre)",
+  podeTrocarDonoDoCard(undefined, undefined),
+  true,
+);
+
 console.log(`\n${ok} assercoes ok, ${falhas} falha(s)\n`);
 process.exit(falhas ? 1 : 0);

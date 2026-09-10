@@ -7092,3 +7092,108 @@ Pedido no mesmo minuto. O card mostrava "Fonte · Status" e não COM QUEM o lead
 está — que é a pergunta de quem atende o cliente que acabou de ligar.
 "sem responsável" é escrito em âmbar, não omitido: lead de funil sem dono é
 justamente o que precisa aparecer.
+
+## 🔴 O proprietário do lead NÃO segue quem está conversando (202609111030)
+
+Relato do Gabriel (2026-09-10), com print: *"o comercial fez todas as tratativas
+e finalizou a negociação. O aluno comprou e passou para o setor da secretaria pra
+falar sobre documentos, mas o proprietário está com o responsável da conversa. O
+proprietário é o comercial Rogerio, mas esse contato pode estar conversando com
+outro."*
+
+A última frase é a regra inteira: **propriedade e "quem conversa agora" são
+coisas diferentes.** Venda fechada tem um vendedor; passar o aluno para a
+Secretaria falar de documentos é atendimento, não troca de dono.
+
+### Dois caminhos gravavam o proprietário seguindo a conversa
+
+| # | onde | alcance |
+|---|---|---|
+| 1 | `assignLeadTo` (`lib/leads/distribution.ts`) | reescrevia o dono do card de intake a CADA atribuição da conversa — bot, rodízio, devolução, varredura da fila, botão do admin |
+| 2 | cascata do `transfer_conversation` | reatribuía **todas** as oportunidades do contato, em **todos** os funis, mais `contacts.owner_id` |
+
+⚠️ **Foi o 1 no caso do print, e é o print que diz qual foi:** a conversa veio
+pelo número da **Secretaria** (`via +55 11 94767-1223`), ou seja é conversa NOVA
+nesse número, triada pelo bot e distribuída. Como `assignLeadTo` só toca o funil
+de intake, o card do Comercial ficou intacto com o vendedor e o de "Controle de
+Leads" virou o atendente. Se tivesse sido transferência, a cascata teria levado o
+Comercial junto — e é por isso que os dois foram fechados: produzem o mesmo
+sintoma, e amanhã é o outro que morde.
+
+### A regra: `podeTrocarDonoDoCard`
+
+- **Card SEM dono grava; card COM dono não é sobrescrito.** A primeira atribuição
+  define o proprietário; depois dela, só uma PESSOA troca. Mesmo princípio da
+  0090 ("decisão humana não se desfaz"), agora valendo também contra a decisão
+  automática que já registrou um dono.
+- ⚠️ **A exceção da DEVOLUÇÃO existe para não congelar um dado falso.** Quando o
+  rodízio tira a conversa de quem não respondeu, aquela pessoa nunca trabalhou o
+  lead — deixar o card no nome dela gravaria como proprietário justamente quem
+  não atendeu, e ainda distorceria o "Ganhos por atendente" do relatório. Então
+  sobrescreve, mas **só** quando o dono do card é exatamente quem está perdendo a
+  conversa.
+- ⚠️ **`donoAnterior` é parâmetro PRÓPRIO, não o `excluir` do `distributeOne`** —
+  que hoje carrega o mesmo id na devolução. Reaproveitar um valor que já tem
+  outro significado é o erro que fez `last_seen_at = NULL` querer dizer três
+  coisas incompatíveis. Colados, qualquer exclusão futura (alguém de férias)
+  passaria a autorizar a troca do proprietário sem ninguém pedir.
+- ⚠️ O `select` do card passou a trazer `owner_id`. Antes era
+  `select("id, stage_id, name")` e o update era **cego** — não havia como nem
+  perguntar quem era o dono.
+
+### A cascata da transferência: pendência migra, propriedade não
+
+🔴 **Isto REVERTE a 0071 ("transfer leva o card") e a 0072 ("transferir leva o
+lead inteiro"), e não é bug de quem pediu:** naquele momento transferência era
+roteamento DENTRO da Secretaria, onde mover o lead junto é o certo. Desde a
+**202609041530** qualquer um transfere para qualquer setor, e a mesma cascata
+passou a atravessar o comercial.
+
+Saíram `opportunities.owner_id` e `contacts.owner_id`. **Compromissos e tarefas
+continuam migrando** (escolha do Gabriel): são pendências de TRABALHO, e quem
+assume o atendimento assume a pendência.
+
+⚠️ **Conferido que a rota do cliente não quebra:** o webhook só usa
+`contacts.owner_id` no ramo que **CRIA** a conversa, e só quando o número **não
+tem bot**. Manter o vendedor como dono não desvia a conversa de documentos de
+quem está atendendo — e no dia em que aquele cliente escrever para um número sem
+bot, cair com o vendedor dele é exatamente a intenção original ("o cliente volta
+e cai com quem já o atendia").
+
+### O proprietário do contato ficou EDITÁVEL — e sem isso a correção não serve
+
+⚠️ No cabeçalho do contato, "Proprietário" era **texto fixo**: não havia como
+trocar em lugar nenhum da tela. Tirar a cascata sem dar o seletor congelaria o
+campo em quem inseriu o contato — ou seja, o Gabriel não conseguiria dizer que o
+dono é o Rogerio, que é literalmente o pedido. `dbContactActions.update` passou a
+aceitar `ownerId` (string vazia LIMPA o dono, `|| null` e não `?? null`).
+
+- ⚠️ **Não é admin-only:** a RLS de `contacts` autoriza qualquer membro a editar
+  (o UPDATE olha só `location_id`) e transferir conversa também é de qualquer um
+  desde a 202609041530 — travar só a tela daria impressão de proteção sem
+  proteger nada.
+- ⚠️ **O dono ATUAL entra na lista mesmo com a equipe ainda carregando.** Sem
+  isso o `value` não casaria com nenhuma `<option>`, o React desenharia "sem
+  proprietário" num contato que TEM dono, e a tela mentiria sobre o dado — a
+  mesma armadilha de campo controlado que o seletor de lead do calendário teve.
+- ⚠️ **`refresh()` depois de salvar não é enfeite:** nesta tela o contato quase
+  nunca vem da store (o inbox parou de carregar os 40 mil), então o `setContacts`
+  do repo atualiza um array que ninguém ali está lendo. Foi exatamente assim que
+  a etiqueta gravava no banco e o seletor continuava mostrando o valor antigo.
+- `<select>` nativo, como no "Atribuir…" do Relatório e no seletor de curso: são
+  dezenas de nomes, e o nativo dá busca por digitação de graça.
+
+### ⏳ Sem retroativo, de propósito
+
+Para consertar o que a cascata já reescreveu seria preciso saber quem era o dono
+ANTES — e **isso não está gravado em lugar nenhum**, porque o update sobrescreveu.
+Adivinhar por semelhança é a chave fraca que este projeto já recusou no cruzamento
+com a Guru: carimbar o proprietário errado é pior do que o campo estar errado
+hoje, porque a partir dali ninguém mais duvida dele. A migração traz a consulta
+que LISTA as divergências (dono do contato ≠ dono de um card de venda do próprio
+contato), para corrigir à mão as que importam.
+
+`npm run test:rodizio` — **100 asserções**. O caso do relato está escrito como
+regressão, e metade dos casos novos vigia o lado oposto: `donoAnterior` vazio ou
+nulo **não** pode virar curinga, senão todo card com dono volta a ser sobrescrito
+por uma comparação frouxa.
