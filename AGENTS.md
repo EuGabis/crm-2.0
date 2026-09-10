@@ -6513,3 +6513,104 @@ aprende a ignorar.
 
 ⚠️ E como o `drop` recria os privilégios do zero, o par `revoke`/`grant` **tem**
 de ser repetido — aqui não é redundância.
+## 🔴 O rodízio dividia por VEZ, não por CARGA — e o Paulo levou 90 leads
+
+Relato do Gabriel (2026-09-10): *"o Paulo é o primeiro a logar e tinha mais de 90
+leads esperando para ser distribuídos. No comercial temos a regra de distribuir
+igualmente os leads para todos os vendedores."*
+
+⚠️ **O cursor girava — mas girava sobre uma lista de UMA pessoa.** `distributeOne`
+fazia `list[cursor % list.length]` sobre os disponíveis; com um só online, isso é
+despejo com aparência de rodízio. E a varredura da fila entrega até 25 por tique,
+a cada minuto.
+
+### A fórmula veio da própria frase dele
+
+*"Dividir igual: 30 pro Paulo, 30 para o Alberto quando logar e mais 30 para o
+Rogério quando logar."*
+
+```
+cota = teto( (carga de TODOS do pool + fila) / tamanho do pool )
+```
+
+- ⚠️ **A soma inclui quem está OFFLINE, e é isso que faz a divisão funcionar.**
+  Contando só os online, 90 ÷ 1 = 90 — o despejo de novo. Com o pool inteiro no
+  denominador, o Paulo recebe até 30 e para; os outros 60 esperam os donos.
+- ⚠️ **Teto e não piso.** No dia a dia (cargas 10/10/10 e 1 lead novo) o piso
+  daria 10, ninguém estaria abaixo da própria cota e o lead ficaria parado com
+  três vendedores livres. O teto dá 11 e o lead sai.
+- **Ninguém abaixo da cota = o lead FICA NA FILA**, visível a todos. É a
+  diferença entre "dividir igualmente" e "entregar a quem logou".
+- **Carga** = conversas ABERTAS atribuídas à pessoa nos números do setor. Uma
+  consulta por setor, num mapa **mutável** compartilhado pelo laço da varredura:
+  sem incrementar a cada atribuição, dez leads do mesmo tique iriam todos para
+  quem estava mais leve na primeira leitura.
+- ⚠️ Empate desempata pelo **cursor**: com três zerados, escolher o primeiro do
+  array faria o primeiro da lista receber tudo — o rodízio deixaria de girar
+  justamente no caso mais comum.
+
+⚠️ **`departments.dividir_igualmente` é POR SETOR, e a Secretaria fica de fora**
+(confirmado pelo Gabriel: *"não vamos mudar na secretaria"*). Ligar em todo mundo
+mudaria lá num sentido perigoso: o problema que originou o rodízio foi lead
+PARADO na fila, e a cota é exatamente o que segura lead quando falta gente. A
+proteção da Secretaria contra despejo é outra e já existe — o ritmo
+(`intervalo_fila_min`, 1 a cada 7 min).
+
+`npm run test:rodizio` — 79 asserções, e o caso dos 90 está escrito passo a passo:
+Paulo sozinho recebe até 30 e a fila SEGURA; Alberto loga zerado e os próximos vão
+para ele; segura de novo em 30; Rogério loga e leva o resto.
+
+## Status "Online / Ausente" do atendente (migração 202609101100)
+
+Pedido: *"os vendedores ficam no CRM pós expediente para responder os leads, mas
+não querem receber leads novos."*
+
+⚠️ **O status separa duas coisas que estavam coladas em `last_seen_at`:** ESTAR no
+CRM e QUERER lead novo. Até aqui a única forma de parar de receber era fechar o
+CRM — e aí a pessoa também parava de responder quem já estava com ela, que é
+justamente o que ela ficou fazendo.
+
+- **Ausente não recebe NADA pelo rodízio** — nem lead do bot, nem devolução de
+  colega. Regra do Gabriel: *"apenas se for transferência de outro atendente"*, e
+  a transferência é ação de PESSOA, não passa pelo rodízio. A exceção sai de
+  graça.
+- ⚠️ `estaOnline` (o nó de atendente FIXO do fluxo) também passou a respeitar o
+  status. Se só o rodízio respeitasse, o nó de assunto entregaria ao ausente
+  justamente o que o rodízio foi proibido de entregar — e o status pareceria não
+  funcionar em metade dos leads, sem erro nenhum.
+- ⚠️ O default é `'online'`: quem nunca tocou no seletor recebe como sempre. Um
+  default `'ausente'` pararia o rodízio da empresa inteira ao nascer da coluna.
+- ⚠️ **`definir_disponibilidade` é `security definer` porque UPDATE em
+  `location_members` é admin-only** (a tabela guarda papel, permissões e
+  departamento). A linha é decidida por `auth.uid()`, NUNCA por parâmetro —
+  recebendo o id de fora, qualquer autenticado tiraria um colega do rodízio.
+  `npm run db:check` acusa "definer sem checagem de empresa" aqui e é falso
+  positivo: `where user_id = auth.uid()` já restringe a uma linha.
+- **O seletor fica VISÍVEL na barra superior, não escondido no menu do avatar.**
+  Um status que corta a chegada de lead e não aparece é uma armadilha: quem
+  esquecer marcado como Ausente para de receber e não descobre por quê. O rótulo
+  escrito ao lado do ponto é o que evita isso — ponto colorido sozinho não diz
+  nada a quem não conhece o código de cores, e some na deuteranopia.
+
+⚠️ Este é o ÚNICO ponto global desta leva, e ele é inerte até alguém usar: com
+todos em `'online'`, nada muda em setor nenhum.
+
+### A devolução do comercial: 20 minutos e só com o time inteiro
+
+- `devolver_apos_min = 20` **só no comercial**; a Secretaria fica em 15 — a régua
+  dela nasceu de outra queixa, e um `update` sem `where` teria arrastado as duas
+  para o mesmo número.
+- `devolver_so_com_todos_online = true` no comercial: tirar o lead de um vendedor
+  quando falta gente não resolve nada — ele muda de mão para cair em quem já está
+  segurando o setor sozinho, que é o despejo por outro caminho.
+- ⚠️ "Todos online" aqui é presença **E** status: quem está no CRM como AUSENTE
+  não conta como um par de mãos. Se contasse, a devolução ligaria com base em
+  alguém que o rodízio nem pode escolher, e a conversa voltaria para a fila sem
+  destino.
+- Continua em minutos ÚTEIS (`private.business_minutes`): o relógio congela fora
+  do expediente, então o "pós expediente" do pedido não vira devolução de
+  madrugada. O status Ausente cobre o resto.
+
+⏳ Se um vendedor entrar de férias sem sair do pool, `devolver_so_com_todos_online`
+desliga a devolução do setor até ele voltar. A saída é tirá-lo do `lead_pool` (ou
+desligar a coluna) — está aqui para não virar mistério.

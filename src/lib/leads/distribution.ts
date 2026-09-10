@@ -79,6 +79,170 @@ export async function onlineOrdered(
 }
 
 /**
+ * Quem do pool está online E ACEITA lead novo agora.
+ *
+ * 🔴 `location_members.disponibilidade` (202609101100) separa duas coisas que
+ * estavam coladas em `last_seen_at`: **estar no CRM** e **querer lead novo**.
+ * Pedido do Gabriel: *"os vendedores ficam no CRM pós expediente para responder
+ * os leads, mas não querem receber leads novos."* Sem o status, a única forma de
+ * parar de receber era fechar o CRM — e aí eles também parariam de responder
+ * quem já está com eles.
+ *
+ * ⚠️ **Ausente não recebe NADA pelo rodízio** — nem lead do bot, nem devolução
+ * de outro vendedor (decisão do Gabriel: *"apenas se for transferência de outro
+ * atendente"*). A transferência é ação de PESSOA e não passa por aqui, então ela
+ * continua chegando, que é exatamente a exceção pedida.
+ *
+ * ⚠️ Tolera a coluna não existir: o código vai ao ar antes da migração, e pedir
+ * coluna inexistente faz o PostgREST recusar a consulta INTEIRA — o rodízio
+ * pararia de distribuir. Sem a coluna, todo mundo presente conta como
+ * disponível, que é o comportamento de hoje.
+ */
+export async function disponiveisOrdered(
+  db: any,
+  locationId: string,
+  pool: string[],
+): Promise<string[]> {
+  if (!pool.length) return [];
+  const since = new Date(Date.now() - PRESENCE_MS).toISOString();
+  const base = () =>
+    db
+      .from("location_members")
+      .select("user_id, disponibilidade")
+      .eq("location_id", locationId)
+      .in("user_id", pool)
+      .gte("last_seen_at", since);
+  let linhas: any[] | null = null;
+  const r = await base();
+  if (r.error) {
+    const semColuna = await db
+      .from("location_members")
+      .select("user_id")
+      .eq("location_id", locationId)
+      .in("user_id", pool)
+      .gte("last_seen_at", since);
+    linhas = semColuna.data;
+  } else {
+    linhas = r.data;
+  }
+  const ok = new Set(
+    (linhas ?? [])
+      .filter((m: any) => (m.disponibilidade ?? "online") !== "ausente")
+      .map((m: any) => m.user_id),
+  );
+  // Mantém a ORDEM DO POOL: é ela que o cursor indexa.
+  return pool.filter((u) => ok.has(u));
+}
+
+/**
+ * Quantas conversas ABERTAS cada um do pool tem nos números deste setor.
+ *
+ * ⚠️ É esta a "carga" que a cota divide. Conversa aberta (não finalizada, não
+ * arquivada) é o trabalho que a pessoa tem na mão — e é por isso que quem
+ * acumula atendimento em aberto passa a receber menos lead novo, que é o
+ * significado de "dividir igualmente" quando as pessoas não chegam juntas.
+ *
+ * ⚠️ Uma consulta por SETOR, não por lead: a varredura chama `distributeOne` num
+ * laço, e recontar a cada lead seria uma ida ao banco por conversa da fila. O
+ * mapa é passado adiante e incrementado a cada atribuição — sem isso, dez leads
+ * no mesmo tique iriam todos para a mesma pessoa, porque a carga dela só mudaria
+ * na próxima leitura.
+ */
+export async function cargaPorAtendente(
+  db: any,
+  locationId: string,
+  channelIds: string[],
+  pool: string[],
+): Promise<Map<string, number>> {
+  const cargas = new Map<string, number>(pool.map((u) => [u, 0]));
+  if (!pool.length || !channelIds.length) return cargas;
+  const { data } = await db
+    .from("conversations")
+    .select("assigned_to")
+    .eq("location_id", locationId)
+    .in("channel_id", channelIds)
+    .in("assigned_to", pool)
+    .is("closed_at", null)
+    .is("archived_at", null);
+  for (const c of data ?? []) {
+    const u = (c as any).assigned_to as string | null;
+    if (u) cargas.set(u, (cargas.get(u) ?? 0) + 1);
+  }
+  return cargas;
+}
+
+/**
+ * A COTA de cada pessoa neste momento: quantos leads cabem a cada um do pool.
+ *
+ * 🔴 A fórmula sai literalmente da regra do Gabriel (2026-09-10): *"dividir
+ * igual — 30 pro Paulo, 30 para o Alberto quando logar e mais 30 para o Rogério
+ * quando logar"*, diante de 90 leads na fila e um vendedor só online.
+ *
+ *     cota = teto( (carga de TODOS do pool + fila) / tamanho do pool )
+ *
+ * ⚠️ **A soma inclui quem está OFFLINE, e é isso que faz a divisão funcionar.**
+ * Contando só quem está online, a conta com uma pessoa daria 90/1 = 90 — o
+ * despejo de hoje. Com o pool inteiro no denominador, o Paulo recebe até 30 e
+ * para; os outros 60 esperam os donos deles chegarem.
+ *
+ * ⚠️ **Teto e não piso.** No dia a dia (cargas 10/10/10 e 1 lead novo) o piso
+ * daria 10 e ninguém estaria abaixo da própria cota — o lead ficaria parado na
+ * fila para sempre, com três vendedores livres. O teto dá 11 e o lead sai.
+ *
+ * Estável por construção: à medida que a carga sobe, a fila cai, e a cota se
+ * mantém — foi conferido no caso dos 90 (30 exatos por pessoa).
+ */
+export function cotaPorAtendente(cargas: number[], fila: number, tamanhoDoPool: number): number {
+  if (tamanhoDoPool <= 0) return 0;
+  const soma = cargas.reduce((a, c) => a + (Number.isFinite(c) ? c : 0), 0);
+  return Math.ceil((soma + Math.max(fila, 0)) / tamanhoDoPool);
+}
+
+/**
+ * Quem recebe o próximo lead: o MENOS carregado entre os disponíveis, e só se
+ * ele ainda couber na própria cota.
+ *
+ * Devolve `null` quando ninguém cabe — e aí o lead **fica na fila do setor**,
+ * visível a todos, em vez de ser empurrado para quem já está cheio. É a
+ * diferença entre "distribuir igualmente" e "entregar a quem estiver logado".
+ *
+ * ⚠️ **Empate desempata pelo CURSOR, não pela ordem do array.** Com três
+ * vendedores zerados, escolher sempre o primeiro do pool faria o primeiro da
+ * lista receber tudo — o rodízio deixaria de girar justamente no caso mais
+ * comum. O cursor preserva a rotação que já existia.
+ *
+ * Pura e exportada para ter teste: é regra de números, o erro não gera exceção
+ * nenhuma e só aparece como "fulano recebeu tudo de novo" dias depois.
+ */
+export function escolherPorCarga(
+  disponiveis: string[],
+  cargas: Map<string, number>,
+  poolInteiro: string[],
+  fila: number,
+  cursor: number,
+): string | null {
+  if (!disponiveis.length || !poolInteiro.length) return null;
+  const carga = (u: string) => cargas.get(u) ?? 0;
+  const cota = cotaPorAtendente(poolInteiro.map(carga), fila, poolInteiro.length);
+  const cabem = disponiveis.filter((u) => carga(u) < cota);
+  if (!cabem.length) return null;
+  const menor = Math.min(...cabem.map(carga));
+  const empatados = cabem.filter((u) => carga(u) === menor);
+  if (empatados.length === 1) return empatados[0];
+  /*
+   * Roda o pool a partir do cursor e pega o primeiro empatado que aparecer —
+   * assim duas chamadas seguidas com todos zerados escolhem pessoas diferentes.
+   */
+  const n = poolInteiro.length;
+  const inicio = ((cursor % n) + n) % n;
+  for (let i = 0; i < n; i++) {
+    const u = poolInteiro[(inicio + i) % n];
+    if (empatados.includes(u)) return u;
+  }
+  return empatados[0];
+}
+
+/**
  * Uma pessoa específica está online agora?
  *
  * Existe para o nó `handoff` de atendente FIXO, que atribui direto e por isso
@@ -87,8 +251,15 @@ export async function onlineOrdered(
  * seria online para um caminho e offline para o outro.
  */
 export async function estaOnline(db: any, locationId: string, userId: string): Promise<boolean> {
-  const online = await onlineOrdered(db, locationId, [userId]);
-  return online.length > 0;
+  /*
+   * ⚠️ Passa por `disponiveisOrdered`, não por `onlineOrdered`: o atendente fixo
+   * marcado como AUSENTE também não pode receber lead novo. Se este caminho
+   * usasse só a presença, o nó de assunto do fluxo entregaria a ele justamente
+   * o que o rodízio foi proibido de entregar — e o status pareceria não
+   * funcionar em metade dos leads, sem erro nenhum.
+   */
+  const disponivel = await disponiveisOrdered(db, locationId, [userId]);
+  return disponivel.length > 0;
 }
 
 /** Funil de leads para setar o dono do card: por nome, senão pelas etapas típicas. */
@@ -207,20 +378,63 @@ export async function distributeOne(
     excluir?: string[];
     /** Motivo repassado ao `assignLeadTo` → coluna `assign_reason` → evento. */
     reason?: string;
+    /**
+     * Carga atual por atendente, compartilhada pelo laço da varredura.
+     *
+     * ⚠️ É MUTÁVEL de propósito: cada atribuição incrementa o mapa, senão dez
+     * leads no mesmo tique iriam todos para a mesma pessoa — a carga dela só
+     * mudaria na próxima leitura do banco. Sem o mapa, `distributeOne` lê a
+     * carga sozinho (caminho do bot, um lead por vez).
+     */
+    cargas?: Map<string, number>;
+    /** Quantos leads estão esperando agora. Entra na cota; padrão 1. */
+    fila?: number;
+    /** Números do setor, para medir a carga. Sem eles, a carga é lida do zero. */
+    channelIds?: string[];
   },
 ): Promise<string | null> {
   const { pool, cursor } = await departmentPool(db, args.locationId, args.deptId);
   if (!pool.length) return null; // sem pool/departamento → segura (aguardando)
-  const online = await onlineOrdered(db, args.locationId, pool);
+  const online = await disponiveisOrdered(db, args.locationId, pool);
   // Departamento pode distribuir mesmo pra offline (0083): usa o pool inteiro
   // independente da presença. Senão, o padrão: online primeiro, offline só se
   // todos estiverem offline.
-  const { data: dep } = await db
-    .from("departments")
-    .select("rodizio_offline")
-    .eq("id", args.deptId)
-    .maybeSingle();
+  /*
+   * ⚠️ Tolera a coluna nova não existir — o código vai ao ar ANTES da migração e
+   * pedir coluna inexistente faz o PostgREST recusar a consulta inteira.
+   */
+  let dep: any = null;
+  {
+    const r = await db
+      .from("departments")
+      .select("rodizio_offline, dividir_igualmente")
+      .eq("id", args.deptId)
+      .maybeSingle();
+    if (r.error) {
+      const semColuna = await db
+        .from("departments")
+        .select("rodizio_offline")
+        .eq("id", args.deptId)
+        .maybeSingle();
+      dep = semColuna.data;
+    } else {
+      dep = r.data;
+    }
+  }
   const alwaysAll = dep?.rodizio_offline === true;
+  /*
+   * 🔴 **A cota é POR SETOR, e não global.** A regra do Gabriel foi dita para o
+   * comercial ("distribuir igualmente os leads para todos os vendedores"), e
+   * ligá-la em todo mundo mudaria a Secretaria sem ninguém pedir — pior, num
+   * sentido perigoso: lá o problema que originou o rodízio foi lead PARADO na
+   * fila, e a cota é justamente o que segura lead quando falta gente. A
+   * Secretaria já tem a proteção dela contra despejo, que é o ritmo
+   * (`intervalo_fila_min`, 1 lead a cada 7 min).
+   *
+   * Coluna e não nome de setor no código — casar por nome já confundiu setor
+   * neste projeto mais de uma vez.
+   */
+  const porCota = dep?.dividir_igualmente === true;
   /*
    * ⚠️ **Ninguém online agora = SEGURA, não despeja no pool inteiro.**
    *
@@ -241,7 +455,33 @@ export async function distributeOne(
   // `cursor % list.length` — o rodízio pularia gente ao devolver uma conversa.
   const list = semExcluidos(alwaysAll ? pool : online);
   if (!list.length) return null;
-  const user = list[cursor % list.length];
+  /*
+   * 🔴 **A escolha é por CARGA, não pela vez do cursor.**
+   *
+   * Relato de 2026-09-10: o Paulo logou primeiro e recebeu os 90 leads que
+   * esperavam. O cursor girava, mas girava sobre uma lista de UMA pessoa —
+   * rodízio entre um só é despejo. A regra do Gabriel para o comercial é
+   * dividir igual entre os três, e `escolherPorCarga` a executa: cada um recebe
+   * até a própria cota e o resto espera o dono chegar.
+   *
+   * ⚠️ Ninguém abaixo da cota devolve `null`, e o lead FICA NA FILA — visível a
+   * todos. É a diferença entre "dividir igualmente" e "entregar a quem logou".
+   */
+  let user: string | null;
+  if (porCota) {
+    const cargas =
+      args.cargas ??
+      (await cargaPorAtendente(db, args.locationId, args.channelIds ?? [], pool));
+    user = escolherPorCarga(list, cargas, pool, args.fila ?? 1, cursor);
+    if (!user) return null;
+    // O mapa acompanha a atribuição: o próximo lead do MESMO tique já vê a carga
+    // nova e vai para outra pessoa. Sem isso, dez leads seguidos iriam todos
+    // para quem estava mais leve na primeira leitura.
+    cargas.set(user, (cargas.get(user) ?? 0) + 1);
+  } else {
+    // Comportamento de sempre nos demais setores: a vez do cursor.
+    user = list[cursor % list.length];
+  }
   const offline = !online.includes(user); // marca "offline" se o escolhido não está online
   await db.from("departments").update({ rr_cursor: cursor + 1 }).eq("id", args.deptId);
   await assignLeadTo(
@@ -482,14 +722,51 @@ export async function devolverInativas(
   let devolvidas = 0;
   let redistribuidas = 0;
 
-  const { data: deps } = await db
-    .from("departments")
-    .select("id, devolver_apos_min, usa_rodizio")
-    .eq("location_id", locationId);
+  /*
+   * ⚠️ Tolera a coluna nova não existir: o código vai ao ar ANTES da migração, e
+   * pedir coluna inexistente faz o PostgREST recusar a consulta INTEIRA — a
+   * devolução pararia. Sem ela, `undefined` cai no comportamento de hoje.
+   */
+  let deps: any[] | null = null;
+  {
+    const r = await db
+      .from("departments")
+      .select("id, devolver_apos_min, usa_rodizio, devolver_so_com_todos_online")
+      .eq("location_id", locationId);
+    if (r.error) {
+      const semColuna = await db
+        .from("departments")
+        .select("id, devolver_apos_min, usa_rodizio")
+        .eq("location_id", locationId);
+      deps = semColuna.data;
+    } else {
+      deps = r.data;
+    }
+  }
 
   for (const dep of deps ?? []) {
     const limite = Number(dep.devolver_apos_min ?? 0);
     if (!limite || dep.usa_rodizio === false) continue;
+
+    /*
+     * 🔴 **Só devolve com o time INTEIRO disponível** (regra do Gabriel,
+     * 2026-09-10, para o comercial): tirar o lead de um vendedor quando falta
+     * gente não resolve nada — ele só muda de mão para cair em quem já está
+     * absorvendo o setor sozinho, que é o despejo por outro caminho.
+     *
+     * ⚠️ "Disponível" aqui é presença **E** status: quem está no CRM marcado
+     * como AUSENTE não conta como um par de mãos para receber. Se contasse, a
+     * devolução ligaria com base em alguém que o rodízio nem pode escolher, e a
+     * conversa voltaria para a fila sem destino.
+     *
+     * É uma COLUNA e não o nome do setor no código — casar por nome já confundiu
+     * setor neste projeto mais de uma vez.
+     */
+    if (dep.devolver_so_com_todos_online === true) {
+      const { pool } = await departmentPool(db, locationId, dep.id);
+      const disponiveis = await disponiveisOrdered(db, locationId, pool);
+      if (!pool.length || disponiveis.length < pool.length) continue;
+    }
 
     const { data: dcs } = await db
       .from("department_channels")
@@ -587,6 +864,7 @@ export async function devolverInativas(
         // respondeu — o cursor não sabe de onde a conversa veio, e o resultado
         // seria um evento de transferência a cada tique, para sempre.
         excluir: [anterior],
+        channelIds,
       });
       if (novo) redistribuidas++;
     }
@@ -871,6 +1149,16 @@ export async function distribuirFilaDoSetor(
     // ⚠️ Contador POR SETOR. Usar o acumulador `distribuidas` para calcular o
     // resto desta fila daria número errado a partir do segundo setor com fila.
     let feitasAqui = 0;
+    /*
+     * ⚠️ Carga lida UMA vez por setor e compartilhada pelo laço — e a `fila` é a
+     * fila INTEIRA (prontas + retidas), não só o que cabe neste tique. É a fila
+     * inteira que entra na cota: com 90 esperando e três vendedores, a cota é 30
+     * por pessoa; contando só as 25 do teto do tique, ela seria 8 e o rodízio
+     * pararia cedo demais.
+     */
+    const { pool: poolDoSetor } = await departmentPool(db, locationId, dep.id);
+    const cargas = await cargaPorAtendente(db, locationId, channelIds, poolDoSetor);
+    const filaTotal = prontas.length + retidas;
     for (const conv of aEntregar) {
       const user = await distributeOne(db, {
         locationId,
@@ -879,6 +1167,9 @@ export async function distribuirFilaDoSetor(
         contactId: conv.contact_id,
         pipelineName: "Controle de Leads",
         reason: "varredura da fila do setor",
+        cargas,
+        fila: filaTotal,
+        channelIds,
       });
       if (user) {
         feitasAqui++;

@@ -22,6 +22,8 @@
 import {
   distribuirFilaDoSetor,
   devolvivel,
+  cotaPorAtendente,
+  escolherPorCarga,
   limiteDoTique,
   PRESENCE_MS,
 } from "../src/lib/leads/distribution.ts";
@@ -678,5 +680,98 @@ eq(
      await distribuirFilaDoSetor(db, "loc1"), { distribuidas: 3, naFila: 0 });
 }
 
+/* ------------------------------------------------------------------ *
+ * escolherPorCarga() - "dividir igual: 30 pro Paulo, 30 pro Alberto
+ * quando logar e mais 30 pro Rogerio quando logar" (Gabriel, 10/09)
+ *
+ * O caso real: 90 leads na fila, o Paulo loga primeiro e leva TODOS. O
+ * cursor girava — mas girava sobre uma lista de uma pessoa, e rodizio
+ * entre um so e despejo.
+ * ------------------------------------------------------------------ */
+console.log("");
+console.log("escolherPorCarga() - cota por atendente");
+console.log("");
+
+const POOL = ["paulo", "alberto", "rogerio"];
+const cargasDe = (p, a, r) => new Map([["paulo", p], ["alberto", a], ["rogerio", r]]);
+
+/* A conta que a regra do Gabriel virou. */
+eq("90 na fila / 3 no pool -> cota 30", cotaPorAtendente([0, 0, 0], 90, 3), 30);
+eq("paulo ja com 30, 60 na fila -> cota segue 30", cotaPorAtendente([30, 0, 0], 60, 3), 30);
+eq("dois atendidos, 30 na fila -> cota segue 30", cotaPorAtendente([30, 30, 0], 30, 3), 30);
+
+/* ⚠️ TETO e nao piso. Com 10/10/10 e 1 lead novo, o piso daria 10 e ninguem
+   estaria abaixo da propria cota — o lead ficaria parado com tres vendedores
+   livres. Foi por isso que a formula usa Math.ceil. */
+eq("dia a dia: 10/10/10 e 1 lead -> cota 11 (teto)", cotaPorAtendente([10, 10, 10], 1, 3), 11);
+
+/* O CASO DO RELATO, passo a passo. */
+eq(
+  "[real] so o paulo online, todos zerados -> paulo recebe",
+  escolherPorCarga(["paulo"], cargasDe(0, 0, 0), POOL, 90, 0),
+  "paulo",
+);
+eq(
+  "[real] paulo ja com 30 e sozinho -> NINGUEM recebe, a fila segura",
+  escolherPorCarga(["paulo"], cargasDe(30, 0, 0), POOL, 60, 0),
+  null,
+);
+eq(
+  "[real] paulo com 29 -> ainda cabe um",
+  escolherPorCarga(["paulo"], cargasDe(29, 0, 0), POOL, 61, 0),
+  "paulo",
+);
+eq(
+  "[real] alberto loga zerado -> os proximos vao pra ele, nao pro paulo",
+  escolherPorCarga(["paulo", "alberto"], cargasDe(30, 0, 0), POOL, 60, 0),
+  "alberto",
+);
+eq(
+  "[real] alberto tambem chega em 30 -> segura de novo (faltam os 30 do rogerio)",
+  escolherPorCarga(["paulo", "alberto"], cargasDe(30, 30, 0), POOL, 30, 0),
+  null,
+);
+eq(
+  "[real] rogerio loga -> leva os que sobraram",
+  escolherPorCarga(["paulo", "alberto", "rogerio"], cargasDe(30, 30, 0), POOL, 30, 0),
+  "rogerio",
+);
+
+/* Menor carga ganha, seja qual for a ordem do pool. */
+eq(
+  "escolhe o MENOS carregado",
+  escolherPorCarga(POOL, cargasDe(8, 2, 5), POOL, 1, 0),
+  "alberto",
+);
+
+/* ⚠️ Empate desempata pelo CURSOR. Sem isso, com todos zerados o primeiro do
+   pool receberia sempre — o rodizio deixaria de girar no caso mais comum. */
+eq("empate com cursor 0 -> paulo", escolherPorCarga(POOL, cargasDe(0, 0, 0), POOL, 3, 0), "paulo");
+eq("empate com cursor 1 -> alberto", escolherPorCarga(POOL, cargasDe(0, 0, 0), POOL, 3, 1), "alberto");
+eq("empate com cursor 2 -> rogerio", escolherPorCarga(POOL, cargasDe(0, 0, 0), POOL, 3, 2), "rogerio");
+eq("cursor da volta", escolherPorCarga(POOL, cargasDe(0, 0, 0), POOL, 3, 3), "paulo");
+eq(
+  "cursor aponta pra quem NAO esta disponivel -> vai pro proximo empatado",
+  escolherPorCarga(["alberto", "rogerio"], cargasDe(0, 0, 0), POOL, 3, 0),
+  "alberto",
+);
+
+/* ⚠️ A soma inclui quem esta OFFLINE, e e isso que faz a divisao funcionar.
+   Contando so os online, 90/1 daria 90 — o despejo de hoje. */
+eq(
+  "a cota conta o pool INTEIRO, nao so os online",
+  cotaPorAtendente([0, 0, 0], 90, 3) === 30 && cotaPorAtendente([0], 90, 1) === 90,
+  true,
+);
+
+/* Bordas: sem ninguem disponivel, sem pool, carga ausente no mapa. */
+eq("ninguem disponivel -> null", escolherPorCarga([], cargasDe(0, 0, 0), POOL, 5, 0), null);
+eq("pool vazio -> null", escolherPorCarga(["paulo"], new Map(), [], 5, 0), null);
+eq(
+  "carga que nao esta no mapa conta como zero",
+  escolherPorCarga(["paulo"], new Map(), POOL, 5, 0),
+  "paulo",
+);
+eq("pool de tamanho 0 -> cota 0", cotaPorAtendente([], 10, 0), 0);
 console.log(`\n${ok} assercoes ok, ${falhas} falha(s)\n`);
 process.exit(falhas ? 1 : 0);
