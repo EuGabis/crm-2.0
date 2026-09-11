@@ -491,7 +491,7 @@ function AudioPlayer({ url, duration, out }: { url: string | null; duration?: st
  *   apareceria duas vezes.
  * - `image` / `video`: é sempre legenda.
  */
-function LegendaMidia({ message, out }: { message: Message; out: boolean }) {
+export function LegendaMidia({ message, out }: { message: Message; out: boolean }) {
   const texto = (message.body ?? "").trim();
   if (!texto || message.type === "audio") return null;
   if (message.type === "file" && texto === (message.mediaName ?? "").trim()) return null;
@@ -722,7 +722,7 @@ function Transcricao({ message, out }: { message: Message; out: boolean }) {
   );
 }
 
-function MediaContent({ message, out }: { message: Message; out: boolean }) {
+export function MediaContent({ message, out }: { message: Message; out: boolean }) {
   const url = useMediaUrl(message.mediaPath);
 
   if (message.type === "image") {
@@ -803,7 +803,7 @@ function MediaContent({ message, out }: { message: Message; out: boolean }) {
  * A data entra só quando o evento NÃO é de hoje — no fio de hoje, "13:19" basta,
  * e repetir "08/09" em cada selo rouba a largura do texto que importa.
  */
-function PipelineEvent({ message }: { message: Message }) {
+export function PipelineEvent({ message }: { message: Message }) {
   const quando = new Date(message.at);
   const hoje = new Date();
   const mesmoDia =
