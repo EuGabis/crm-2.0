@@ -20,6 +20,7 @@ import { SubNav } from "@/components/layout/subnav";
 import { TOOLTIP_STYLE } from "@/components/dashboard/opportunity-widgets";
 import { GoogleAdsReport } from "@/components/reports/google-ads-report";
 import { ServiceSlaReport } from "@/components/reports/service-sla-report";
+import { LogDoBot } from "@/components/reports/log-do-bot";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -1177,6 +1178,7 @@ const TODAS_AS_ABAS = [
   "Atendimento",
   "Conversas do setor",
   "Agentes",
+  "Log do bot",
   "Atribuição",
   "Google Ads",
 ];
@@ -1210,6 +1212,13 @@ function RelatoriosPageInner() {
         { label: "Atendimento" },
         { label: "Conversas do setor" },
         { label: "Agentes" },
+        /*
+         * ⚠️ Admin-only, e a rota confere de novo no servidor: o log mostra nome
+         * e telefone de TODO lead do dia, inclusive de setores que o atendente
+         * não enxerga. `log_do_bot` é `security definer`, então esconder a aba
+         * aqui não seria proteção.
+         */
+        { label: "Log do bot" },
         { label: "Atribuição" },
         { label: "Google Ads" },
       ]
@@ -1237,6 +1246,7 @@ function RelatoriosPageInner() {
         {activeTab === "Leads do dia" && <LeadsDoDiaReport />}
         {activeTab === "Conversas do setor" && isSupervisor && <SectorReport />}
         {activeTab === "Agentes" && isAdmin && <AgentesReport />}
+        {activeTab === "Log do bot" && isAdmin && <LogDoBot />}
         {activeTab === "Atribuição" && <AtribuicaoReport />}
         {activeTab === "Google Ads" && <GoogleAdsReport />}
       </div>

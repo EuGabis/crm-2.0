@@ -186,10 +186,20 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
       const json = await res.json().catch(() => ({}));
       if (res.ok) {
         const n = json.distributed ?? 0;
+        const retidas = json.retidas ?? 0;
         const nome = alvoDistribuicao ? memberMap.get(alvoDistribuicao) : null;
         if (n > 0) {
+          /*
+           * ⚠️ "Todos" pode legitimamente NÃO levar todos: com a cota ligada, o
+           * que passa da fatia de quem está online fica na fila esperando os
+           * outros logarem. Sem dizer isso, o admin lê "12 distribuídos" com 28
+           * ainda na tela e clica de novo achando que o botão falhou.
+           */
+          const sobra = retidas > 0 ? ` · ${retidas} seguem na fila (cota)` : "";
           toast.success(
-            nome ? `${n} lead(s) para ${nome}` : `${n} lead(s) distribuído(s) para quem está online`,
+            nome
+              ? `${n} lead(s) para ${nome}${sobra}`
+              : `${n} lead(s) distribuído(s) para quem está online${sobra}`,
           );
         } else if (json.alvoForaDoPool) {
           /* ⚠️ Zero com alvo escolhido tem causa DIFERENTE de zero sem alvo, e

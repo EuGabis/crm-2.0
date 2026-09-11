@@ -7355,3 +7355,133 @@ investigação de 09/09 começar por "mas ele está online".
   curta e as pessoas já sabem onde cada nome fica; reordenar por presença faria o
   nome pular de lugar entre uma abertura e outra, e transferir para o colega
   errado é pior que rolar dois nomes.
+
+## 🔴 A COTA INFLAVA: a causa raiz dos dois despejos (2026-09-11)
+
+Relatos, em dois dias seguidos: *"o Paulo é o primeiro a logar e tinha mais de 90
+leads esperando"* (10/09) e *"o Alberto recebeu todos os leads ao logar hoje"*
+(11/09), depois *"o Rogerio recebeu muitos e o Paulo foi o único que não
+recebeu"*.
+
+A regra, dita pelo Gabriel em 11/09 e agora escrita como teste:
+
+> *"Caiu 100 leads: 33,33% para o Paulo, 33,33% para o Alberto, 33,33% para o
+> Rogerio. Os leads do time de vendas têm que ser divididos de maneira
+> igualitária entre os 3."*
+
+### A causa: `soma(cargas) + fila` crescia a cada entrega
+
+```
+cota = teto( (carga de todos + fila) / tamanho do pool )
+```
+
+Os chamadores passavam a **fila INICIAL** e incrementavam o **mapa de cargas** a
+cada atribuição. Então o total que a conta divide subia 1 por entrega, e a cota
+subia junto:
+
+| entrega | cargas | fila passada | total | cota | Alberto cabe? |
+|---|---|---|---|---|---|
+| 0 | 0/0 | 6 | 6 | 3 | 0 < 3 ✅ |
+| 3 | 3/0 | 6 | **9** | **5** | 3 < 5 ✅ |
+| 5 | 5/0 | 6 | **11** | **6** | 5 < 6 ✅ |
+
+Com pool 2 e 6 esperando, a cota ia de 3 a 6 e **a única pessoa online levava a
+fila inteira**. Com 100 e três vendedores, ela nunca alcançava ninguém.
+
+🔴 **E é por isso que a correção de 10/09 não resolveu:** eu mexi em QUEM escolhe
+(`escolherPorCarga`, que estava certa) e não no TOTAL que a conta divide. O
+sintoma voltou idêntico no dia seguinte, com outra pessoa.
+
+**Correção:** `filaRestante` — o nome do parâmetro agora É o contrato, nas três
+funções. `soma(cargas) + filaRestante` é CONSTANTE ao longo de um lote: cada
+entrega soma 1 numa carga e tira 1 da fila. Os três chamadores decrementam.
+
+### A segunda causa: o botão do Relatório nunca teve cota
+
+`distributeDepartment` — o "Distribuir agora: Todos / 50% / 30%" — **não passa
+por `distributeOne`**. Fazia `list[(cursor + i) % list.length]` direto, e com uma
+pessoa online o módulo devolve sempre a mesma pessoa. Ele lê até **mil**
+pendentes de uma vez.
+
+⚠️ **São TRÊS caminhos que atribuem — bot, varredura e este botão — e eu tinha
+coberto dois.** A lição, terceira vez neste arquivo: ao consertar uma regra de
+distribuição, **conte os caminhos** antes de dar por fechado.
+
+De quebra, no mesmo lugar:
+- ⚠️ usava `onlineOrdered` (só presença) e entregava lead novo a quem marcou
+  **"Ausente"** — a pessoa que literalmente pediu para não receber. Passou a
+  `disponiveisOrdered`, como o resto do rodízio desde 202609101100.
+- 🔴 **o motivo MENTIA:** sem `reason`, `assignLeadTo` grava o padrão *"atribuída
+  pelo bot (origem não informada)"* — e o fio dizia BOT numa atribuição vinda de
+  um clique de administrador. Foi essa lacuna que me obrigou a DEDUZIR qual
+  caminho despejou os leads. Agora grava "distribuição pelo relatório (rodízio)".
+- devolve `{ atribuidas, retidas }`: com a cota, "Todos" pode legitimamente não
+  levar todos, e um número só não distingue "não havia fila" de "a cota segurou o
+  resto". A tela diz `· N seguem na fila (cota)`.
+
+### A terceira: a cota media o ACERVO, não os leads do dia
+
+`cargaPorAtendente` contava **conversas abertas acumuladas**. Em 10/09 o Paulo
+tinha **67 abertas** por causa do incidente da fila, e a migração que iria
+rebalanceá-las (`202609102300`) **ainda não tinha sido aplicada** — então elas
+continuavam com ele. A cota via o Paulo muito acima da média e **nunca o
+escolhia**, enquanto Alberto e Rogério "alcançavam" o número dele absorvendo a
+fila. É exatamente o relato *"o Paulo foi o único que não recebeu"*.
+
+⚠️ **A regra é sobre os LEADS, não sobre o acervo.** Virou
+`recebidosNoDiaPorAtendente`, por `atribuida_em` no dia — e **NÃO** filtra
+`closed_at`/`archived_at`: fechar rápido não pode render mais lead, e um backlog
+histórico não pode render zero.
+
+⚠️ `inicioDoDiaSP()` porque a Vercel roda em UTC: às 21h de Brasília o servidor
+já está no dia seguinte, e um corte por hora local jogaria fora as atribuições da
+noite — justamente as do turno que gerou a queixa. Offset fixo em -03:00 (o
+Brasil não tem horário de verão desde 2019); se voltar, derive das partes do
+`Intl` em vez de somar uma hora.
+
+`npm run test:rodizio` — **120 asserções**. A regra do Gabriel está escrita
+literalmente: 100 leads e três online → **34/33/33**; só um online → ele leva
+**34** e **66 esperam** os donos.
+
+## Log do bot (migração 202609111500) — o instrumento que faltava
+
+Pedido do Gabriel no meio do incidente: *"uma tela de log do bot — aparece o
+comercial Alberto, Rogerio e Paulo, mostra os leads que ele recebeu (nome, número
+e horário), em qual período foram atribuídos a ele, e o fluxo."*
+
+⚠️ **Não é relatório: é instrumento.** Nos dois incidentes eu precisei DEDUZIR
+qual dos três caminhos tinha despejado os leads, porque o dado estava espalhado
+por quatro tabelas. Deduzir custou duas rodadas **e uma correção no lugar
+errado**.
+
+`public.log_do_bot(location, dias)` põe numa linha só: contato, telefone, quando
+CHEGOU (primeira mensagem de entrada), quando foi ATRIBUÍDO, para quem, **por
+qual motivo**, o fluxo do bot, o número e o desfecho da triagem.
+
+- 🔴 **A coluna que resolve tudo é o MOTIVO.** A tela o traduz em origem —
+  "botão do relatório", "varredura da fila", "bot / rodízio", "devolução",
+  "pessoa" —, e o texto completo fica no `title`. É o que responde "quem
+  despejou?" em dois segundos em vez de duas rodadas.
+- ⚠️ **Inclui quem NÃO tem dono.** "O Alberto levou 34 e 66 estão esperando" e "o
+  Alberto levou 34 de 34" são operações opostas; sem a fila na mesma tela não dá
+  para distinguir. A fila é um grupo próprio e fica sempre por último — é
+  contexto, não desempenho de ninguém.
+- ⚠️ **A porcentagem é sobre os ATRIBUÍDOS, não sobre o total.** Com a fila no
+  denominador, "33% cada" nunca apareceria e a regra do rateio ficaria impossível
+  de conferir na tela.
+- ⚠️ `lateral ... limit 1` no desfecho: `bot_desfechos` é append-only e a conversa
+  que reabre passa pela triagem de novo — sem o corte, um lead com duas triagens
+  vira duas linhas e a soma por atendente deixa de bater.
+- ⚠️ Horas em **America/Sao_Paulo**, não no relógio do navegador: a tela existe
+  para reconstruir a linha do tempo de um incidente ("caiu 22h", "logou 8h").
+- **Admin-only, conferido no SERVIDOR** — `log_do_bot` é `security definer`, e o
+  log mostra nome e telefone de todo lead do dia, inclusive de outros setores.
+
+A consulta que responde ao incidente (como usuário REAL — a service role cai na
+guarda de empresa e recebe zero linhas sem erro):
+
+```sql
+select atendente, motivo, count(*)
+  from public.log_do_bot('<location_id>', 2)
+ group by 1, 2 order by 3 desc;
+```
