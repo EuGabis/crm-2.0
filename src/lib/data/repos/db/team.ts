@@ -38,6 +38,13 @@ export interface Department {
   usaRodizio: boolean;
   /** Distribui mesmo para quem está offline? (0083) */
   rodizioOffline: boolean;
+  /**
+   * O prazo de primeira resposta só corre com o vendedor ONLINE (202609112100).
+   *
+   * É a outra metade do `rodizioOffline`: sem ela, o lead que cai em Pendentes
+   * de quem está offline é devolvido N minutos depois, com ele dormindo.
+   */
+  slaSoOnline: boolean;
   /** Minutos de espera do cliente antes de devolver ao rodízio. 0 = desligado. */
   devolverAposMin: number;
   /** Aplica o logout automático por inatividade (10 min) aos membros? (0081) */
@@ -111,6 +118,7 @@ const mapDepartment = (r: any, channelIds: string[] = []): Department => ({
   colaborativo: r.colaborativo ?? false,
   usaRodizio: r.usa_rodizio ?? true,
   rodizioOffline: r.rodizio_offline ?? false,
+  slaSoOnline: r.sla_so_online ?? false,
   devolverAposMin: r.devolver_apos_min ?? 15,
   logoutInatividade: r.logout_inatividade ?? true,
   createdAt: r.created_at,
@@ -338,6 +346,7 @@ export const departmentActions = {
     colaborativo?: boolean;
     usaRodizio?: boolean;
     rodizioOffline?: boolean;
+    slaSoOnline?: boolean;
     devolverAposMin?: number;
     logoutInatividade?: boolean;
   }): Promise<{ ok: boolean; error?: string }> {
@@ -345,9 +354,21 @@ export const departmentActions = {
     if (!loc) return { ok: false, error: "Empresa não encontrada" };
     const supabase = createClient();
     const { data: auth } = await supabase.auth.getUser();
-    const { data, error } = await supabase
-      .from("departments")
-      .insert({
+    /*
+     * ⚠️ **A coluna nova vai em campo separado, e a escrita tem segunda
+     * tentativa SEM ela.** Neste projeto o código chega à produção ANTES da
+     * migração, e mandar coluna inexistente faz o PostgREST recusar o INSERT
+     * inteiro — criar departamento pararia de funcionar na janela entre o deploy
+     * e o SQL. Foi assim que o envio quebrou em 01/09.
+     */
+    const novas = { sla_so_online: input.slaSoOnline ?? false };
+    const criar = (extra: Record<string, unknown>) =>
+      supabase
+        .from("departments")
+        .insert({ ...baseInsert, ...extra })
+        .select()
+        .single();
+    const baseInsert = {
         location_id: loc,
         name: input.name.trim(),
         description: input.description.trim(),
@@ -359,9 +380,9 @@ export const departmentActions = {
         devolver_apos_min: input.devolverAposMin ?? 15,
         logout_inatividade: input.logoutInatividade ?? true,
         created_by: auth.user?.id ?? null,
-      })
-      .select()
-      .single();
+    };
+    let { data, error } = await criar(novas);
+    if (error) ({ data, error } = await criar({}));
     if (error || !data) {
       return {
         ok: false,
@@ -393,6 +414,7 @@ export const departmentActions = {
       colaborativo?: boolean;
       usaRodizio?: boolean;
       rodizioOffline?: boolean;
+      slaSoOnline?: boolean;
       devolverAposMin?: number;
       logoutInatividade?: boolean;
     }
@@ -407,15 +429,20 @@ export const departmentActions = {
     if (patch.colaborativo !== undefined) row.colaborativo = patch.colaborativo;
     if (patch.usaRodizio !== undefined) row.usa_rodizio = patch.usaRodizio;
     if (patch.rodizioOffline !== undefined) row.rodizio_offline = patch.rodizioOffline;
+    if (patch.slaSoOnline !== undefined) row.sla_so_online = patch.slaSoOnline;
     if (patch.devolverAposMin !== undefined) row.devolver_apos_min = patch.devolverAposMin;
     if (patch.logoutInatividade !== undefined) row.logout_inatividade = patch.logoutInatividade;
     const supabase = createClient();
-    const { data, error } = await supabase
-      .from("departments")
-      .update(row)
-      .eq("id", id)
-      .select()
-      .single();
+    const salvar = (r: Record<string, unknown>) =>
+      supabase.from("departments").update(r).eq("id", id).select().single();
+    let { data, error } = await salvar(row);
+    // Mesma rede do create: sem a coluna nova, salva o resto em vez de recusar
+    // o formulário inteiro.
+    if (error && "sla_so_online" in row) {
+      const semNova = { ...row };
+      delete semNova.sla_so_online;
+      ({ data, error } = await salvar(semNova));
+    }
     if (error || !data) {
       return {
         ok: false,

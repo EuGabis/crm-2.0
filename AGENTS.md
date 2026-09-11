@@ -7746,3 +7746,138 @@ agora importa `@/lib/periodo`); sem isso o teste morre na resolução do `@/`.
 virada da noite em São Paulo (23h30 de 11/09 = 02h30 UTC de 12/09), fevereiro
 bissexto, "mês passado" na virada de ano, o teto puxando o INÍCIO e preservando o
 fim, o futuro colapsando em hoje, e `2026-02-30` sendo recusada.
+
+## Distribuição de vendas: Offline ≠ Ausente, SLA que pausa, e Plantão (2026-09-11)
+
+Regra escrita pelo Gabriel em texto fechado, para **Paulo, Alberto e Rogério**.
+Migrações **202609112100** (aditiva) e **202609112101** (liga as chaves).
+
+### 🔴 Reverte a decisão de 28/08 — e só no setor de VENDAS
+
+*"Offline NÃO significa indisponível para receber leads."* Em 28/08 a decisão foi
+o contrário, e por um motivo medido: na SECRETARIA o lead caiu numa atendente que
+começa 12h, ninguém mais do setor viu, e *"a fila de espera dos alunos ficou
+muito alta"*.
+
+As duas coisas convivem porque a operação é outra: o vendedor trabalha o lead
+DELE e não há aluno esperando na linha. Por isso a mudança é **coluna por setor**
+(`departments.rodizio_offline` + `sla_so_online`), nunca global — ligar na
+Secretaria repetiria um problema já medido. `usa_rodizio`, `dividir_igualmente`,
+`intervalo_fila_min` e `devolver_apos_min` já seguiam esse padrão.
+
+### As três peças
+
+| status | recebe lead novo? | onde cai |
+|---|---|---|
+| 🟢 online | sim | caixa normal |
+| ⚪ offline | **sim** | **Pendentes** (`assigned_offline`) |
+| 🟡 ausente | **não** | — |
+
+**"Pendentes" já existia com outro nome**: é a aba `offline` do rail do inbox
+(`conversations.assigned_offline`, 0060), que some sozinha quando o dono abre a
+conversa. O rótulo passou a ser "Pendentes" porque o antigo ("Recebidas enquanto
+eu estava offline") descrevia o mecanismo, e o novo descreve o que a pessoa tem
+para fazer.
+
+### 🔴 O defeito que o pedido revelou: `rodizio_offline` atropelava o "Ausente"
+
+Ligado, `distributeOne` usava o `pool` CRU — **incluindo quem tinha marcado
+"Ausente"**. Ou seja, o setor que ligasse "distribuir mesmo para offline" perdia
+junto o respeito ao botão de ausência, sem nada dizendo isso. As duas nunca foram
+a mesma coisa: **presença é observada, ausência é declarada.**
+
+`elegiveisOrdered` (pool menos ausentes) é a lista que o rodízio usa agora, e o
+mesmo conserto foi aplicado ao botão "Distribuir agora" do Relatório — **terceira
+vez que este arquivo aprende a contar os caminhos**: bot, varredura e botão.
+
+### 🔴 E um defeito de desenho que só o TESTE pegou: a cota reservava a fatia do ausente
+
+`cotaPorAtendente` divide a fila pelo pool inteiro — o que é CERTO para offline
+(ele volta e recebe a dele: é o *"não perde a vez"* do pedido). Para o **ausente**
+é errado: com um ausente e um presente diante de 3 leads, a cota dava 2 e o
+terceiro **ficava parado esperando quem declarou indisponibilidade**. O
+denominador passou a ser os elegíveis. O exemplo do próprio pedido
+("Paulo → Rogério → Paulo → Rogério") está escrito como asserção.
+
+### O SLA que PAUSA — a outra metade do "offline recebe"
+
+Sem ela, ligar o offline entregaria o lead à caixa de Pendentes de quem está
+dormindo e o tomaria 20 minutos depois: *"continua pertencendo a ele"* viraria
+mentira, e o lead circularia a noite entre três pessoas offline.
+
+- `location_members.online_desde` — início da presença ATUAL. O prazo conta de
+  `greatest(atribuida_em, online_desde)`, então quem recebeu às 3h começa a valer
+  às 8h.
+- `dono_online = false` → o prazo está **parado**, não há o que cobrar.
+- ⚠️ **Quem reinicia a temporada é o `touch_presence`, e só quando a pessoa
+  estava FRIA** (sem sinal dentro da janela). Reiniciar a cada ping zeraria o
+  prazo a cada 30 segundos e **a devolução nunca aconteceria** — sem erro
+  nenhum. Conferido em produção (transação revertida): frio há 385 min → abre
+  temporada; ping de rotina com temporada de 30 min → continua 30; ausente
+  pingando → sem temporada.
+- ⚠️ `private.presenca_janela()` (15 min) **tem de bater com `PRESENCE_MS` de
+  `lib/presence.ts`** — são dois mundos decidindo sobre a mesma pessoa, e foi
+  divergência assim que fez a investigação de 09/09 começar por "mas ele está
+  online".
+- ⚠️ O retroativo põe `online_desde = now()` em quem está presente. Deixar nulo
+  seria pior do que parece: `greatest(x, null)` é null, e a devolução leria "o
+  prazo nunca começou" para a operação inteira. Consequência assumida: no minuto
+  seguinte à migração, o prazo de todo mundo recomeça do zero.
+
+### Plantão de fim de semana
+
+`public.plantoes` (setor, vendedor, janela, contingência) + `criar_plantao`.
+No período, 100% dos leads novos do setor vão para o plantonista.
+
+- **Online recebe · Offline recebe e vai para Pendentes · Ausente não recebe**, e
+  aí vale a contingência escolhida: `normal` (cai no rodízio) ou `fila` (o lead
+  espera, visível a todos).
+- ⚠️ **O cursor NÃO avança e a carga NÃO conta** os leads do plantão (item 9 do
+  pedido: não podem alterar o equilíbrio da distribuição normal). Quem marca isso
+  é a coluna **`conversations.plantao_id`** — e não o texto de `assign_reason`:
+  decidir por texto livre é o erro que a redistribuição de 10/09 cometeu, pegando
+  1 motivo entre 7.
+- ⚠️ **Plantonista fora do pool do setor não recebe.** Ele nem enxergaria a
+  conversa (a RLS é por número/departamento), e some da fila sem ninguém atender.
+- ⚠️ `criar_plantao` **recusa período sobreposto**: dois plantões vigentes não
+  têm resposta certa, e o leitor teria de escolher por critério arbitrário —
+  como nasceu o bug do "canal ativo mais antigo" (202608312055). Conferido em
+  produção: cria o primeiro, recusa o sobreposto e recusa janela invertida.
+- Cancelar **marca** `cancelado_em`, não apaga: as conversas carregam
+  `plantao_id`, e apagar a linha apagaria de onde veio aquele lead.
+- A tela fica no diálogo do DEPARTAMENTO, junto do rodízio: quem organiza a
+  escala é quem configura quem recebe. Separado, alguém mexeria no rodízio sem
+  ver que há um plantão mandando em tudo.
+
+### Ordem das migrações (obrigatória)
+
+| | o que faz | quando |
+|---|---|---|
+| `202609112100` | colunas, funções, tabela, `conversas_paradas` com 2 colunas novas | pode ir **antes** do merge (aditiva) |
+| `202609112101` | **liga** `rodizio_offline` + `sla_so_online` em Vendas | só **depois** do merge |
+
+⚠️ Aplicar a segunda cedo faz o rodízio distribuir para offline enquanto o código
+no ar ainda não sabe pausar o SLA — lead em Pendentes devolvido 20 min depois,
+com o vendedor dormindo. O `update` casa o nome **exato** "Vendas": `ilike
+'%vendas%'` pegaria "Secretaria Backup", que já foi o setor do time comercial.
+
+### O que a regra NÃO faz, de propósito
+
+- **Ausência não redistribui o que já é seu** (item 5): só o SLA devolve, e ele
+  exige o cliente esperando sem resposta humana.
+- **Não compensa** o que o ausente deixou de receber (item 3): a cota olha os
+  leads do DIA, então ele volta a receber a partir dali, sem fila retroativa.
+- ⏳ **O histórico do item 11 fica parcial.** Já existem: quem atribuiu e por quê
+  (gatilho `log_atribuicao`), status offline (`assigned_offline`), plantão
+  (`plantao_id`), devolução com o tempo no texto. **Falta** um registro explícito
+  de "SLA cumprido × excedido" por lead — e não foi criado de propósito: a aba
+  **Atendimento** (0079) já mede primeira resposta humana contra meta, e uma
+  segunda fonte para o mesmo número divergiria da primeira.
+- ⏳ **Turno por vendedor** continua não existindo. Com offline recebendo, um
+  vendedor de férias que não marque "Ausente" continua recebendo a fatia dele —
+  e agora ela não volta para os outros. A saída hoje é tirá-lo do `lead_pool`.
+
+`npm run test:rodizio` — **149 asserções**, 29 novas. As que mais importam: o
+ausente não recebendo com `rodizio_offline` ligado, o lead do offline indo para
+Pendentes, o prazo parado com o dono offline, e o plantão nas três combinações de
+status × contingência.

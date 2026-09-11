@@ -55,6 +55,7 @@ import {
   type TeamMember,
 } from "@/lib/data/repos/db/team";
 import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
+import { PlantaoCard } from "@/components/team/plantao-card";
 import { cn } from "@/lib/utils";
 
 import { useConfirm } from "@/components/shared/confirm";
@@ -648,6 +649,8 @@ function DepartmentDialog({
 }) {
   const { channels } = useWhatsappChannels();
   const { members } = useTeam();
+  const presence = usePresence();
+  const { isAdmin } = useMyMembership();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [permissions, setPermissions] = useState<ModulePermissions>({});
@@ -656,6 +659,7 @@ function DepartmentDialog({
   const [colaborativo, setColaborativo] = useState(false);
   const [usaRodizio, setUsaRodizio] = useState(true);
   const [rodizioOffline, setRodizioOffline] = useState(false);
+  const [slaSoOnline, setSlaSoOnline] = useState(false);
   const [devolverAposMin, setDevolverAposMin] = useState(15);
   const [logoutInatividade, setLogoutInatividade] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -679,6 +683,7 @@ function DepartmentDialog({
     setColaborativo(department?.colaborativo ?? false);
     setUsaRodizio(department?.usaRodizio ?? true);
     setRodizioOffline(department?.rodizioOffline ?? false);
+    setSlaSoOnline(department?.slaSoOnline ?? false);
     setDevolverAposMin(department?.devolverAposMin ?? 15);
     setLogoutInatividade(department?.logoutInatividade ?? true);
   }, [department, open]);
@@ -711,6 +716,7 @@ function DepartmentDialog({
           colaborativo,
           usaRodizio,
           rodizioOffline,
+          slaSoOnline,
           devolverAposMin,
           logoutInatividade,
         })
@@ -723,6 +729,7 @@ function DepartmentDialog({
           colaborativo,
           usaRodizio,
           rodizioOffline,
+          slaSoOnline,
           devolverAposMin,
           logoutInatividade,
         });
@@ -879,14 +886,39 @@ function DepartmentDialog({
               />
               <span className="space-y-0.5">
                 <span className="block text-xs font-semibold text-slate-800">
-                  Distribuir mesmo para quem está offline
+                  Offline também recebe (vai para Pendentes)
+                </span>
+                {/*
+                  ⚠️ O texto mudou junto com a regra de 2026-09-11. Antes dizia
+                  "desligado (recomendado)" — e continua sendo o certo para a
+                  SECRETARIA, onde o cliente está numa fila de atendimento. Para
+                  VENDAS a regra é a oposta, porque o lead é trabalhado pelo dono
+                  e não há ninguém esperando na linha.
+                */}
+                <span className="block text-[11px] font-normal leading-relaxed text-slate-500">
+                  Ligado: quem está <strong>offline continua no rodízio</strong> e o lead cai na{" "}
+                  <strong>caixa de Pendentes</strong> dele — continua sendo dele, e estar offline
+                  não faz perder a vez. Desligado: só quem está online recebe; se ninguém estiver,
+                  o lead fica na <strong>fila do setor</strong>, visível para todos.{" "}
+                  <strong>Quem marcou &quot;Ausente&quot; nunca recebe</strong>, nos dois casos.
+                </span>
+              </span>
+            </Label>
+
+            <Label className="ml-4 flex cursor-pointer items-start gap-2.5 rounded-lg border border-dashed p-3">
+              <Checkbox
+                checked={slaSoOnline}
+                onCheckedChange={(v) => setSlaSoOnline(v === true)}
+                className="mt-0.5"
+              />
+              <span className="space-y-0.5">
+                <span className="block text-xs font-semibold text-slate-800">
+                  O prazo só corre com o atendente online
                 </span>
                 <span className="block text-[11px] font-normal leading-relaxed text-slate-500">
-                  Ligado: o lead entra no rodízio de <strong>todos</strong> do pool,
-                  esteja online ou não. Desligado (recomendado): só quem está
-                  online recebe; se ninguém estiver, o lead fica na{" "}
-                  <strong>fila do setor</strong>, visível para todos, e vai para
-                  quem entrar primeiro.
+                  Ligado: o lead que cai em <strong>Pendentes</strong> não é devolvido enquanto o
+                  dono estiver offline — o prazo começa a contar quando ele volta. É o par do item
+                  acima: sem isto, o lead seria tomado de volta com o vendedor dormindo.
                 </span>
               </span>
             </Label>
@@ -914,6 +946,22 @@ function DepartmentDialog({
                 mensagem de sexta à noite não é devolvida na madrugada do sábado.
               </p>
             </div>
+
+            {/*
+              O plantão só aparece com o departamento SALVO: ele precisa do id
+              para amarrar a escala, e um formulário que aceita dados e não tem
+              onde gravá-los é pior que a ausência dele.
+            */}
+            {department && (
+              <div className="ml-4">
+                <PlantaoCard
+                  departmentId={department.id}
+                  membros={deptMembers.map((m) => ({ userId: m.userId, name: m.name }))}
+                  presenca={presence}
+                  podeEditar={isAdmin}
+                />
+              </div>
+            )}
             </>
           )}
 

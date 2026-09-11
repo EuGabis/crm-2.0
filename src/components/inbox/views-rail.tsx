@@ -421,7 +421,13 @@ export function ViewsRail({
       />
       <RailButton
         icon={WifiOff}
-        label="Recebidas enquanto eu estava offline"
+        /*
+         * "Pendentes" é o nome que a regra de distribuição usa (2026-09-11):
+         * lead entregue a quem estava offline fica AQUI e continua sendo dele.
+         * O rótulo antigo ("Recebidas enquanto eu estava offline") descrevia o
+         * mecanismo; este descreve o que a pessoa tem para fazer.
+         */
+        label="Pendentes — chegaram enquanto eu estava offline"
         active={scope === "offline"}
         onClick={() => pick("offline")}
         badge={offlineCount}

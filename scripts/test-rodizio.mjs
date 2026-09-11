@@ -28,6 +28,8 @@ import {
   podeTrocarDonoDoCard,
   distributeDepartment,
   inicioDoDiaSP,
+  plantaoAtivo,
+  elegiveisOrdered,
   PRESENCE_MS,
 } from "../src/lib/leads/distribution.ts";
 
@@ -77,6 +79,8 @@ function fakeDb(estado) {
     // É o `.gte("last_seen_at", ...)` de `onlineOrdered` que decide quem está
     // online — o coração da regra que este teste existe para vigiar.
     for (const [c, v] of f.gte) linhas = linhas.filter((l) => (l[c] ?? "") >= v);
+    for (const [c, v] of f.lte) linhas = linhas.filter((l) => (l[c] ?? "") <= v);
+    for (const [c, v] of f.gt) linhas = linhas.filter((l) => (l[c] ?? "") > v);
     if (f.limite !== null) linhas = linhas.slice(0, f.limite);
     if (f.single) return { data: linhas[0] ?? null, error: null };
     return { data: linhas, error: null };
@@ -90,6 +94,8 @@ function fakeDb(estado) {
       nulos: [],
       naoNulos: [],
       gte: [],
+      lte: [],
+      gt: [],
       limite: null,
       single: false,
       patch: null,
@@ -105,6 +111,9 @@ function fakeDb(estado) {
       not: (c) => (f.naoNulos.push(c), api),
       in: (c, v) => ((f.arrays[c] = v), api),
       gte: (c, v) => (f.gte.push([c, v]), api),
+      // `plantaoAtivo` recorta a janela com lte(inicio) + gt(fim).
+      lte: (c, v) => (f.lte.push([c, v]), api),
+      gt: (c, v) => (f.gt.push([c, v]), api),
       update: (patch) => ((f.patch = patch), api),
       then: (res) => Promise.resolve(resolver(f)).then(res),
     };
@@ -1082,6 +1091,275 @@ const contarPorPessoa = (db) => {
     "[real] Paulo zerado no dia entra na frente de quem ja recebeu 20",
     escolherPorCarga(POOL3, doDia(0, 20, 20), POOL3, 60, 0),
     "paulo",
+  );
+}
+
+/* ==================================================================
+ * Regra de distribuição do time de vendas (2026-09-11):
+ * Offline ≠ Ausente · SLA que só corre online · Plantão
+ * ==================================================================
+ *
+ * 🔴 Cada asserção aqui trava uma frase do pedido. As duas que mais importam:
+ *
+ *  - **"Offline NÃO significa indisponível"** — e o defeito que existia é o
+ *    oposto do intuitivo: ligar `rodizio_offline` fazia o setor perder junto o
+ *    respeito ao botão "Ausente", porque o código usava o `pool` CRU.
+ *  - **"o SLA não começa enquanto o vendedor estiver offline"** — sem isso, o
+ *    lead cai em Pendentes e é tomado 20 minutos depois, com ele dormindo.
+ */
+console.log("\nOffline != Ausente, e o plantao\n");
+
+/** Setor com a regra de vendas ligada (offline recebe + divide igual). */
+function vendasRegraNova(statusPorPessoa) {
+  const st = cenario({});
+  st.departments[0].dividir_igualmente = true;
+  st.departments[0].rodizio_offline = true; // offline PARTICIPA
+  st.departments[0].sla_so_online = true;
+  st.location_members = Object.entries(statusPorPessoa).map(([u, estado]) => ({
+    location_id: "loc1",
+    user_id: u,
+    department_id: "dep1",
+    last_seen_at: estado === "offline" ? offline : online,
+    disponibilidade: estado === "ausente" ? "ausente" : "online",
+  }));
+  return st;
+}
+
+/*
+ * Põe conversas na fila JÁ com a sessão do bot concluída.
+ *
+ * ⚠️ Não é detalhe de teste: sem a sessão elas são retidas por "não passou pelo
+ * bot" (regra do Gabriel), e o cenário mediria outra coisa sem dizer isso. O
+ * `cenario()` faz esse pareamento sozinho quando as conversas vão nele; aqui
+ * elas entram depois, então a sessão precisa ir junto.
+ */
+function comFila(st, convs) {
+  st.conversations = convs;
+  st.bot_sessions = convs.map((c) => ({ conversation_id: c.id, status: "concluido" }));
+  return st;
+}
+
+{
+  // Offline continua elegível; ausente sai. É a tabela do pedido, em uma linha.
+  const st = vendasRegraNova({ paulo: "online", alberto: "offline", rogerio: "ausente" });
+  const db = fakeDb(st);
+  eq(
+    "[regra] elegiveis = online + offline, SEM o ausente",
+    await elegiveisOrdered(db, "loc1", ["paulo", "alberto", "rogerio"]),
+    ["paulo", "alberto"],
+  );
+}
+
+{
+  /* O exemplo literal do pedido: "Se Alberto estiver offline -> Lead -> Alberto
+     -> Pendentes". Com 2 leads e os dois elegíveis, um vai para cada. */
+  const st = vendasRegraNova({ paulo: "online", alberto: "offline" });
+  comFila(st, [naFila("k1"), naFila("k2")]);
+  const db = fakeDb(st);
+  const r = await distribuirFilaDoSetor(db, "loc1");
+  const por = contarPorPessoa(db);
+  eq("[regra] offline RECEBE: os 2 saem", r.distribuidas, 2);
+  eq("[regra] um para cada, o offline inclusive", Object.keys(por).sort(), ["alberto", "paulo"]);
+  const doAlberto = db.atribuicoes().find((e) => e.patch.assigned_to === "alberto");
+  eq(
+    "[regra] o lead do offline vai para PENDENTES (assigned_offline)",
+    doAlberto.patch.assigned_offline,
+    true,
+  );
+  const doPaulo = db.atribuicoes().find((e) => e.patch.assigned_to === "paulo");
+  eq("[regra] o do online nao e pendente", doPaulo.patch.assigned_offline, false);
+}
+
+{
+  /* 🔴 O defeito que existia: com `rodizio_offline` ligado, o AUSENTE recebia.
+     "Se Alberto estiver Ausente -> Lead -> Rogério". */
+  const st = vendasRegraNova({ alberto: "ausente", rogerio: "offline" });
+  comFila(st, [naFila("k1"), naFila("k2"), naFila("k3")]);
+  const db = fakeDb(st);
+  await distribuirFilaDoSetor(db, "loc1");
+  const por = contarPorPessoa(db);
+  eq("[regra] o AUSENTE nao recebe nada", por.alberto ?? 0, 0);
+  eq("[regra] tudo foi para quem nao esta ausente (offline inclusive)", por.rogerio, 3);
+}
+
+{
+  // Todos ausentes: ninguém recebe, e o lead FICA NA FILA (não some, não cai
+  // em quem declarou indisponibilidade).
+  const st = vendasRegraNova({ paulo: "ausente", alberto: "ausente" });
+  comFila(st, [naFila("k1")]);
+  const db = fakeDb(st);
+  const r = await distribuirFilaDoSetor(db, "loc1");
+  eq("[regra] todos ausentes -> ninguem recebe", r.distribuidas, 0);
+  eq("[regra] e o lead continua na fila, visivel", r.naFila, 1);
+}
+
+/* ---------------- Plantão ---------------- */
+
+const plantaoDe = (user, extra = {}) => ({
+  id: "pl1",
+  location_id: "loc1",
+  department_id: "dep1",
+  user_id: user,
+  inicio: new Date(AGORA - 3600 * 1000).toISOString(),
+  fim: new Date(AGORA + 3600 * 1000).toISOString(),
+  se_ausente: "normal",
+  cancelado_em: null,
+  ...extra,
+});
+
+{
+  const db = fakeDb(cenario({ plantoes: [plantaoDe("rogerio")] }));
+  eq("[plantao] o vigente e encontrado", (await plantaoAtivo(db, "dep1"))?.user_id, "rogerio");
+}
+
+{
+  // Janela passada não vale — e o teste existe porque um plantão que não expira
+  // sozinho concentraria os leads para sempre.
+  const db = fakeDb(
+    cenario({
+      plantoes: [
+        plantaoDe("rogerio", {
+          inicio: new Date(AGORA - 7200 * 1000).toISOString(),
+          fim: new Date(AGORA - 3600 * 1000).toISOString(),
+        }),
+      ],
+    }),
+  );
+  eq("[plantao] terminado nao vale mais", await plantaoAtivo(db, "dep1"), null);
+  const dbC = fakeDb(cenario({ plantoes: [plantaoDe("rogerio", { cancelado_em: "2026-09-11" })] }));
+  eq("[plantao] cancelado nao vale", await plantaoAtivo(dbC, "dep1"), null);
+}
+
+{
+  /* 100% dos leads para o plantonista, e a distribuição normal suspensa. */
+  const st = vendasRegraNova({ paulo: "online", alberto: "online", rogerio: "online" });
+  st.plantoes = [plantaoDe("rogerio")];
+  comFila(st, [naFila("k1"), naFila("k2"), naFila("k3")]);
+  const db = fakeDb(st);
+  await distribuirFilaDoSetor(db, "loc1");
+  const por = contarPorPessoa(db);
+  eq("[plantao] 100% dos leads vao para o plantonista", por, { rogerio: 3 });
+  eq("[plantao] o motivo aparece no fio", db.atribuicoes()[0].patch.assign_reason, "plantão");
+  eq(
+    "[plantao] a conversa fica marcada, para a cota ignorar depois",
+    db.atribuicoes()[0].patch.plantao_id,
+    "pl1",
+  );
+  /* ⚠️ item 9: "os leads do plantão não devem alterar o equilíbrio da
+     distribuição normal" — por isso o cursor do setor NÃO avança. */
+  eq("[plantao] o cursor do rodizio nao avanca", st.departments[0].rr_cursor, 0);
+}
+
+{
+  // Plantonista OFFLINE recebe igual, e vai para Pendentes (item 7).
+  const st = vendasRegraNova({ paulo: "online", rogerio: "offline" });
+  st.plantoes = [plantaoDe("rogerio")];
+  comFila(st, [naFila("k1")]);
+  const db = fakeDb(st);
+  await distribuirFilaDoSetor(db, "loc1");
+  const at = db.atribuicoes()[0];
+  eq("[plantao] offline recebe do mesmo jeito", at.patch.assigned_to, "rogerio");
+  eq("[plantao] e o lead fica em Pendentes", at.patch.assigned_offline, true);
+}
+
+{
+  // Plantonista AUSENTE + contingência "normal" -> cai no rodízio normal.
+  const st = vendasRegraNova({ paulo: "online", rogerio: "ausente" });
+  st.plantoes = [plantaoDe("rogerio")];
+  comFila(st, [naFila("k1")]);
+  const db = fakeDb(st);
+  await distribuirFilaDoSetor(db, "loc1");
+  eq(
+    "[plantao] ausente + contingencia normal -> vai para outro",
+    db.atribuicoes()[0].patch.assigned_to,
+    "paulo",
+  );
+  eq("[plantao] e nao fica marcado como plantao", db.atribuicoes()[0].patch.plantao_id ?? null, null);
+}
+
+{
+  // Plantonista AUSENTE + contingência "fila" -> o lead ESPERA, e não vai para
+  // outro vendedor. É a outra opção que o pedido manda deixar configurável.
+  const st = vendasRegraNova({ paulo: "online", rogerio: "ausente" });
+  st.plantoes = [plantaoDe("rogerio", { se_ausente: "fila" })];
+  comFila(st, [naFila("k1")]);
+  const db = fakeDb(st);
+  const r = await distribuirFilaDoSetor(db, "loc1");
+  eq("[plantao] ausente + contingencia fila -> ninguem recebe", r.distribuidas, 0);
+  eq("[plantao] o lead continua na fila", r.naFila, 1);
+}
+
+{
+  /* ⚠️ Plantonista fora do pool do setor NÃO recebe: ele nem enxergaria a
+     conversa (a RLS é por número/departamento), e some da fila sem ninguém
+     atender. Cai na distribuição normal. */
+  const st = vendasRegraNova({ paulo: "online" });
+  st.plantoes = [plantaoDe("dequem_nao_e_do_setor")];
+  comFila(st, [naFila("k1")]);
+  const db = fakeDb(st);
+  await distribuirFilaDoSetor(db, "loc1");
+  eq(
+    "[plantao] plantonista fora do pool -> distribuicao normal",
+    db.atribuicoes()[0].patch.assigned_to,
+    "paulo",
+  );
+}
+
+/* ---------------- SLA que só corre com o vendedor online ---------------- */
+
+const parada = (extra = {}) => ({
+  conversation_id: "x1",
+  contact_id: "c1",
+  assigned_to: "paulo",
+  assigned_by: null,
+  channel_id: "ch1",
+  devolvida_em: null,
+  ultima_do_cliente: "2026-09-11T12:00:00Z",
+  espera_util_min: 60,
+  passou_pelo_bot: true,
+  ja_respondida: false,
+  minutos_com_atendente: 60,
+  dono_online: true,
+  minutos_de_sla: 60,
+  ...extra,
+});
+
+{
+  eq("[sla] dono online e prazo estourado -> devolve", devolvivel(parada(), ["ch1"], 20, true), true);
+  /* 🔴 A metade que faltava do "offline recebe": com o vendedor offline o prazo
+     está PARADO. Sem esta linha, o lead cairia em Pendentes e seria tomado 20
+     minutos depois, com ele dormindo — e "continua pertencendo a ele" viraria
+     mentira. */
+  eq(
+    "[sla] dono OFFLINE -> o prazo nao corre, nao devolve",
+    devolvivel(parada({ dono_online: false }), ["ch1"], 20, true),
+    false,
+  );
+  /* O lead caiu de madrugada e o vendedor chegou há 5 minutos: o prazo conta a
+     partir da chegada dele, não da atribuição. */
+  eq(
+    "[sla] voltou ha 5 min -> ainda tem tempo",
+    devolvivel(parada({ minutos_com_atendente: 300, minutos_de_sla: 5 }), ["ch1"], 20, true),
+    false,
+  );
+  eq(
+    "[sla] voltou ha 25 min sem responder -> devolve",
+    devolvivel(parada({ minutos_com_atendente: 300, minutos_de_sla: 25 }), ["ch1"], 20, true),
+    true,
+  );
+  /* ⚠️ Setor SEM a regra (a Secretaria) não muda de comportamento: o estado do
+     dono é ignorado. Ligar isso em todo mundo repetiria a fila alta de 28/08. */
+  eq(
+    "[sla] setor sem a regra ignora o estado do dono",
+    devolvivel(parada({ dono_online: false }), ["ch1"], 20, false),
+    true,
+  );
+  /* ⚠️ Campo ausente (migração ainda não aplicada) NÃO pode travar a devolução
+     inteira — o código vai ao ar antes do SQL. */
+  eq(
+    "[sla] sem os campos novos, vale a regra de hoje",
+    devolvivel({ ...parada(), dono_online: undefined, minutos_de_sla: undefined }, ["ch1"], 20, true),
+    true,
   );
 }
 

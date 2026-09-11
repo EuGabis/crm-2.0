@@ -105,26 +105,7 @@ export async function disponiveisOrdered(
 ): Promise<string[]> {
   if (!pool.length) return [];
   const since = new Date(Date.now() - PRESENCE_MS).toISOString();
-  const base = () =>
-    db
-      .from("location_members")
-      .select("user_id, disponibilidade")
-      .eq("location_id", locationId)
-      .in("user_id", pool)
-      .gte("last_seen_at", since);
-  let linhas: any[] | null = null;
-  const r = await base();
-  if (r.error) {
-    const semColuna = await db
-      .from("location_members")
-      .select("user_id")
-      .eq("location_id", locationId)
-      .in("user_id", pool)
-      .gte("last_seen_at", since);
-    linhas = semColuna.data;
-  } else {
-    linhas = r.data;
-  }
+  const linhas = await membrosDoPool(db, locationId, pool, since);
   const ok = new Set(
     (linhas ?? [])
       .filter((m: any) => (m.disponibilidade ?? "online") !== "ausente")
@@ -132,6 +113,66 @@ export async function disponiveisOrdered(
   );
   // Mantém a ORDEM DO POOL: é ela que o cursor indexa.
   return pool.filter((u) => ok.has(u));
+}
+
+/**
+ * Quem do pool ACEITA lead novo, **esteja online ou não**.
+ *
+ * 🔴 É o item 1 da regra de 2026-09-11: *"Offline NÃO significa indisponível
+ * para receber leads"*. Só o status **Ausente** tira alguém da distribuição;
+ * a presença decide apenas se o lead cai em **Pendentes**.
+ *
+ * ⚠️ **É a correção de um defeito real do `rodizio_offline`.** Ligado, o
+ * `distributeOne` usava o `pool` CRU — incluindo quem tinha marcado "Ausente".
+ * Ou seja, o setor que ligasse "distribuir mesmo para quem está offline"
+ * perderia junto o respeito ao botão de ausência, sem nada dizendo isso. As duas
+ * coisas nunca foram a mesma: ausência é declaração, presença é observação.
+ */
+export async function elegiveisOrdered(
+  db: any,
+  locationId: string,
+  pool: string[],
+): Promise<string[]> {
+  if (!pool.length) return [];
+  // Sem filtro de presença de propósito: offline continua elegível.
+  const linhas = await membrosDoPool(db, locationId, pool, null);
+  const ausentes = new Set(
+    (linhas ?? [])
+      .filter((m: any) => (m.disponibilidade ?? "online") === "ausente")
+      .map((m: any) => m.user_id),
+  );
+  return pool.filter((u) => !ausentes.has(u));
+}
+
+/**
+ * Linhas de `location_members` do pool, com a disponibilidade.
+ *
+ * ⚠️ Tolera a coluna `disponibilidade` não existir: o código vai ao ar antes da
+ * migração, e pedir coluna inexistente faz o PostgREST recusar a consulta
+ * INTEIRA — o rodízio pararia de distribuir. Sem a coluna, ninguém é ausente,
+ * que é o comportamento anterior.
+ */
+async function membrosDoPool(
+  db: any,
+  locationId: string,
+  pool: string[],
+  /** ISO do corte de presença, ou `null` para não filtrar por presença. */
+  desde: string | null,
+): Promise<any[]> {
+  const base = (cols: string) => {
+    const q = db
+      .from("location_members")
+      .select(cols)
+      .eq("location_id", locationId)
+      .in("user_id", pool);
+    return desde ? q.gte("last_seen_at", desde) : q;
+  };
+  const r = await base("user_id, disponibilidade");
+  if (r.error) {
+    const semColuna = await base("user_id");
+    return (semColuna.data as any[]) ?? [];
+  }
+  return (r.data as any[]) ?? [];
 }
 
 /**
@@ -202,11 +243,24 @@ export async function recebidosNoDiaPorAtendente(
    * zero — o que faria a cota liberar geral e reabrir o despejo. O fallback é a
    * métrica antiga (abertas), que é pior mas não é catastrófica.
    */
+  /*
+   * ⚠️ **Lead de PLANTÃO não entra na carga** (item 9 do pedido de 11/09: "os
+   * leads recebidos durante o plantão não devem alterar o equilíbrio da
+   * distribuição normal"). Sem isto, o plantonista voltaria da segunda-feira com
+   * a cota estourada e ficaria sem receber nada por dias — o oposto de manter o
+   * equilíbrio.
+   */
   let linhas: any[] | null = null;
-  const r = await base().gte("atribuida_em", desde);
+  const r = await base().gte("atribuida_em", desde).is("plantao_id", null);
   if (r.error) {
-    const antigo = await base().is("closed_at", null).is("archived_at", null);
-    linhas = (antigo.data as any[]) ?? null;
+    // Sem `plantao_id` ainda (código no ar antes da migração): tenta só a data.
+    const semPlantao = await base().gte("atribuida_em", desde);
+    if (semPlantao.error) {
+      const antigo = await base().is("closed_at", null).is("archived_at", null);
+      linhas = (antigo.data as any[]) ?? null;
+    } else {
+      linhas = (semPlantao.data as any[]) ?? null;
+    }
   } else {
     linhas = (r.data as any[]) ?? null;
   }
@@ -286,10 +340,23 @@ export function escolherPorCarga(
    */
   filaRestante: number,
   cursor: number,
+  /**
+   * Entre QUEM a fila é dividida. Padrão: o pool inteiro.
+   *
+   * 🔴 **O AUSENTE não entra aqui, e foi um teste que pegou isso.** A cota
+   * reserva a fatia de quem está offline de propósito — ele volta e recebe a
+   * dele, que é o "não perde a vez" do pedido. Mas reservar a fatia de quem
+   * marcou "Ausente" deixa o lead esperando por alguém que declarou que NÃO
+   * está disponível: com um ausente e um presente diante de 3 leads, a cota dava
+   * 2 e o terceiro ficava parado. O pedido é explícito — ausente é retirado da
+   * distribuição.
+   */
+  poolParaCota?: string[],
 ): string | null {
   if (!disponiveis.length || !poolInteiro.length) return null;
   const carga = (u: string) => cargas.get(u) ?? 0;
-  const cota = cotaPorAtendente(poolInteiro.map(carga), filaRestante, poolInteiro.length);
+  const base = poolParaCota?.length ? poolParaCota : poolInteiro;
+  const cota = cotaPorAtendente(base.map(carga), filaRestante, base.length);
   const cabem = disponiveis.filter((u) => carga(u) < cota);
   if (!cabem.length) return null;
   const menor = Math.min(...cabem.map(carga));
@@ -433,13 +500,20 @@ export async function assignLeadTo(
      * `podeTrocarDonoDoCard`.
      */
     donoAnterior?: string | null;
+    /**
+     * Veio de um PLANTÃO (202609112100).
+     *
+     * ⚠️ Marca a conversa para a cota ignorá-la: o item 9 do pedido diz que os
+     * leads do plantão não podem alterar o equilíbrio da distribuição normal.
+     * Coluna e não texto em `assign_reason` — decidir por texto livre já custou
+     * uma rodada aqui (a redistribuição de 10/09 pegou 1 motivo entre 7).
+     */
+    plantaoId?: string | null;
   },
   userId: string,
   offline = false,
 ) {
-  await db
-    .from("conversations")
-    .update({
+  const patch: Record<string, unknown> = {
       assigned_to: userId,
       bot_paused: true,
       awaiting_distribution: false,
@@ -462,9 +536,22 @@ export async function assignLeadTo(
        * enquanto a causa era rota fixa no fluxo. Sem motivo informado, agora diz
        * que não sabe, em vez de chutar o caminho mais comum.
        */
-      assign_reason: p.reason ?? "atribuída pelo bot (origem não informada)",
-    })
-    .eq("id", p.conversationId);
+    assign_reason: p.reason ?? "atribuída pelo bot (origem não informada)",
+  };
+  /*
+   * ⚠️ Só manda `plantao_id` quando há plantão: o código vai ao ar ANTES da
+   * migração, e mandar coluna inexistente faz o PostgREST recusar o UPDATE
+   * INTEIRO — a conversa não seria atribuída a ninguém. Com a coluna já criada,
+   * o campo entra normalmente.
+   */
+  if (p.plantaoId) patch.plantao_id = p.plantaoId;
+  const r = await db.from("conversations").update(patch).eq("id", p.conversationId);
+  if (r?.error && p.plantaoId) {
+    // Sem a coluna ainda: atribui do mesmo jeito, sem a marca. Perder a marca é
+    // ruim; não atribuir o lead é pior.
+    delete patch.plantao_id;
+    await db.from("conversations").update(patch).eq("id", p.conversationId);
+  }
 
   const pid = await leadsPipelineId(db, p.locationId, p.pipelineName);
   if (!pid) return;
@@ -485,6 +572,52 @@ export async function assignLeadTo(
   if (opp && podeTrocarDonoDoCard(opp.owner_id, p.donoAnterior)) {
     await db.from("opportunities").update({ owner_id: userId }).eq("id", opp.id);
   }
+}
+
+/** Um plantão vigente (202609112100). */
+export type PlantaoAtivo = {
+  id: string;
+  user_id: string;
+  inicio: string;
+  fim: string;
+  /** O que fazer se o plantonista estiver AUSENTE: cair na normal, ou segurar. */
+  se_ausente: "normal" | "fila";
+};
+
+/**
+ * O plantão vigente do setor, se houver.
+ *
+ * 🔴 Item 6 da regra de 2026-09-11: no período configurado, **100% dos leads
+ * novos vão para o plantonista** e a distribuição normal fica suspensa.
+ *
+ * ⚠️ Devolve `null` — e não estoura — quando a tabela ainda não existe: o código
+ * vai ao ar ANTES da migração, e uma consulta a tabela inexistente faz o
+ * PostgREST recusar. Sem esta tolerância, o rodízio pararia de distribuir na
+ * janela entre o deploy e o SQL. É a lição de 01/09.
+ *
+ * ⚠️ Ordena por `inicio desc` e pega UM: a criação recusa sobreposição, então
+ * isso é só para o resultado ser determinístico se dois plantões existirem
+ * (banco mexido à mão, migração aplicada pela metade). Critério arbitrário
+ * escondido é como nasceu o bug do "canal ativo mais antigo".
+ */
+export async function plantaoAtivo(
+  db: any,
+  deptId: string,
+  agora: Date = new Date(),
+): Promise<PlantaoAtivo | null> {
+  const t = agora.toISOString();
+  const { data, error } = await db
+    .from("plantoes")
+    .select("id, user_id, inicio, fim, se_ausente")
+    .eq("department_id", deptId)
+    .is("cancelado_em", null)
+    .lte("inicio", t)
+    .gt("fim", t)
+    .order("inicio", { ascending: false })
+    .limit(1);
+  if (error) return null;
+  const linha = (data ?? [])[0];
+  return linha ? ({ ...linha, se_ausente: linha.se_ausente ?? "normal" } as PlantaoAtivo) : null;
 }
 
 /**
@@ -555,7 +688,7 @@ export async function distributeOne(
   {
     const r = await db
       .from("departments")
-      .select("rodizio_offline, dividir_igualmente")
+      .select("rodizio_offline, dividir_igualmente, sla_so_online")
       .eq("id", args.deptId)
       .maybeSingle();
     if (r.error) {
@@ -601,7 +734,77 @@ export async function distributeOne(
   // ⚠️ A exclusão é aplicada DEPOIS da regra de presença, não antes: tirar a
   // pessoa do pool cedo mudaria o tamanho de `pool` e, com ele, o resultado do
   // `cursor % list.length` — o rodízio pularia gente ao devolver uma conversa.
-  const list = semExcluidos(alwaysAll ? pool : online);
+  /*
+   * 🔴 **`alwaysAll` usa os ELEGÍVEIS, não o pool cru.**
+   *
+   * Era `pool`, e isso incluía quem tinha marcado "Ausente": o setor que ligasse
+   * "distribuir mesmo para quem está offline" perdia junto o respeito ao botão
+   * de ausência — sem nada dizendo isso. Presença e ausência nunca foram a mesma
+   * coisa: uma é observada, a outra é declarada. Ver `elegiveisOrdered`.
+   */
+  const porCotaAntes = dep?.dividir_igualmente === true;
+  /*
+   * ⚠️ Os ELEGÍVEIS (pool menos ausentes) são lidos também quando o setor NÃO
+   * distribui para offline: a cota precisa deles no denominador, senão a fatia
+   * de quem marcou "Ausente" fica reservada e o lead espera por quem declarou
+   * que não está disponível.
+   */
+  const elegiveis =
+    alwaysAll || porCotaAntes ? await elegiveisOrdered(db, args.locationId, pool) : online;
+  const list = semExcluidos(alwaysAll ? elegiveis : online);
+
+  /*
+   * 🔴 **PLANTÃO tem prioridade sobre a distribuição normal** (itens 6 e 7).
+   *
+   * Vem DEPOIS de resolver presença e ausência porque as duas decidem o destino
+   * dele também: plantonista offline recebe e o lead vai para Pendentes;
+   * plantonista AUSENTE não recebe, e aí vale a contingência configurada.
+   */
+  const plantao = await plantaoAtivo(db, args.deptId);
+  if (plantao && !args.excluir?.includes(plantao.user_id)) {
+    const ausente = !elegiveis.includes(plantao.user_id);
+    const noPool = pool.includes(plantao.user_id);
+    if (!noPool) {
+      /*
+       * ⚠️ Plantonista fora do pool do setor NÃO recebe. Ele provavelmente nem
+       * enxergaria a conversa (a RLS é por número/departamento), e entregar a
+       * quem não vê é pior que não entregar: some da fila e ninguém atende.
+       */
+      console.warn(
+        `[rodizio] plantão ${plantao.id}: ${plantao.user_id} não está no pool do setor ${args.deptId} — usando a distribuição normal`,
+      );
+    } else if (ausente && plantao.se_ausente === "fila") {
+      // Contingência "fila": o lead espera, visível a todos, em vez de cair em
+      // quem declarou que não está disponível.
+      return null;
+    } else if (!ausente) {
+      const offlinePlantao = !online.includes(plantao.user_id);
+      /*
+       * ⚠️ **O cursor NÃO avança e a carga não conta** (item 9): "os leads
+       * recebidos durante o plantão não devem alterar o equilíbrio da
+       * distribuição normal". Quem marca isso é a coluna `plantao_id` — texto
+       * em `assign_reason` não serve de chave de decisão, e este repositório já
+       * pagou por isso.
+       */
+      await assignLeadTo(
+        db,
+        {
+          conversationId: args.conversationId,
+          contactId: args.contactId,
+          locationId: args.locationId,
+          pipelineName: args.pipelineName,
+          reason: `plantão${offlinePlantao ? " (estava offline — foi para Pendentes)" : ""}`,
+          donoAnterior: args.donoAnterior,
+          plantaoId: plantao.id,
+        },
+        plantao.user_id,
+        offlinePlantao,
+      );
+      return plantao.user_id;
+    }
+    // Ausente + contingência "normal": segue o caminho de sempre, abaixo.
+  }
+
   if (!list.length) return null;
   /*
    * 🔴 **A escolha é por CARGA, não pela vez do cursor.**
@@ -620,7 +823,7 @@ export async function distributeOne(
     const cargas =
       args.cargas ??
       (await recebidosNoDiaPorAtendente(db, args.locationId, args.channelIds ?? [], pool));
-    user = escolherPorCarga(list, cargas, pool, args.filaRestante ?? 1, cursor);
+    user = escolherPorCarga(list, cargas, pool, args.filaRestante ?? 1, cursor, elegiveis);
     if (!user) return null;
     // O mapa acompanha a atribuição: o próximo lead do MESMO tique já vê a carga
     // nova e vai para outra pessoa. Sem isso, dez leads seguidos iriam todos
@@ -756,9 +959,62 @@ export async function distributeDepartment(
       dep = r.data;
     }
   }
-  // Departamento que distribui mesmo offline (0083) usa o pool inteiro.
-  const list = dep?.rodizio_offline === true ? pool : online;
+  /*
+   * 🔴 **Era `pool` cru, e isso entregava lead a quem marcou "Ausente".** Mesmo
+   * defeito que `distributeOne` tinha: ligar "distribuir mesmo para quem está
+   * offline" não pode desligar junto o respeito ao botão de ausência. É a
+   * terceira vez que este arquivo aprende a mesma lição — ao mexer numa regra de
+   * distribuição, **conte os caminhos**: bot, varredura e este botão.
+   */
+  // Os elegíveis (pool menos AUSENTES) servem à lista e ao denominador da cota
+  // — a fatia de quem declarou indisponibilidade não fica reservada.
+  const elegiveis = await elegiveisOrdered(db, locationId, pool);
+  const list = dep?.rodizio_offline === true ? elegiveis : online;
   if (!list.length) return { atribuidas: 0, retidas: convs.length };
+
+  /*
+   * PLANTÃO: no período configurado, 100% dos leads novos vão para o
+   * plantonista, e isso vale também para o botão do Relatório quando ele está
+   * em "Rodízio" — senão um clique espalharia entre os três justamente o que a
+   * escala mandou concentrar num.
+   *
+   * ⚠️ Quando o admin ESCOLHE a pessoa no seletor, a escolha dele vence (o ramo
+   * `paraUsuario` acima já retornou): ali ele está decidindo à mão, e é o mesmo
+   * motivo pelo qual aquele caminho passa por cima de presença e ausência.
+   */
+  const plantao = await plantaoAtivo(db, deptId);
+  if (plantao && pool.includes(plantao.user_id)) {
+    /*
+     * ⚠️ Ausente é perguntado DIRETO, e não deduzido de `list`: quando o setor
+     * não distribui para offline, `list` é só quem está online — e "não está na
+     * lista" ali significa offline, não ausente. Confundir os dois é exatamente
+     * o que esta regra veio separar.
+     */
+    const ausente = !elegiveis.includes(plantao.user_id);
+    if (!ausente) {
+      const take = Math.min(convs.length, Math.max(1, Math.ceil(convs.length * fraction)));
+      const offlinePlantao = !online.includes(plantao.user_id);
+      for (let i = 0; i < take; i++) {
+        await assignLeadTo(
+          db,
+          {
+            conversationId: convs[i].id,
+            contactId: convs[i].contact_id,
+            locationId,
+            pipelineName: "Controle de Leads",
+            reason: `plantão${offlinePlantao ? " (estava offline — foi para Pendentes)" : ""}`,
+            plantaoId: plantao.id,
+          },
+          plantao.user_id,
+          offlinePlantao,
+        );
+      }
+      // Cursor não avança: não houve rodízio (item 9 do pedido).
+      return { atribuidas: take, retidas: convs.length - take };
+    }
+    if (plantao.se_ausente === "fila") return { atribuidas: 0, retidas: convs.length };
+    // Ausente + contingência "normal": segue o rodízio abaixo.
+  }
 
   const take = Math.min(convs.length, Math.max(1, Math.ceil(convs.length * fraction)));
   const porCota = dep?.dividir_igualmente === true;
@@ -781,7 +1037,7 @@ export async function distributeDepartment(
        * de um clique de "30%" ela cairia para 9 e o botão pararia cedo demais —
        * a mesma razão pela qual a varredura passa prontas + retidas.
        */
-      user = escolherPorCarga(list, cargas, pool, convs.length - feitas, cursor + feitas);
+      user = escolherPorCarga(list, cargas, pool, convs.length - feitas, cursor + feitas, elegiveis);
       // Ninguém abaixo da cota: o RESTO FICA NA FILA, visível a todos, em vez de
       // ser empurrado para quem já está cheio. "Todos" pode não levar todos.
       if (!user) break;
@@ -871,6 +1127,23 @@ export type LinhaParada = {
    * também não filtra por ela — o comportamento é o de hoje.
    */
   minutos_com_atendente?: number | string | null;
+  /**
+   * O dono está presente e disponível AGORA? (202609112100)
+   *
+   * ⚠️ Opcional pelo mesmo motivo dos anteriores: até a migração ser aplicada
+   * chega `undefined`, e aí a regra do SLA pausado não é aplicada — o
+   * comportamento é o de hoje, em vez de a devolução travar inteira.
+   */
+  dono_online?: boolean | null;
+  /**
+   * Minutos ÚTEIS desde que o prazo COMEÇOU A VALER — `greatest(atribuida_em,
+   * online_desde do dono)`.
+   *
+   * ⚠️ É sempre ≤ `minutos_com_atendente`: o prazo só começa quando o vendedor
+   * fica disponível, então quem recebeu dormindo não perde o lead antes de ter
+   * tido chance de ver.
+   */
+  minutos_de_sla?: number | string | null;
 };
 
 /**
@@ -889,6 +1162,11 @@ export function devolvivel(
   channelIds: string[],
   /** Limite do setor, em minutos úteis. Sem ele, a janela não é conferida aqui. */
   limiteMin?: number,
+  /**
+   * O setor conta o prazo SÓ enquanto o dono está online?
+   * (`departments.sla_so_online`, 202609112100.)
+   */
+  slaSoOnline = false,
 ): boolean {
   // Sem dono não é devolução: é fila, e quem cuida dela é `distribuirFilaDoSetor`.
   // Devolver para a fila quem já está na fila seria um evento por tique, para
@@ -951,6 +1229,31 @@ export function devolvivel(
   if (l.minutos_com_atendente != null && limiteMin != null) {
     const comAtendente = Number(l.minutos_com_atendente);
     if (Number.isFinite(comAtendente) && comAtendente < limiteMin) return false;
+  }
+
+  /*
+   * 🔴 **O PRAZO SÓ CORRE COM O VENDEDOR ONLINE** (item 4 da regra de
+   * 2026-09-11), e é a outra metade do "offline recebe".
+   *
+   * Sem isto, ligar o `rodizio_offline` num setor entregaria o lead à caixa de
+   * Pendentes de quem está dormindo e o tomaria 20 minutos depois — ou seja, o
+   * "continua pertencendo a ele" do pedido viraria mentira, e o lead ficaria
+   * circulando a noite inteira entre três pessoas offline.
+   *
+   * Duas condições, e as duas são necessárias:
+   *   1) dono offline AGORA → o prazo está PARADO, não há o que cobrar;
+   *   2) o prazo (`minutos_de_sla`) conta desde que ele ficou disponível, e não
+   *      desde a atribuição — quem recebeu às 3h da manhã começa a valer às 8h.
+   *
+   * ⚠️ Campo ausente NÃO bloqueia: enquanto a migração não for aplicada, os dois
+   * chegam `undefined` e a regra some, em vez de desligar a devolução inteira.
+   */
+  if (slaSoOnline) {
+    if (l.dono_online === false) return false;
+    if (l.minutos_de_sla != null && limiteMin != null) {
+      const sla = Number(l.minutos_de_sla);
+      if (Number.isFinite(sla) && sla < limiteMin) return false;
+    }
   }
 
   /*
@@ -1037,7 +1340,7 @@ export async function devolverInativas(
   {
     const r = await db
       .from("departments")
-      .select("id, devolver_apos_min, usa_rodizio, devolver_so_com_todos_online")
+      .select("id, devolver_apos_min, usa_rodizio, devolver_so_com_todos_online, sla_so_online")
       .eq("location_id", locationId);
     if (r.error) {
       const semColuna = await db
@@ -1134,7 +1437,7 @@ export async function devolverInativas(
     }
 
     const parados = (linhas ?? []).filter((l: any) =>
-      devolvivel(l, channelIds, limite),
+      devolvivel(l, channelIds, limite, dep.sla_so_online === true),
     );
     if (!parados.length) continue;
 
