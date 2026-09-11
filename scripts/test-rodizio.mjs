@@ -26,6 +26,8 @@ import {
   escolherPorCarga,
   limiteDoTique,
   podeTrocarDonoDoCard,
+  distributeDepartment,
+  inicioDoDiaSP,
   PRESENCE_MS,
 } from "../src/lib/leads/distribution.ts";
 
@@ -869,6 +871,219 @@ eq(
   podeTrocarDonoDoCard(undefined, undefined),
   true,
 );
+
+/* ------------------------------------------------------------------
+   O BOTAO "Distribuir agora" do Relatorio (distributeDepartment)
+
+   🔴 Relato de 2026-09-11: "o Alberto recebeu todos os leads ao logar hoje" —
+   um dia depois de eu ter "resolvido" o mesmo sintoma com o Paulo.
+
+   A correcao de 10/09 (escolherPorCarga) entrou em `distributeOne`, que e o
+   caminho do BOT e o da VARREDURA. Este botao nao passa por la: fazia
+   `list[(cursor + i) % list.length]` direto, e com uma pessoa online o modulo
+   devolve sempre a mesma pessoa. Sao TRES caminhos que atribuem, e eu tinha
+   coberto dois.
+   ------------------------------------------------------------------ */
+console.log("");
+console.log("botao Distribuir agora - a cota vale aqui tambem");
+
+const filaDe = (n) =>
+  Array.from({ length: n }, (_, i) => ({ id: `q${i}`, contact_id: `c${i}` }));
+
+{
+  // Uma pessoa online, 6 na fila, pool de 2 -> cota 3. Antes: ana levava as 6.
+  const st = cenario({});
+  st.departments[0].dividir_igualmente = true;
+  st.location_members[1].last_seen_at = offline;
+  const db = fakeDb(st);
+  const r = await distributeDepartment(db, "loc1", "dep1", filaDe(6), 1, null, ["ch1"]);
+  eq("[real] 1 online, 6 na fila, pool 2 -> a cota segura metade", r, {
+    atribuidas: 3,
+    retidas: 3,
+  });
+  eq("e as 3 foram todas para quem esta online", new Set(db.atribuicoes().map((e) => e.patch.assigned_to)), new Set(["ana"]));
+}
+
+{
+  // O motivo nao pode dizer BOT: foi um clique de administrador. Era o padrao
+  // "atribuida pelo bot (origem nao informada)", e foi o que me obrigou a
+  // deduzir qual caminho despejou os leads.
+  const st = cenario({});
+  st.departments[0].dividir_igualmente = true;
+  const db = fakeDb(st);
+  await distributeDepartment(db, "loc1", "dep1", filaDe(2), 1, null, ["ch1"]);
+  eq(
+    "o motivo diz que veio do relatorio, nao do bot",
+    db.atribuicoes()[0].patch.assign_reason,
+    "distribuição pelo relatório (rodízio)",
+  );
+}
+
+{
+  // Setor SEM dividir_igualmente (a Secretaria) nao muda de comportamento.
+  const st = cenario({});
+  st.departments[0].dividir_igualmente = false;
+  const db = fakeDb(st);
+  const r = await distributeDepartment(db, "loc1", "dep1", filaDe(4), 1, null, ["ch1"]);
+  eq("sem cota no setor -> entrega tudo, como antes", r, { atribuidas: 4, retidas: 0 });
+}
+
+{
+  // "Ausente" pediu para nao receber lead novo. O botao usava `onlineOrdered`,
+  // que olha so a presenca, e entregava a ele assim mesmo.
+  const st = cenario({});
+  st.departments[0].dividir_igualmente = true;
+  st.location_members[1].disponibilidade = "ausente";
+  const db = fakeDb(st);
+  await distributeDepartment(db, "loc1", "dep1", filaDe(4), 1, null, ["ch1"]);
+  eq(
+    "quem esta AUSENTE nao recebe pelo botao",
+    db.atribuicoes().every((e) => e.patch.assigned_to !== "bia"),
+    true,
+  );
+}
+
+{
+  // Escolher a pessoa no seletor e decisao deliberada: passa por cima da cota.
+  const st = cenario({});
+  st.departments[0].dividir_igualmente = true;
+  const db = fakeDb(st);
+  const r = await distributeDepartment(db, "loc1", "dep1", filaDe(6), 1, "bia", ["ch1"]);
+  eq("alvo escolhido pelo admin ignora a cota", r, { atribuidas: 6, retidas: 0 });
+}
+
+/* ------------------------------------------------------------------
+   A METRICA da cota: leads recebidos NO DIA, nao conversas abertas
+
+   🔴 "o Rogerio recebeu muitos e o Paulo foi o unico que nao recebeu" —
+   o Paulo tinha 67 conversas ABERTAS do incidente da fila (medido em 10/09, e a
+   migracao que iria rebalancea-las nao tinha sido aplicada). A cota olhava esse
+   acumulado, via o Paulo muito acima da media e nunca o escolhia, enquanto os
+   outros dois "alcancavam" o numero dele absorvendo a fila.
+   ------------------------------------------------------------------ */
+console.log("");
+console.log("cota por leads do DIA, nao por acervo aberto");
+
+const POOL3 = ["paulo", "alberto", "rogerio"];
+const doDia = (p, a, r) => new Map([["paulo", p], ["alberto", a], ["rogerio", r]]);
+
+eq(
+  "[real] o acervo do Paulo (67) contra o dia dos outros -> ele NUNCA entra",
+  escolherPorCarga(POOL3, doDia(67, 10, 15), POOL3, 10, 0),
+  "alberto",
+);
+eq(
+  "[real] medindo o DIA (todos zerados menos os que ja receberam) -> vai pro Paulo",
+  escolherPorCarga(POOL3, doDia(0, 20, 15), POOL3, 10, 0),
+  "paulo",
+);
+eq(
+  "quem ja recebeu a cota do dia nao recebe mais",
+  escolherPorCarga(["alberto"], doDia(0, 20, 15), POOL3, 10, 0),
+  null,
+);
+eq(
+  "manha com 90 na fila e todos zerados -> a cota e 30, a regra original",
+  cotaPorAtendente([0, 0, 0], 90, 3),
+  30,
+);
+
+/* ⚠️ A Vercel roda em UTC: as 21h de Brasilia o servidor ja esta no dia
+   seguinte, e um corte por hora local jogaria fora as atribuicoes da noite —
+   justamente as do turno que gerou esta queixa. */
+eq(
+  "21h de Brasilia (00h UTC do dia seguinte) ainda e o dia de ontem em SP",
+  inicioDoDiaSP(new Date("2026-09-11T00:30:00Z")),
+  "2026-09-10T00:00:00-03:00",
+);
+eq(
+  "meio-dia UTC cai no mesmo dia",
+  inicioDoDiaSP(new Date("2026-09-11T12:00:00Z")),
+  "2026-09-11T00:00:00-03:00",
+);
+
+/* ------------------------------------------------------------------
+   A REGRA, dita pelo Gabriel em 2026-09-11:
+
+     "Caiu 100 leads: 33,33% para o Paulo, 33,33% para o Alberto, 33,33% para o
+      Rogerio. Os leads do time de vendas tem que ser divididos de maneira
+      igualitaria entre os 3."
+
+   🔴 O que quebrava isso NAO era quem escolhe — era o TOTAL que a conta divide.
+   Os chamadores passavam a fila INICIAL e incrementavam o mapa de cargas, entao
+   `soma(cargas) + fila` crescia 1 por entrega e a cota subia junto. Com 100 na
+   fila e um vendedor online, a cota nunca alcancava ele: levava os 100.
+   ------------------------------------------------------------------ */
+console.log("");
+console.log("100 leads divididos entre 3 - a regra do Gabriel");
+
+function timeDeVendas(onlineDe) {
+  const st = cenario({});
+  st.departments[0].dividir_igualmente = true;
+  st.location_members = ["paulo", "alberto", "rogerio"].map((u) => ({
+    location_id: "loc1",
+    user_id: u,
+    department_id: "dep1",
+    last_seen_at: onlineDe.includes(u) ? online : offline,
+  }));
+  return st;
+}
+const contarPorPessoa = (db) => {
+  const c = {};
+  for (const e of db.atribuicoes()) c[e.patch.assigned_to] = (c[e.patch.assigned_to] ?? 0) + 1;
+  return c;
+};
+
+{
+  // Os tres online: 100 leads saem 34/33/33 — a divisao inteira de 100 por 3.
+  const db = fakeDb(timeDeVendas(["paulo", "alberto", "rogerio"]));
+  const r = await distributeDepartment(db, "loc1", "dep1", filaDe(100), 1, null, ["ch1"]);
+  const por = contarPorPessoa(db);
+  const qtds = Object.values(por).sort((a, b) => b - a);
+  eq("[regra] 100 leads e 3 online -> 34/33/33", qtds, [34, 33, 33]);
+  eq("[regra] os 100 sairam", r.atribuidas, 100);
+  eq("[regra] ninguem ficou de fora do rateio", Object.keys(por).length, 3);
+}
+
+{
+  /* 🔴 O caso dos dois incidentes: UM vendedor logado de manhã.
+     Ele leva a fatia DELE (34) e as outras 66 esperam os donos — em vez de
+     "o Alberto recebeu todos os leads ao logar hoje". */
+  const db = fakeDb(timeDeVendas(["alberto"]));
+  const r = await distributeDepartment(db, "loc1", "dep1", filaDe(100), 1, null, ["ch1"]);
+  eq("[real] so o Alberto online -> ele leva 34, e 66 esperam", r, {
+    atribuidas: 34,
+    retidas: 66,
+  });
+  eq("[real] e todas as 34 foram para ele", contarPorPessoa(db), { alberto: 34 });
+}
+
+{
+  // Dois online: cada um pega a sua fatia; a do ausente do dia continua guardada.
+  const db = fakeDb(timeDeVendas(["alberto", "rogerio"]));
+  const r = await distributeDepartment(db, "loc1", "dep1", filaDe(99), 1, null, ["ch1"]);
+  eq("2 de 3 online, 99 na fila -> 33 cada, 33 guardados", r, {
+    atribuidas: 66,
+    retidas: 33,
+  });
+  eq("e os dois receberam igual", Object.values(contarPorPessoa(db)).sort(), [33, 33]);
+}
+
+{
+  /* Quem JA recebeu a fatia do dia nao recebe de novo — e a recíproca, que é o
+     relato do Paulo: quem esta zerado no dia recebe primeiro, mesmo tendo um
+     acervo antigo enorme. A carga aqui e "recebidos hoje", nao conversas abertas. */
+  const st = timeDeVendas(["paulo", "alberto", "rogerio"]);
+  st.conversations = [];
+  const db = fakeDb(st);
+  // Simula 20 ja entregues hoje ao Alberto, mexendo no mapa que a funcao le do
+  // banco nao da — entao vai pelo caminho puro, que e onde a regra mora.
+  eq(
+    "[real] Paulo zerado no dia entra na frente de quem ja recebeu 20",
+    escolherPorCarga(POOL3, doDia(0, 20, 20), POOL3, 60, 0),
+    "paulo",
+  );
+}
 
 console.log(`\n${ok} assercoes ok, ${falhas} falha(s)\n`);
 process.exit(falhas ? 1 : 0);

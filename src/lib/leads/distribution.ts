@@ -135,20 +135,52 @@ export async function disponiveisOrdered(
 }
 
 /**
- * Quantas conversas ABERTAS cada um do pool tem nos números deste setor.
+ * Início do dia de HOJE no relógio de São Paulo, como instante ISO.
  *
- * ⚠️ É esta a "carga" que a cota divide. Conversa aberta (não finalizada, não
- * arquivada) é o trabalho que a pessoa tem na mão — e é por isso que quem
- * acumula atendimento em aberto passa a receber menos lead novo, que é o
- * significado de "dividir igualmente" quando as pessoas não chegam juntas.
+ * ⚠️ A Vercel roda em UTC: às 21h de Brasília o servidor já está no dia
+ * seguinte, e um corte por `new Date().setHours(0,0,0,0)` jogaria fora as
+ * atribuições da noite — justamente as do turno que gerou esta queixa. Mesmo
+ * cuidado de `private.business_minutes` (0079) e das janelas de resposta
+ * automática.
+ *
+ * ⚠️ O offset é fixo em -03:00: o Brasil não tem horário de verão desde 2019. Se
+ * ele voltar, esta linha erra por uma hora em dois dias do ano — e aí o certo é
+ * derivar o offset das partes do `Intl`, não somar uma hora à mão.
+ */
+export function inicioDoDiaSP(agora: Date = new Date()): string {
+  const dia = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(agora);
+  return `${dia}T00:00:00-03:00`;
+}
+
+/**
+ * Quantos leads cada um do pool JÁ RECEBEU HOJE nos números deste setor.
+ *
+ * 🔴 **Media conversas ABERTAS acumuladas, e isso starvava um vendedor.**
+ * Relato de 2026-09-11: *"o Rogerio recebeu muitos e o Paulo foi o único que não
+ * recebeu"*. Não era defeito de presença nem de pool — era a métrica.
+ *
+ * Em 10/09 o Paulo tinha **67 conversas abertas** (medido) por causa do
+ * incidente da fila; a migração que iria rebalanceá-las (`202609102300`) ainda
+ * não tinha sido aplicada, então elas continuavam com ele. A cota olhava esse
+ * acumulado, via o Paulo MUITO acima da média e nunca o escolhia — enquanto
+ * Alberto e Rogério "alcançavam" o número dele absorvendo a fila inteira.
+ *
+ * ⚠️ **A regra do Gabriel é sobre os LEADS, não sobre o acervo:** *"distribuir
+ * igualmente os leads para todos os vendedores"*. Quem recebeu 30 hoje e fechou
+ * os 30 recebeu 30 — fechar rápido não pode render mais lead, e um backlog
+ * histórico não pode render zero. Por isso a contagem é por `atribuida_em` no
+ * DIA, e NÃO filtra `closed_at`/`archived_at`.
+ *
+ * ⚠️ E a cota do dia continua atendendo a regra original: com 90 na fila de
+ * manhã e todos zerados no dia, a conta dá 30 para cada um, que é literalmente o
+ * exemplo que ele deu.
  *
  * ⚠️ Uma consulta por SETOR, não por lead: a varredura chama `distributeOne` num
  * laço, e recontar a cada lead seria uma ida ao banco por conversa da fila. O
  * mapa é passado adiante e incrementado a cada atribuição — sem isso, dez leads
- * no mesmo tique iriam todos para a mesma pessoa, porque a carga dela só mudaria
- * na próxima leitura.
+ * no mesmo tique iriam todos para a mesma pessoa.
  */
-export async function cargaPorAtendente(
+export async function recebidosNoDiaPorAtendente(
   db: any,
   locationId: string,
   channelIds: string[],
@@ -156,15 +188,29 @@ export async function cargaPorAtendente(
 ): Promise<Map<string, number>> {
   const cargas = new Map<string, number>(pool.map((u) => [u, 0]));
   if (!pool.length || !channelIds.length) return cargas;
-  const { data } = await db
-    .from("conversations")
-    .select("assigned_to")
-    .eq("location_id", locationId)
-    .in("channel_id", channelIds)
-    .in("assigned_to", pool)
-    .is("closed_at", null)
-    .is("archived_at", null);
-  for (const c of data ?? []) {
+  const desde = inicioDoDiaSP();
+  const base = () =>
+    db
+      .from("conversations")
+      .select("assigned_to")
+      .eq("location_id", locationId)
+      .in("channel_id", channelIds)
+      .in("assigned_to", pool);
+  /*
+   * ⚠️ Tolera `atribuida_em` (202609101830) não existir: sem o fallback, a
+   * consulta inteira seria recusada pelo PostgREST e TODAS as cargas voltariam
+   * zero — o que faria a cota liberar geral e reabrir o despejo. O fallback é a
+   * métrica antiga (abertas), que é pior mas não é catastrófica.
+   */
+  let linhas: any[] | null = null;
+  const r = await base().gte("atribuida_em", desde);
+  if (r.error) {
+    const antigo = await base().is("closed_at", null).is("archived_at", null);
+    linhas = (antigo.data as any[]) ?? null;
+  } else {
+    linhas = (r.data as any[]) ?? null;
+  }
+  for (const c of linhas ?? []) {
     const u = (c as any).assigned_to as string | null;
     if (u) cargas.set(u, (cargas.get(u) ?? 0) + 1);
   }
@@ -192,10 +238,26 @@ export async function cargaPorAtendente(
  * Estável por construção: à medida que a carga sobe, a fila cai, e a cota se
  * mantém — foi conferido no caso dos 90 (30 exatos por pessoa).
  */
-export function cotaPorAtendente(cargas: number[], fila: number, tamanhoDoPool: number): number {
+export function cotaPorAtendente(
+  cargas: number[],
+  /**
+   * 🔴 **Quantos ainda ESPERAM — e o "ainda" é a correção de 2026-09-11.**
+   *
+   * `soma(cargas) + filaRestante` tem de ser CONSTANTE ao longo de um lote: cada
+   * entrega soma 1 numa carga e tira 1 da fila. Os chamadores passavam a fila
+   * INICIAL e incrementavam o mapa de cargas — então o total crescia 1 por
+   * entrega e **a cota subia junto**. Com pool 2 e 6 esperando ela ia de 3 a 6, e
+   * a única pessoa online levava a fila inteira; com pool 3 e 100, ela nunca
+   * parava. Foi a causa dos dois incidentes ("o Paulo recebeu 90", "o Alberto
+   * recebeu todos") — e sobreviveu à primeira correção porque eu mexi em QUEM
+   * escolhe, não no total que a conta divide.
+   */
+  filaRestante: number,
+  tamanhoDoPool: number,
+): number {
   if (tamanhoDoPool <= 0) return 0;
   const soma = cargas.reduce((a, c) => a + (Number.isFinite(c) ? c : 0), 0);
-  return Math.ceil((soma + Math.max(fila, 0)) / tamanhoDoPool);
+  return Math.ceil((soma + Math.max(filaRestante, 0)) / tamanhoDoPool);
 }
 
 /**
@@ -218,12 +280,16 @@ export function escolherPorCarga(
   disponiveis: string[],
   cargas: Map<string, number>,
   poolInteiro: string[],
-  fila: number,
+  /**
+   * ⚠️ Quantos ainda ESPERAM neste momento — decresce a cada entrega do lote.
+   * Passar a fila inicial infla a cota a cada volta; ver `cotaPorAtendente`.
+   */
+  filaRestante: number,
   cursor: number,
 ): string | null {
   if (!disponiveis.length || !poolInteiro.length) return null;
   const carga = (u: string) => cargas.get(u) ?? 0;
-  const cota = cotaPorAtendente(poolInteiro.map(carga), fila, poolInteiro.length);
+  const cota = cotaPorAtendente(poolInteiro.map(carga), filaRestante, poolInteiro.length);
   const cabem = disponiveis.filter((u) => carga(u) < cota);
   if (!cabem.length) return null;
   const menor = Math.min(...cabem.map(carga));
@@ -454,8 +520,14 @@ export async function distributeOne(
      * carga sozinho (caminho do bot, um lead por vez).
      */
     cargas?: Map<string, number>;
-    /** Quantos leads estão esperando agora. Entra na cota; padrão 1. */
-    fila?: number;
+    /**
+     * Quantos leads ainda ESPERAM neste instante (este inclusive). Entra na
+     * cota; padrão 1.
+     *
+     * ⚠️ Quem chama num laço tem de DECREMENTAR a cada entrega — a fila inicial
+     * repetida infla a cota e devolve o despejo. Ver `cotaPorAtendente`.
+     */
+    filaRestante?: number;
     /** Números do setor, para medir a carga. Sem eles, a carga é lida do zero. */
     channelIds?: string[];
     /**
@@ -547,8 +619,8 @@ export async function distributeOne(
   if (porCota) {
     const cargas =
       args.cargas ??
-      (await cargaPorAtendente(db, args.locationId, args.channelIds ?? [], pool));
-    user = escolherPorCarga(list, cargas, pool, args.fila ?? 1, cursor);
+      (await recebidosNoDiaPorAtendente(db, args.locationId, args.channelIds ?? [], pool));
+    user = escolherPorCarga(list, cargas, pool, args.filaRestante ?? 1, cursor);
     if (!user) return null;
     // O mapa acompanha a atribuição: o próximo lead do MESMO tique já vê a carga
     // nova e vai para outra pessoa. Sem isso, dez leads seguidos iriam todos
@@ -577,8 +649,28 @@ export async function distributeOne(
 }
 
 /**
- * Distribui uma fração dos leads "aguardando" de um departamento entre os online,
- * em rodízio. `fraction` 1 = todos; 0.3 = 30%. Retorna quantos foram atribuídos.
+ * Distribui uma fração dos leads "aguardando" de um departamento. `fraction`
+ * 1 = todos; 0.3 = 30%.
+ *
+ * 🔴 **Esta função IGNORAVA a cota, e era um despejo à espera de acontecer.**
+ * Relato de 2026-09-11: *"o Alberto recebeu todos os leads ao logar hoje"* —
+ * mesmo sintoma do Paulo em 10/09, um dia depois de eu ter "resolvido" aquilo.
+ *
+ * A correção de 10/09 (`escolherPorCarga`) entrou em `distributeOne`, que é o
+ * caminho do BOT e o da VARREDURA de minuto. O botão "Distribuir agora" do
+ * Relatório não passa por lá: ele fazia `list[(cursor + i) % list.length]`
+ * direto. Com uma pessoa online, `list.length` é 1 e o módulo devolve sempre a
+ * mesma pessoa — o cursor gira sobre uma lista de um. **É exatamente o defeito
+ * que a cota foi escrita para fechar, sobrevivendo no caminho que eu não
+ * cobri.** E o botão lê até MIL pendentes de uma vez.
+ *
+ * ⚠️ A lição, que já é a terceira vez neste arquivo: ao consertar uma regra de
+ * distribuição, **conte os caminhos que atribuem** antes de dar por fechado.
+ * São três — bot, varredura e este botão —, e é sempre o não coberto que morde.
+ *
+ * Devolve `{ atribuidas, retidas }`: com a cota, "Todos" pode legitimamente não
+ * levar todos, e um número só não distingue "não havia fila" de "a cota segurou
+ * o resto até os outros logarem".
  */
 export async function distributeDepartment(
   db: any,
@@ -601,12 +693,20 @@ export async function distributeDepartment(
    * distribuir. Quem chama soma os zeros e avisa na tela.
    */
   paraUsuario?: string | null,
-): Promise<number> {
-  if (!convs.length) return 0;
+  /** Números do setor — sem eles não dá para medir a carga de cada atendente. */
+  channelIds?: string[],
+): Promise<{ atribuidas: number; retidas: number }> {
+  if (!convs.length) return { atribuidas: 0, retidas: 0 };
   const { pool, cursor } = await departmentPool(db, locationId, deptId);
-  const online = await onlineOrdered(db, locationId, pool);
+  /*
+   * 🔴 Era `onlineOrdered`, que olha só a PRESENÇA — então o botão entregava
+   * lead novo a quem marcou "Ausente" na barra superior, que é literalmente a
+   * pessoa que pediu para não receber (202609101100). `distributeOne` usa
+   * `disponiveisOrdered` desde aquele dia; este caminho ficou para trás.
+   */
+  const online = await disponiveisOrdered(db, locationId, pool);
   if (paraUsuario) {
-    if (!pool.includes(paraUsuario)) return 0;
+    if (!pool.includes(paraUsuario)) return { atribuidas: 0, retidas: convs.length };
     const take = Math.min(convs.length, Math.max(1, Math.ceil(convs.length * fraction)));
     for (let i = 0; i < take; i++) {
       await assignLeadTo(
@@ -624,22 +724,71 @@ export async function distributeDepartment(
     }
     // ⚠️ O cursor NÃO avança: não houve rodízio. Avançá-lo puniria a próxima
     // pessoa da vez por uma entrega que ela não recebeu.
-    return take;
+    /*
+     * ⚠️ **A cota NÃO se aplica aqui, de propósito.** Escolher a pessoa no
+     * seletor é decisão deliberada de administrador, e ela já passa por cima da
+     * presença e do status "Ausente" pelo mesmo motivo: um botão que recusa em
+     * silêncio a escolha de quem clicou é pior que não ter o botão.
+     */
+    return { atribuidas: take, retidas: convs.length - take };
   }
-  // Departamento que distribui mesmo offline (0083) usa o pool inteiro; senão,
-  // só os online (e não distribui nada se ninguém online).
-  const { data: dep } = await db
-    .from("departments")
-    .select("rodizio_offline")
-    .eq("id", deptId)
-    .maybeSingle();
+  /*
+   * ⚠️ Tolera `dividir_igualmente` não existir — mesmo cuidado de
+   * `distributeOne`: o código chega à produção ANTES da migração, e pedir coluna
+   * inexistente faz o PostgREST recusar a consulta INTEIRA, o que aqui derrubaria
+   * o botão inteiro em vez de apenas ignorar a cota.
+   */
+  let dep: any = null;
+  {
+    const r = await db
+      .from("departments")
+      .select("rodizio_offline, dividir_igualmente")
+      .eq("id", deptId)
+      .maybeSingle();
+    if (r.error) {
+      const semColuna = await db
+        .from("departments")
+        .select("rodizio_offline")
+        .eq("id", deptId)
+        .maybeSingle();
+      dep = semColuna.data;
+    } else {
+      dep = r.data;
+    }
+  }
+  // Departamento que distribui mesmo offline (0083) usa o pool inteiro.
   const list = dep?.rodizio_offline === true ? pool : online;
-  if (!list.length) return 0;
+  if (!list.length) return { atribuidas: 0, retidas: convs.length };
 
   const take = Math.min(convs.length, Math.max(1, Math.ceil(convs.length * fraction)));
+  const porCota = dep?.dividir_igualmente === true;
+  /*
+   * ⚠️ Lida UMA vez e mutada a cada entrega — o mesmo mapa compartilhado de
+   * `distribuirFilaDoSetor`. Sem incrementar, os até MIL leads deste clique
+   * veriam todos a mesma carga inicial e iriam para a mesma pessoa.
+   */
+  const cargas = porCota
+    ? await recebidosNoDiaPorAtendente(db, locationId, channelIds ?? [], pool)
+    : null;
+  let feitas = 0;
   for (let i = 0; i < take; i++) {
     const conv = convs[i];
-    const user = list[(cursor + i) % list.length];
+    let user: string | null;
+    if (porCota && cargas) {
+      /*
+       * ⚠️ A `fila` da cota é a fila INTEIRA (`convs.length`), não o `take`. Com
+       * 90 esperando e três vendedores a cota é 30 por pessoa; medindo só os 27
+       * de um clique de "30%" ela cairia para 9 e o botão pararia cedo demais —
+       * a mesma razão pela qual a varredura passa prontas + retidas.
+       */
+      user = escolherPorCarga(list, cargas, pool, convs.length - feitas, cursor + feitas);
+      // Ninguém abaixo da cota: o RESTO FICA NA FILA, visível a todos, em vez de
+      // ser empurrado para quem já está cheio. "Todos" pode não levar todos.
+      if (!user) break;
+      cargas.set(user, (cargas.get(user) ?? 0) + 1);
+    } else {
+      user = list[(cursor + feitas) % list.length];
+    }
     await assignLeadTo(
       db,
       {
@@ -647,13 +796,24 @@ export async function distributeDepartment(
         contactId: conv.contact_id,
         locationId,
         pipelineName: "Controle de Leads",
+        /*
+         * 🔴 **O motivo MENTIA.** Sem `reason`, `assignLeadTo` grava o padrão
+         * "atribuída pelo bot (origem não informada)" — e o fio dizia BOT numa
+         * atribuição que veio de um clique de administrador. Foi essa lacuna que
+         * me obrigou a DEDUZIR, em vez de ler, qual caminho despejou os leads no
+         * Alberto. Mesma armadilha do padrão "rodízio do bot" em 02/09.
+         */
+        reason: "distribuição pelo relatório (rodízio)",
       },
       user,
       !online.includes(user),
     );
+    feitas++;
   }
-  await db.from("departments").update({ rr_cursor: cursor + take }).eq("id", deptId);
-  return take;
+  // ⚠️ Avança pelo que REALMENTE foi entregue, não pelo `take`: parando na cota,
+  // somar o `take` puniria quem nunca recebeu.
+  await db.from("departments").update({ rr_cursor: cursor + feitas }).eq("id", deptId);
+  return { atribuidas: feitas, retidas: convs.length - feitas };
 }
 
 export { statusForStageName };
@@ -1334,7 +1494,7 @@ export async function distribuirFilaDoSetor(
      * pararia cedo demais.
      */
     const { pool: poolDoSetor } = await departmentPool(db, locationId, dep.id);
-    const cargas = await cargaPorAtendente(db, locationId, channelIds, poolDoSetor);
+    const cargas = await recebidosNoDiaPorAtendente(db, locationId, channelIds, poolDoSetor);
     const filaTotal = prontas.length + retidas;
     for (const conv of aEntregar) {
       const user = await distributeOne(db, {
@@ -1345,7 +1505,9 @@ export async function distribuirFilaDoSetor(
         pipelineName: "Controle de Leads",
         reason: "varredura da fila do setor",
         cargas,
-        fila: filaTotal,
+        // 🔴 DECRESCE. Com `filaTotal` fixo aqui, cada entrega inflava a cota em
+        // 1/pool e a pessoa online nunca batia no teto — o despejo de 10 e 11/09.
+        filaRestante: filaTotal - feitasAqui,
         channelIds,
       });
       if (user) {

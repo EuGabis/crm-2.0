@@ -50,6 +50,12 @@ export async function POST(request: Request) {
 
   const { data: deps } = await db.from("departments").select("id").eq("location_id", locationId);
   let distributed = 0;
+  /*
+   * ⚠️ Quantos ficaram na fila por CAUSA DA COTA. Sem este número, "Todos"
+   * entregando 12 de 40 pareceria defeito do botão — e a conduta é o oposto:
+   * a cota está segurando o resto para quem ainda vai logar.
+   */
+  let retidasPelaCota = 0;
   for (const dep of deps ?? []) {
     const { data: dcs } = await db
       .from("department_channels")
@@ -75,14 +81,19 @@ export async function POST(request: Request) {
     const { prontas } = await filaProntaDoSetor(db, locationId, channelIds, 1000);
     if (!prontas.length) continue;
 
-    distributed += await distributeDepartment(
+    const r = await distributeDepartment(
       db,
       locationId,
       dep.id,
       prontas,
       fraction,
       paraUsuario,
+      // Sem os números do setor não dá para medir a carga de cada atendente, e
+      // a cota cairia de volta no despejo que ela existe para impedir.
+      channelIds,
     );
+    distributed += r.atribuidas;
+    retidasPelaCota += r.retidas;
   }
 
   /*
@@ -92,6 +103,7 @@ export async function POST(request: Request) {
    */
   return Response.json({
     distributed,
+    retidas: retidasPelaCota,
     alvoForaDoPool: !!paraUsuario && distributed === 0,
   });
 }
