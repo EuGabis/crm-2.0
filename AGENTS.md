@@ -7485,3 +7485,42 @@ select atendente, motivo, count(*)
   from public.log_do_bot('<location_id>', 2)
  group by 1, 2 order by 3 desc;
 ```
+
+### O log em TRÊS GRADES — e o corte de mil linhas que ele levou (2026-09-11)
+
+Primeiro uso em produção, e o print trouxe as duas coisas de uma vez.
+
+**Pedido:** *"na tela do log do bot só aparece o Paulo — deixe 3 grades, do
+Paulo, Alberto e Rogerio."* Estava certo: os grupos eram desenhados um EMBAIXO
+do outro, e com o Paulo em 258 leads o Alberto e o Rogério ficavam fora da tela.
+Comparar o rateio — a razão de existir do log — exigia rolar centenas de linhas e
+memorizar números.
+
+Agora é `lg:grid-cols-3` e **cada grade rola POR DENTRO** (`max-h` +
+`overflow-auto`), então as três ficam visíveis ao mesmo tempo em qualquer altura
+de janela. Fluxo e número saíram da linha e viraram resumo do cabeçalho: numa
+coluna de um terço da tela não cabem sete colunas, e esses dois se repetem em
+quase toda linha do mesmo atendente. Havendo mais de um, o cabeçalho diz QUANTOS
+em vez de escolher um e mentir.
+
+⚠️ **O filtro para isolar o time é o NÚMERO do CRM, não o nome das pessoas.**
+"Paulo, Alberto e Rogério" é o time de hoje; o número é o vínculo real e continua
+certo quando alguém entra ou sai. Casar por nome já confundiu setor mais de uma
+vez neste projeto.
+
+### 🔴 "805 atribuídos de 1000" — o 1000 não era total, era o TETO
+
+O mesmo print mostrou o número redondo, e ele é a **armadilha nº 7**: o PostgREST
+corta em 1000 linhas **sem erro e sem aviso**. A tela estava dividindo um dia com
+mais de mil leads como se fossem mil — ou seja, **as porcentagens do rateio
+estavam erradas**, na tela criada justamente para auditar o rateio.
+
+A rota passou a **paginar com `.range()`** até a página incompleta. Teto de
+segurança de 10 páginas, e quando ele morde a tela **diz** (`truncado`) em vez de
+mostrar um número redondo com cara de total. Mesma regra na grade: acima de
+`MAX_LINHAS` o card escreve "mostrando os 300 mais recentes de 800".
+
+⚠️ Vale como lembrete geral: **todo número redondo — 1000, 100, 50 — num total
+vindo do PostgREST é suspeito até prova em contrário.** Foi um total redondo que
+denunciou este, e foi um total redondo que denunciou o defeito dos contatos em
+2026.
