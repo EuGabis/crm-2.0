@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ChannelIcon } from "@/components/shared/channel-icon";
+import { ContactConversations } from "@/components/contacts/contact-conversations";
 import { CustomFieldsInputs } from "@/components/contacts/custom-fields-inputs";
 import { TagBadges } from "@/components/contacts/tag-badges";
 import { contactName } from "@/lib/data/repos/contacts";
@@ -376,6 +377,10 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
             </ul>
           )}
         </div>
+      </div>
+
+      <div className="mt-4">
+        <ContactConversations contactId={contact.id} contatoNome={contactName(contact)} />
       </div>
 
       <div className="mt-4">

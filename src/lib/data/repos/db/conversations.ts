@@ -138,7 +138,7 @@ function contatoDoJoin(r: any) {
   };
 }
 
-const mapMessage = (r: any): Message => ({
+export const mapMessage = (r: any): Message => ({
   id: r.id,
   conversationId: r.conversation_id,
   direction: r.direction,

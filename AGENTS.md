@@ -7563,3 +7563,86 @@ tomando essa decisão.
   de lead do calendário.
 - "Sem proprietário (do grupo)" continua sendo opção: era o comportamento
   anterior quando a conversa estava no bot ou na fila.
+
+## "Visualizar conversa" na tela do contato (2026-09-11, sem migração)
+
+Pedido: ver o atendimento a partir do CONTATO, com as conversas separadas
+quando houver mais de uma — *"Visualizar conversa com a Cibelle" × "com o Daniel,
+que foi uma conversa que ele teve com a secretaria"*.
+
+**A separação é a conversa, e a conversa aqui é `contato + número`** — medido:
+158 contatos têm mais de uma, e em **todos os 158** a quantidade de conversas é
+igual à de números distintos. Não houve o que inventar de agrupamento.
+
+### 🔴 O rótulo sai de quem ESCREVEU, não do responsável
+
+A leitura natural do pedido é `assigned_to`. A medida diz que não:
+
+| | |
+|---|---|
+| conversas **sem responsável** | **1.706 de 2.571 (66%)** |
+| saídas humanas **com autor** (setembro) | **6.039 de 6.039 (100%)** |
+| idem, agosto | 2.408 de 3.314 (73%) |
+
+Rotular pelo responsável deixaria dois terços como "com ninguém". E o
+responsável de hoje não é quem atendeu: no caso que originou o pedido o Alberto
+atendeu e transferiu para a Cibelle — pelos autores das mensagens **as duas**
+aparecem, que é o que a pessoa quer ler.
+
+A cascata do rótulo, com um fato diferente em cada degrau: participantes →
+"atendida (autor não registrado)" (o histórico de agosto, que não dá para
+adivinhar) → **"só o bot respondeu"** → responsável → "sem atendente".
+
+⚠️ **"Só o bot respondeu" NÃO é "ninguém respondeu"**, e é a mesma distinção que
+a aba de SLA já faz: o auto-responder responde em segundos, então juntar os dois
+esconde exatamente a conversa que ficou sem gente. Conferido: as duas conversas
+de "Lito Academy Vendas" do contato de teste têm 6 e 12 saídas, **todas do bot**.
+
+### É LEITURA — e por isso o balão é próprio
+
+Responder, transferir, finalizar, editar e apagar continuam só na caixa de
+entrada. ⚠️ Reusar o `MessageBubble` do inbox traria responder/editar/apagar
+junto, e o botão de responder escreve na store do composer de uma conversa que
+nem está aberta.
+
+⚠️ Mas **mídia e evento são as peças do inbox** (`MediaContent`, `LegendaMidia`,
+`PipelineEvent`, agora exportados de `thread.tsx`): duas renderizações de
+imagem, áudio e arquivo divergiriam na primeira mudança — e a do inbox já
+resolve URL assinada, player com velocidade e transcrição.
+
+O que o balão daqui tem a mais é o **NOME de quem enviou**. No inbox ele é
+dispensável (você está dentro da conversa); aqui o fio passa por várias mãos e
+sem o nome ele não diz quem falou o quê — é o que o CRM antigo mostrava como
+"Alberto Oliveira: ...".
+
+### Consulta própria, e por que ela cabe
+
+Mesma decisão de `db/notes.ts`: o `load()` da caixa traz as 3.000 mensagens mais
+recentes da empresa inteira — caro demais para abrir um contato. Aqui o recorte
+é por contato, e ele é pequeno: **mediana de 17 mensagens, p99 de 112, máximo de
+385** em todo o banco, nenhum contato acima de 500. Por isso as mensagens vêm
+JUNTO da listagem, numa consulta só: o diálogo abre instantâneo, sem segunda ida
+ao servidor.
+
+- ⚠️ **Paginado com `.range()`** mesmo cabendo hoje: o PostgREST corta no "Max
+  rows" (1000) **sem erro e sem aviso**, e fio cortado no meio não se anuncia. A
+  ordem desempata por `id` — gravação em lote deixa várias linhas no mesmo
+  `created_at`, e ordem instável entre páginas repete umas e PULA outras.
+- ⚠️ `ensureSession()` antes da consulta: **sem sessão a RLS devolve zero linhas
+  e nenhum erro**, que é como a conversa aberta em aba nova nascia em branco.
+- O erro do PostgREST vai para a TELA com `code · message`.
+
+⚠️ **Vazio no fio significa vazio MESMO**, e por isso o texto pode afirmar:
+conferido no banco que as policies de SELECT de `conversations` e `messages` têm
+as mesmas condições por conversa — quem vê a conversa vê as mensagens dela. Não
+existe "a lista mostra e o fio esconde". (Conversa sem nenhuma mensagem existe:
+nasce assim em "Nova conversa" e no rodízio.)
+
+"Abrir na caixa" é `<Link>` de verdade (`/conversas?c=<id>`), não botão que
+navega: é o que devolve Ctrl+clique e "abrir em nova guia".
+
+⏳ **Conversa que a RLS esconde simplesmente não é listada** — um atendente pode
+ver "Conversas (1)" num contato que falou por três números, sem nada dizendo que
+há mais. Contar o que não se pode ler exigiria função `security definer`; quem
+precisa ver tudo tem `le_todas_conversas` (202609110930), que nasceu deste mesmo
+pedido.
