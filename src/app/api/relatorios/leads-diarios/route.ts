@@ -1,5 +1,12 @@
 import { createClient } from "@/lib/supabase/server";
 import { canAccess } from "@/lib/auth/module-access";
+import {
+  PERIODO_MAX_DIAS,
+  ajustarPeriodo,
+  diasEntre,
+  ehDiaValido,
+  somaDias,
+} from "@/lib/periodo";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -19,17 +26,16 @@ function diaEm(d: Date): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: FUSO }).format(d);
 }
 
-/** Lista de dias "AAAA-MM-DD" de `de` até `ate`, inclusive. */
+/**
+ * Lista de dias "AAAA-MM-DD" de `de` até `ate`, inclusive.
+ *
+ * O passo é o `somaDias` de `lib/periodo` — a mesma conta que o seletor da tela
+ * usa. Duas implementações de "o dia seguinte" é como nasce um relatório que
+ * discorda do próprio filtro por um dia.
+ */
 function enumerarDias(de: string, ate: string): string[] {
   const out: string[] = [];
-  // Meio-dia UTC para o passo de 24h nunca cair em cima de uma virada de dia
-  // (nem de horário de verão) e pular ou repetir uma data.
-  const cursor = new Date(`${de}T12:00:00Z`);
-  const fim = new Date(`${ate}T12:00:00Z`);
-  while (cursor <= fim) {
-    out.push(cursor.toISOString().slice(0, 10));
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
-  }
+  for (let d = de; d <= ate; d = somaDias(d, 1)) out.push(d);
   return out;
 }
 
@@ -149,17 +155,43 @@ export async function GET(request: Request) {
   }
 
   const url = new URL(request.url);
-  const dias = Math.min(180, Math.max(1, Number(url.searchParams.get("dias")) || 30));
   // `flow` vazio = todos os fluxos. A tela sempre manda um (o seletor de fluxo).
   const flow = url.searchParams.get("flow") || null;
 
-  const agora = new Date();
-  const ate = diaEm(agora);
-  // O passo é dado em cima da DATA LOCAL já resolvida, não no relógio do
-  // processo: `agora - N dias` em UTC pode cair no dia anterior em São Paulo.
-  const inicio = new Date(`${ate}T12:00:00Z`);
-  inicio.setUTCDate(inicio.getUTCDate() - (dias - 1));
-  const de = inicio.toISOString().slice(0, 10);
+  const hoje = diaEm(new Date());
+  const pDe = url.searchParams.get("de");
+  const pAte = url.searchParams.get("ate");
+
+  /*
+   * Período EXPLÍCITO (`de`/`ate`) tem prioridade; sem ele, cai nos últimos N
+   * `dias`, que é o que a tela mandava antes desta mudança e continua sendo o
+   * default de quem chamar a rota sem parâmetro nenhum.
+   *
+   * ⚠️ Data malformada responde **400 com o motivo**, e não "cai nos 30 dias":
+   * um período silenciosamente diferente do pedido é a tela que mente — quem
+   * olha os números não tem como saber que está vendo outro recorte.
+   */
+  let de: string;
+  let ate: string;
+  if (pDe || pAte) {
+    if (!ehDiaValido(pDe) || !ehDiaValido(pAte)) {
+      return Response.json(
+        { error: "Período inválido — use de=AAAA-MM-DD&ate=AAAA-MM-DD." },
+        { status: 400 }
+      );
+    }
+    // Inverte se vier ao contrário, corta o futuro e aplica o teto de dias.
+    ({ de, ate } = ajustarPeriodo({ de: pDe, ate: pAte }, PERIODO_MAX_DIAS, hoje));
+  } else {
+    const dias = Math.min(
+      PERIODO_MAX_DIAS,
+      Math.max(1, Number(url.searchParams.get("dias")) || 30)
+    );
+    ate = hoje;
+    // O passo é dado em cima da DATA LOCAL já resolvida, não no relógio do
+    // processo: `agora - N dias` em UTC pode cair no dia anterior em São Paulo.
+    de = somaDias(ate, -(dias - 1));
+  }
 
   const { data, error } = await supabase.rpc("triagem_leads", {
     p_location: membership.location_id,
@@ -358,7 +390,9 @@ export async function GET(request: Request) {
      */
     semCurso: temCarteira ? leads.filter((l) => !l.curso).length : undefined,
     total: fechar(total),
-    dias,
+    // Quantos dias o recorte tem, já ajustado (o pedido pode ter sido cortado
+    // pelo teto ou pelo futuro). Quem manda no rótulo da tela é `periodo`.
+    dias: diasEntre(de, ate),
     flow,
     periodo: { de, ate },
   });

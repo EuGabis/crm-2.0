@@ -28,7 +28,7 @@ function eq(rotulo, obtido, esperado) {
 }
 
 const COMERCIAL = {
-  dias: 7,
+  periodo: { de: "2026-09-02", ate: "2026-09-03" },
   fluxoKey: "triagem",
   fluxoNome: "Triagem Comercial",
   mostraPontos: true,
@@ -53,7 +53,7 @@ const COMERCIAL = {
 
 // Dados REAIS de produção (03/09/2026), para o teste não medir só um caso feliz.
 const SECRETARIA = {
-  dias: 7,
+  periodo: { de: "2026-08-28", ate: "2026-09-03" },
   fluxoKey: "triagem-secretaria",
   fluxoNome: "Triagem Secretaria",
   mostraPontos: false,
@@ -135,6 +135,13 @@ console.log("── Comercial (2 séries, com pontuação) ──");
   const res = wb.getWorksheet("Resumo");
   const linhaDe = porRotulo(res);
   eq("nome do fluxo no topo", res.getRow(2).getCell(1).value, "Triagem Comercial");
+  /*
+   * ⚠️ O período por EXTENSO, e não "últimos N dias": a planilha circula fora do
+   * CRM e quem a abre semanas depois precisa saber QUAIS dias ela conta. Era
+   * `dias: number`, que com data escolhida no calendário não descreve mais o
+   * recorte ("7 dias" pode ser a semana passada).
+   */
+  eq("período por extenso no Resumo", res.getRow(3).getCell(1).value, "Período: de 02/09 a 03/09/2026");
   eq("tem taxa de qualificação", linhaDe.has("Taxa de qualificação"), true);
   // 5 de 8 classificados = 62,5%
   const taxa = res.getRow(linhaDe.get("Taxa de qualificação")).getCell(2);
@@ -209,6 +216,20 @@ console.log("── Aba Por hora ──");
 }
 
 console.log("── Bordas ──");
+{
+  /*
+   * Uma DATA ESPECÍFICA (de = ate). É o caso que motivou o seletor de calendário,
+   * e a frase não pode virar "de 09/09 a 09/09" — quem escolheu um dia quer ler
+   * o dia.
+   */
+  const umDia = { ...COMERCIAL, periodo: { de: "2026-09-09", ate: "2026-09-09" } };
+  const { lido: wb1 } = await relê(umDia);
+  eq(
+    "um dia só: a planilha diz o dia, não um intervalo",
+    wb1.getWorksheet("Resumo").getRow(3).getCell(1).value,
+    "Período: em 09/09/2026"
+  );
+}
 {
   // Período sem nenhum dado: não pode estourar, e a barra de dados não pode ser
   // aplicada num intervalo vazio.

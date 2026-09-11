@@ -15,7 +15,8 @@
     "test:inbox": "node --import ./scripts/lib/alias-register.mjs scripts/test-inbox-store.mjs",
     "test:frio": "node --import ./scripts/lib/alias-register.mjs scripts/test-lead-frio.mjs",
     "test:etiquetas": "node --import ./scripts/lib/alias-register.mjs scripts/test-etiquetas.mjs",
-    "test:leads-xlsx": "node scripts/test-leads-xlsx.mjs",
+    "test:leads-xlsx": "node --import ./scripts/lib/alias-register.mjs scripts/test-leads-xlsx.mjs",
+    "test:periodo": "node scripts/test-periodo.mjs",
     "test:phone": "node scripts/test-phone.mjs",
     "test:rodizio": "node --import ./scripts/lib/alias-register.mjs scripts/test-rodizio.mjs",
     "test:webhook": "node --import ./scripts/lib/alias-register.mjs scripts/test-webhook-reenvio.mjs"
