@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
-
 interface Linha {
   conversation_id: string;
   contato: string;
@@ -27,12 +26,22 @@ const PERIODOS = [
 ];
 
 /**
+ * Teto de linhas desenhadas por grade.
+ *
+ * ⚠️ Não é estética: um dia real passa de mil leads, e sem teto o navegador
+ * monta milhares de `<tr>` em oito grades ao mesmo tempo. O card DIZ quando
+ * corta — tabela que mostra 300 de 800 calada é a mesma classe de mentira do
+ * corte de mil linhas que esta tela levou do PostgREST.
+ */
+const MAX_LINHAS = 300;
+
+/**
  * Hora no relógio de SÃO PAULO, não no do navegador.
  *
  * ⚠️ A operação inteira raciocina em horário de Brasília ("caiu 22h", "logou
  * 8h"). Um gestor abrindo isto de outro fuso leria horários que não batem com o
- * que a equipe viveu — e este relatório existe justamente para reconstruir a
- * linha do tempo de um incidente.
+ * que a equipe viveu — e esta tela existe para reconstruir a linha do tempo de
+ * um incidente.
  */
 const hora = (iso: string | null) =>
   iso
@@ -90,9 +99,11 @@ function origemDe(motivo: string): { curto: string; classe: string } {
 export function LogDoBot() {
   const [dias, setDias] = useState(1);
   const [linhas, setLinhas] = useState<Linha[]>([]);
+  const [truncado, setTruncado] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [fluxo, setFluxo] = useState("todos");
+  const [canal, setCanal] = useState("todos");
 
   useEffect(() => {
     let vivo = true;
@@ -109,7 +120,10 @@ export function LogDoBot() {
       const j = await r.json().catch(() => ({}));
       if (!vivo) return;
       if (!r.ok) setErro(j.error ?? "Não foi possível carregar");
-      else setLinhas(j.linhas ?? []);
+      else {
+        setLinhas(j.linhas ?? []);
+        setTruncado(!!j.truncado);
+      }
       setCarregando(false);
     })();
     return () => {
@@ -121,10 +135,23 @@ export function LogDoBot() {
     () => Array.from(new Set(linhas.map((l) => l.fluxo).filter(Boolean))).sort(),
     [linhas],
   );
+  /*
+   * ⚠️ O filtro por NÚMERO é o jeito de isolar o time de vendas sem casar por
+   * nome de pessoa. "Paulo, Alberto e Rogério" é o time de hoje; o número do CRM
+   * é o vínculo real, e continua certo quando alguém entra ou sai. Casar por nome
+   * já confundiu setor mais de uma vez neste projeto.
+   */
+  const canais = useMemo(
+    () => Array.from(new Set(linhas.map((l) => l.canal).filter(Boolean))).sort(),
+    [linhas],
+  );
 
   const visiveis = useMemo(
-    () => (fluxo === "todos" ? linhas : linhas.filter((l) => l.fluxo === fluxo)),
-    [linhas, fluxo],
+    () =>
+      linhas.filter(
+        (l) => (fluxo === "todos" || l.fluxo === fluxo) && (canal === "todos" || l.canal === canal),
+      ),
+    [linhas, fluxo, canal],
   );
 
   /**
@@ -166,7 +193,7 @@ export function LogDoBot() {
             atribuído e por qual caminho.
           </p>
         </div>
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="ml-auto flex flex-wrap items-center gap-1.5">
           {PERIODOS.map((p) => (
             <button
               key={p.dias}
@@ -181,11 +208,26 @@ export function LogDoBot() {
               {p.label}
             </button>
           ))}
+          {canais.length > 1 && (
+            <select
+              value={canal}
+              onChange={(e) => setCanal(e.target.value)}
+              title="Filtrar pelo número do CRM — é como isolar o time de vendas"
+              className="h-7 max-w-[190px] rounded-md border border-slate-200 bg-white px-1.5 text-[11px] text-slate-700"
+            >
+              <option value="todos">Número: todos</option>
+              {canais.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          )}
           {fluxos.length > 1 && (
             <select
               value={fluxo}
               onChange={(e) => setFluxo(e.target.value)}
-              className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-[11px] text-slate-700"
+              className="h-7 max-w-[190px] rounded-md border border-slate-200 bg-white px-1.5 text-[11px] text-slate-700"
             >
               <option value="todos">Fluxo: todos</option>
               {fluxos.map((f) => (
@@ -204,6 +246,18 @@ export function LogDoBot() {
         </div>
       )}
 
+      {/*
+        ⚠️ Um total truncado é pior que nenhum: as porcentagens do rateio saem
+        erradas e alguém decide com base nelas. Se o teto de páginas morder, a
+        tela diz — em vez de mostrar um número redondo com cara de total.
+      */}
+      {truncado && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+          <strong>Período grande demais para listar inteiro.</strong> Os números abaixo cobrem
+          apenas as primeiras 10.000 linhas — use um período menor para conferir o rateio.
+        </div>
+      )}
+
       {carregando && <p className="text-xs text-slate-500">Carregando…</p>}
 
       {!carregando && !erro && visiveis.length === 0 && (
@@ -219,8 +273,8 @@ export function LogDoBot() {
         <>
           {/*
             A faixa do rateio. ⚠️ É a informação que faltava nos dois incidentes:
-            a divisão entre os vendedores só é legível quando os números estão
-            lado a lado, com a fila junto.
+            a divisão entre os vendedores só é legível com os números lado a lado,
+            e com a fila junto.
           */}
           <div className="rounded-xl border bg-white p-3">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
@@ -257,100 +311,130 @@ export function LogDoBot() {
             </div>
           </div>
 
-          {grupos.map((g) => {
-            const comHora = g.leads.filter((l) => l.atribuida_em);
-            const horas = comHora.map((l) => horaCheia(l.atribuida_em!));
-            const faixa =
-              horas.length > 0
-                ? `${String(Math.min(...horas)).padStart(2, "0")}h–${String(
-                    Math.max(...horas),
-                  ).padStart(2, "0")}h`
-                : null;
-            // Quantos por hora — é o "em qual período" do pedido, e é o que
-            // torna visível um despejo (tudo numa hora só).
-            const porHora = new Map<number, number>();
-            for (const h of horas) porHora.set(h, (porHora.get(h) ?? 0) + 1);
-            const pico = [...porHora.entries()].sort((a, b) => b[1] - a[1])[0];
+          {/*
+            🔴 TRÊS GRADES LADO A LADO, e não uma lista embaixo da outra.
+            Empilhado, o Paulo com 258 leads empurrava o Alberto e o Rogério para
+            fora da tela — e comparar o rateio, que é a razão de existir deste log,
+            exigia rolar centenas de linhas e memorizar números. Cada grade rola
+            POR DENTRO (`max-h` + `overflow-auto`), então as três ficam visíveis ao
+            mesmo tempo em qualquer altura de janela.
+          */}
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+            {grupos.map((g) => {
+              const comHora = g.leads.filter((l) => l.atribuida_em);
+              const horas = comHora.map((l) => horaCheia(l.atribuida_em!));
+              const faixa =
+                horas.length > 0
+                  ? `${String(Math.min(...horas)).padStart(2, "0")}h–${String(
+                      Math.max(...horas),
+                    ).padStart(2, "0")}h`
+                  : null;
+              // Quantos por hora — é o "em qual período" do pedido, e é o que
+              // torna visível um despejo (tudo concentrado numa hora só).
+              const porHora = new Map<number, number>();
+              for (const h of horas) porHora.set(h, (porHora.get(h) ?? 0) + 1);
+              const pico = [...porHora.entries()].sort((a, b) => b[1] - a[1])[0];
+              /*
+               * Fluxo e número saíram da LINHA e viraram resumo do cabeçalho: numa
+               * coluna de um terço da tela não cabem sete colunas de tabela, e
+               * esses dois se repetem em quase toda linha do mesmo atendente.
+               * Havendo mais de um, o cabeçalho diz QUANTOS em vez de escolher um
+               * e mentir.
+               */
+              const resumo = (vals: string[], plural: string) => {
+                const u = Array.from(new Set(vals.filter(Boolean)));
+                return u.length === 1 ? u[0] : u.length > 1 ? `${u.length} ${plural}` : null;
+              };
+              const fluxoDoGrupo = resumo(g.leads.map((l) => l.fluxo), "fluxos");
+              const mostrados = g.leads.slice(0, MAX_LINHAS);
 
-            return (
-              <div key={g.nome} className="overflow-hidden rounded-xl border bg-white">
-                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b bg-slate-50/70 px-3 py-2">
-                  <p className="text-xs font-bold text-slate-800">{g.nome}</p>
-                  <p className="text-[11px] text-slate-500">{g.leads.length} lead(s)</p>
-                  {faixa && <p className="text-[11px] text-slate-500">atribuídos entre {faixa}</p>}
-                  {pico && pico[1] > 1 && (
-                    <p className="text-[11px] text-slate-500">
-                      pico às {String(pico[0]).padStart(2, "0")}h ({pico[1]})
+              return (
+                <div
+                  key={g.nome}
+                  className="flex flex-col overflow-hidden rounded-xl border bg-white"
+                >
+                  <div className="border-b bg-slate-50/70 px-3 py-2">
+                    <div className="flex items-baseline gap-2">
+                      <p className="truncate text-xs font-bold text-slate-800">{g.nome}</p>
+                      <p className="ml-auto shrink-0 text-sm font-bold text-slate-900">
+                        {g.leads.length}
+                      </p>
+                    </div>
+                    <p className="mt-0.5 text-[10px] leading-snug text-slate-500">
+                      {faixa ? `atribuídos entre ${faixa}` : "sem atribuição no período"}
+                      {pico && pico[1] > 1
+                        ? ` · pico às ${String(pico[0]).padStart(2, "0")}h (${pico[1]})`
+                        : ""}
+                      {fluxoDoGrupo ? ` · ${fluxoDoGrupo}` : ""}
                     </p>
-                  )}
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="border-b text-left text-[10px] uppercase tracking-wide text-slate-400">
-                        <th className="px-3 py-1.5 font-semibold">Nome</th>
-                        <th className="px-3 py-1.5 font-semibold">Número</th>
-                        <th className="px-3 py-1.5 font-semibold">Chegou</th>
-                        <th className="px-3 py-1.5 font-semibold">Atribuído</th>
-                        <th className="px-3 py-1.5 font-semibold">Origem</th>
-                        <th className="px-3 py-1.5 font-semibold">Fluxo</th>
-                        <th className="px-3 py-1.5 font-semibold">Número do CRM</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {g.leads.map((l) => {
-                        const o = origemDe(l.motivo);
-                        return (
-                          <tr key={l.conversation_id} className="border-b last:border-0">
-                            <td className="px-3 py-1.5">
-                              {/*
-                                Link real (`/conversas?c=`), não botão: devolve
-                                Ctrl+clique e o menu de contexto de graça — o
-                                mesmo padrão do "Abrir conversa" do Relatório.
-                              */}
-                              <Link
-                                href={`/conversas?c=${l.conversation_id}`}
-                                className="font-medium text-slate-800 hover:text-indigo-600 hover:underline"
-                              >
-                                {l.contato}
-                              </Link>
-                              {l.desfecho && (
-                                <span className="ml-1.5 rounded bg-slate-100 px-1 py-0.5 text-[10px] text-slate-500">
-                                  {l.desfecho}
+                  </div>
+                  {/* A rolagem é DAQUI, não da página: é o que mantém as três lado a lado. */}
+                  <div className="max-h-[520px] overflow-auto">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-white">
+                        <tr className="border-b text-left text-[10px] uppercase tracking-wide text-slate-400">
+                          <th className="px-2 py-1.5 font-semibold">Nome</th>
+                          <th className="px-2 py-1.5 font-semibold">Número</th>
+                          <th className="px-2 py-1.5 font-semibold">Chegou</th>
+                          <th className="px-2 py-1.5 font-semibold">Atrib.</th>
+                          <th className="px-2 py-1.5 font-semibold">Origem</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {mostrados.map((l) => {
+                          const o = origemDe(l.motivo);
+                          return (
+                            <tr key={l.conversation_id} className="border-b last:border-0">
+                              <td className="max-w-[130px] px-2 py-1.5">
+                                <Link
+                                  href={`/conversas?c=${l.conversation_id}`}
+                                  className="block truncate font-medium text-slate-800 hover:text-indigo-600 hover:underline"
+                                  title={l.contato}
+                                >
+                                  {l.contato}
+                                </Link>
+                                {l.desfecho && (
+                                  <span className="text-[10px] text-slate-400">{l.desfecho}</span>
+                                )}
+                              </td>
+                              <td className="whitespace-nowrap px-2 py-1.5 tabular-nums text-slate-600">
+                                {l.telefone || "—"}
+                              </td>
+                              <td className="whitespace-nowrap px-2 py-1.5 tabular-nums text-slate-600">
+                                {dias > 1 ? dataHora(l.chegou_em) : hora(l.chegou_em)}
+                              </td>
+                              <td className="whitespace-nowrap px-2 py-1.5 tabular-nums text-slate-600">
+                                {dias > 1 ? dataHora(l.atribuida_em) : hora(l.atribuida_em)}
+                              </td>
+                              <td className="px-2 py-1.5">
+                                <span
+                                  className={cn(
+                                    "whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium",
+                                    o.classe,
+                                  )}
+                                  // O motivo COMPLETO no title: o rótulo curto
+                                  // agrupa, mas "devolvida: esperava 37 min" tem o
+                                  // número que explica o caso.
+                                  title={l.motivo || undefined}
+                                >
+                                  {o.curto}
                                 </span>
-                              )}
-                            </td>
-                            <td className="px-3 py-1.5 tabular-nums text-slate-600">
-                              {l.telefone || "—"}
-                            </td>
-                            <td className="px-3 py-1.5 tabular-nums text-slate-600">
-                              {dias > 1 ? dataHora(l.chegou_em) : hora(l.chegou_em)}
-                            </td>
-                            <td className="px-3 py-1.5 tabular-nums text-slate-600">
-                              {dias > 1 ? dataHora(l.atribuida_em) : hora(l.atribuida_em)}
-                            </td>
-                            <td className="px-3 py-1.5">
-                              <span
-                                className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", o.classe)}
-                                // O motivo COMPLETO fica no title: o rótulo curto
-                                // agrupa, mas "devolvida: esperava 37 min" tem o
-                                // número que explica o caso.
-                                title={l.motivo || undefined}
-                              >
-                                {o.curto}
-                              </span>
-                            </td>
-                            <td className="px-3 py-1.5 text-slate-600">{l.fluxo || "—"}</td>
-                            <td className="px-3 py-1.5 text-slate-600">{l.canal || "—"}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    {g.leads.length > MAX_LINHAS && (
+                      <p className="border-t bg-slate-50 px-2 py-1.5 text-[10px] text-slate-500">
+                        mostrando os {MAX_LINHAS} mais recentes de {g.leads.length}
+                      </p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </>
       )}
     </div>
