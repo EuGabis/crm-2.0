@@ -7646,3 +7646,103 @@ ver "Conversas (1)" num contato que falou por três números, sem nada dizendo q
 há mais. Contar o que não se pode ler exigiria função `security definer`; quem
 precisa ver tudo tem `le_todas_conversas` (202609110930), que nasceu deste mesmo
 pedido.
+
+## Leads do dia: período no CALENDÁRIO (2026-09-11, sem migração)
+
+Pedido: *"preciso poder filtrar por uma data específica, como se eu pudesse
+selecionar no calendário o período personalizado"*. O seletor era um `Select` de
+`7 · 15 · 30 · 60 · 90 dias`, ancorado em HOJE — não havia como olhar um dia
+específico nem uma semana fechada.
+
+**Nada de banco**: `public.triagem_leads` (202609041015) já recebe `p_de`/`p_ate`
+como `date` e filtra `between`. Conferido como usuário real: um dia só devolve 30
+leads (09/09), três dias devolvem 107. A mudança inteira é de rota e tela.
+
+### 🔴 A moeda é TEXTO "AAAA-MM-DD", de ponta a ponta
+
+`src/lib/periodo.ts` é a casa da aritmética, e existe por causa de um erro que
+NÃO dá exceção nem quebra o build: `new Date("2026-09-09")` é meia-noite **UTC**,
+que no Brasil é 08/09 às 21h — voltar para texto devolve **"2026-09-08"**. O
+relatório mostraria o dia vizinho e nada acusaria.
+
+- `paraData` usa as partes LOCAIS e o **meio-dia** (somar dias nunca tropeça numa
+  virada); `deData` nunca usa `toISOString()`.
+- `hojeSP` é o dia em **São Paulo**, como as funções do banco: a Vercel roda em
+  UTC, e às 21h de Brasília o processo já está no dia seguinte.
+- Comparar "AAAA-MM-DD" com `<`/`>` já é comparar cronologicamente — por isso não
+  há `Date` circulando entre o seletor, a rota e a planilha.
+
+⚠️ **Os atalhos moram em `lib/`, não no componente**, e é o que os torna
+testáveis: o Node roda TypeScript nativamente mas **não JSX**, então regra de
+data dentro de um `.tsx` não tem como ser exercitada — e "mês passado" e a virada
+de ano são exatamente o tipo de conta que erra em silêncio.
+
+⚠️ **O atalho é DERIVADO do período, nunca guardado ao lado dele.** Guardar os
+dois faria o botão mentir no dia seguinte: "Hoje", escolhido ontem, continuaria
+escrito "Hoje" apontando para a data de ontem. (Hoje ele vira "Ontem" sozinho —
+está escrito como teste.)
+
+### Decisões do seletor
+
+- **Atalhos em BOTÕES ao lado do calendário**, não num menu: são o caminho de
+  todo dia, e escondê-los atrás de um segundo clique faria o calendário — que é a
+  exceção — parecer o único caminho.
+- ⚠️ **Rascunho com Aplicar.** Sem isso cada clique dispararia uma consulta,
+  inclusive o PRIMEIRO clique de um intervalo, que ainda não é um intervalo.
+- ⚠️ **`to` indefinido no primeiro clique vira `de = ate`** — que é exatamente o
+  caso de quem quer UMA data específica e clica uma vez só.
+- ⚠️ **Dia futuro é bloqueado no calendário**: ele não tem lead nenhum, e uma
+  coluna zerada à frente se lê como queda de volume.
+- ⚠️ **O teto de 180 dias AVISA e trava o Aplicar**, em vez de encurtar sozinho:
+  recortar em silêncio mostraria na tela um intervalo diferente do que a pessoa
+  acabou de selecionar.
+- ⚠️ **O rascunho é semeado por `key`, não por efeito** — `setState` síncrono
+  dentro de `useEffect` dispara renderização em cascata e o lint acusa. Mesma
+  decisão do diálogo de respostas rápidas. (O seletor do painel,
+  `dashboard/date-filter.tsx`, ainda usa o efeito e carrega esse erro.)
+
+⏳ **São dois seletores de data no repo.** O do painel está preso ao
+`DashboardRangeProvider` e tem presets próprios ("Trimestre passado"); o novo é
+controlado e sem contexto. Nasceu separado para não mexer no painel por causa de
+um relatório — quando alguém precisar tocar nos dois, o caminho é o painel passar
+a usar este. As abas **Atendimento** e **Log do bot** também continuam com
+`Select` de dias, e são as próximas candidatas.
+
+### Rota
+
+`de`/`ate` têm prioridade; sem eles, continua caindo nos últimos N `dias` (é o
+default de quem chamar a rota sem parâmetro).
+
+⚠️ **Data malformada responde 400 com o motivo, e não "cai nos 30 dias"**: um
+período silenciosamente diferente do pedido é a tela que mente — quem olha os
+números não tem como saber que está vendo outro recorte. E `ehDiaValido` confere
+que a data EXISTE, não só o formato: sem isso `2026-02-30` viraria 02/03 pelo
+`new Date` e o relatório responderia outro dia.
+
+⚠️ **O rótulo da tela segue o período que a ROTA respondeu**, não o que a tela
+pediu — uma URL montada à mão pode ser ajustada (futuro, teto, invertida), e um
+número de 180 dias sob a frase "de 01/01 a 11/09" seria a tela mentindo sobre o
+próprio recorte.
+
+`enumerarDias` passou a usar o mesmo `somaDias` do seletor: duas implementações
+de "o dia seguinte" é como nasce um relatório que discorda do próprio filtro.
+
+### A planilha diz QUAIS dias, não quantos
+
+`DadosLeads.dias: number` virou `periodo: { de, ate }`. Com data escolhida no
+calendário, "últimos 7 dias" não descreve mais o recorte — pode ser a semana
+passada —, e a planilha circula fora do CRM, onde ninguém tem o filtro à vista.
+
+⚠️ **O nome do arquivo carrega as DATAS do recorte, não a data do download**:
+dois recortes baixados no mesmo dia tinham o mesmo nome e um sobrescrevia o
+outro — e é justamente quem compara períodos que baixa duas vezes seguidas.
+
+⚠️ `npm run test:leads-xlsx` passou a rodar com o `alias-register` (a planilha
+agora importa `@/lib/periodo`); sem isso o teste morre na resolução do `@/`.
+
+### Testes
+
+`npm run test:periodo` — **56 asserções**: a ida e volta texto→Date→texto, a
+virada da noite em São Paulo (23h30 de 11/09 = 02h30 UTC de 12/09), fevereiro
+bissexto, "mês passado" na virada de ano, o teto puxando o INÍCIO e preservando o
+fim, o futuro colapsando em hoje, e `2026-02-30` sendo recusada.

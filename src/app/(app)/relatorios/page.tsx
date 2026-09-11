@@ -17,18 +17,12 @@ import {
   YAxis,
 } from "recharts";
 import { SubNav } from "@/components/layout/subnav";
+import { PeriodoPicker } from "@/components/shared/period-picker";
 import { TOOLTIP_STYLE } from "@/components/dashboard/opportunity-widgets";
 import { GoogleAdsReport } from "@/components/reports/google-ads-report";
 import { ServiceSlaReport } from "@/components/reports/service-sla-report";
 import { LogDoBot } from "@/components/reports/log-do-bot";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { formatBRL } from "@/lib/data/repos/opportunities";
 import { usePipelineDb } from "@/lib/data/repos/db/pipeline";
 import { useMyMembership } from "@/lib/data/repos/db/team";
@@ -38,6 +32,7 @@ import {
   type CursoContado,
 } from "@/components/reports/leads-por-atendente";
 import { useAiAnalyses } from "@/lib/data/repos/db/ai";
+import { resolvePreset, rotuloDoPeriodo, type Periodo } from "@/lib/periodo";
 import { cn } from "@/lib/utils";
 import { useIsSupervisor } from "@/lib/data/repos/db/sector";
 import { SectorReport } from "@/components/relatorios/sector-report";
@@ -553,7 +548,16 @@ const NAO_CONCLUIU = "_naoConcluiu";
  * recebe conteúdo, quem desistiu precisa ser retomado.
  */
 function LeadsDoDiaReport() {
-  const [dias, setDias] = useState(30);
+  /*
+   * O recorte é um PERÍODO ("AAAA-MM-DD"), não um número de dias (pedido do
+   * Gabriel, 11/09: filtrar uma data específica, escolhendo no calendário).
+   *
+   * ⚠️ A moeda é a MESMA da rota e do banco, de ponta a ponta. Guardar `Date`
+   * aqui e converter na hora de chamar a API traria de volta o erro de um dia
+   * que `lib/periodo.ts` documenta — e ele é silencioso: a tela mostraria o dia
+   * vizinho sem nada acusar.
+   */
+  const [periodo, setPeriodo] = useState<Periodo>(() => resolvePreset("30d"));
   const [fluxoKey, setFluxoKey] = useState(FLUXOS[0].key);
   const fluxo = FLUXOS.find((f) => f.key === fluxoKey) ?? FLUXOS[0];
 
@@ -590,18 +594,7 @@ function LeadsDoDiaReport() {
               </button>
             ))}
           </div>
-          <Select value={String(dias)} onValueChange={(v) => v && setDias(Number(v))}>
-            <SelectTrigger className="h-8 w-[130px] text-xs">
-              <SelectValue>{dias} dias</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {[7, 15, 30, 60, 90].map((d) => (
-                <SelectItem key={d} value={String(d)} className="text-xs">
-                  {d} dias
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <PeriodoPicker periodo={periodo} onChange={setPeriodo} />
         </div>
       </div>
       {/*
@@ -611,12 +604,16 @@ function LeadsDoDiaReport() {
         sem ela a tela mostraria por um instante os números do fluxo anterior
         sob os rótulos do novo, que é pior que um "Carregando...".
       */}
-      <LeadsDoDiaPainel key={`${fluxo.key}-${dias}`} dias={dias} fluxo={fluxo} />
+      <LeadsDoDiaPainel
+        key={`${fluxo.key}-${periodo.de}-${periodo.ate}`}
+        periodo={periodo}
+        fluxo={fluxo}
+      />
     </>
   );
 }
 
-function LeadsDoDiaPainel({ dias, fluxo }: { dias: number; fluxo: Fluxo }) {
+function LeadsDoDiaPainel({ periodo: pedido, fluxo }: { periodo: Periodo; fluxo: Fluxo }) {
   const [dados, setDados] = useState<{
     linhas: LinhaDia[];
     horas: LinhaHora[];
@@ -624,6 +621,8 @@ function LeadsDoDiaPainel({ dias, fluxo }: { dias: number; fluxo: Fluxo }) {
     carteiras?: Carteira[];
     cursos?: CursoContado[];
     semCurso?: number;
+    /** O recorte que a ROTA respondeu — pode não ser exatamente o pedido. */
+    periodo?: Periodo;
   } | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [baixando, setBaixando] = useState(false);
@@ -633,7 +632,8 @@ function LeadsDoDiaPainel({ dias, fluxo }: { dias: number; fluxo: Fluxo }) {
     void (async () => {
       try {
         const res = await fetch(
-          `/api/relatorios/leads-diarios?dias=${dias}&flow=${encodeURIComponent(fluxo.key)}`
+          `/api/relatorios/leads-diarios?de=${pedido.de}&ate=${pedido.ate}` +
+            `&flow=${encodeURIComponent(fluxo.key)}`
         );
         const json = await res.json().catch(() => ({}));
         if (!ativo) return;
@@ -649,7 +649,7 @@ function LeadsDoDiaPainel({ dias, fluxo }: { dias: number; fluxo: Fluxo }) {
     return () => {
       ativo = false;
     };
-  }, [dias, fluxo.key]);
+  }, [pedido.de, pedido.ate, fluxo.key]);
 
   /*
    * As séries do gráfico = as do bot + "não concluíram" no TOPO da pilha.
@@ -698,6 +698,14 @@ function LeadsDoDiaPainel({ dias, fluxo }: { dias: number; fluxo: Fluxo }) {
 
   const t = dados.total;
   const semDesfecho = Math.max(t.entraram - t.concluiram, 0);
+  /*
+   * ⚠️ O rótulo segue o período que a ROTA respondeu, não o que a tela pediu.
+   * Hoje o seletor não deixa pedir nada que precise de ajuste (o calendário
+   * bloqueia o futuro e trava acima do teto), mas uma URL montada à mão pode —
+   * e aí um número contando 180 dias sob a frase "de 01/01 a 11/09" seria a
+   * tela mentindo sobre o próprio recorte.
+   */
+  const periodo = dados.periodo ?? pedido;
 
   const baixar = async () => {
     setBaixando(true);
@@ -708,7 +716,7 @@ function LeadsDoDiaPainel({ dias, fluxo }: { dias: number; fluxo: Fluxo }) {
         linhas: dados.linhas,
         horas: dados.horas ?? [],
         total: t,
-        dias,
+        periodo,
         fluxoKey: fluxo.key,
         fluxoNome: fluxo.nome,
         mostraPontos: fluxo.mostraPontos,
@@ -734,7 +742,10 @@ function LeadsDoDiaPainel({ dias, fluxo }: { dias: number; fluxo: Fluxo }) {
         <div className="rounded-xl border bg-white p-4">
           <p className="text-[11px] font-medium text-slate-500">Entraram</p>
           <p className="text-2xl font-bold tabular-nums text-slate-900">{t.entraram}</p>
-          <p className="text-[11px] text-slate-400">nos últimos {dias} dias</p>
+          {/* ⚠️ O período POR EXTENSO, e não "nos últimos N dias": com data
+              escolhida no calendário, "últimos 3 dias" descreveria um recorte
+              que termina hoje — que pode não ser o que está na tela. */}
+          <p className="text-[11px] text-slate-400">{rotuloDoPeriodo(periodo)}</p>
         </div>
         {series.map((s) => {
           const n = s.chave === NAO_CONCLUIU ? semDesfecho : (t.desfechos[s.chave] ?? 0);
@@ -902,7 +913,7 @@ function LeadsDoDiaPainel({ dias, fluxo }: { dias: number; fluxo: Fluxo }) {
           dos próprios números. Entre o gráfico e a tabela dele, este card
           separava um do outro. */}
       <div className="mt-4">
-        <LeadsPorHora horas={dados.horas ?? []} dias={dias} />
+        <LeadsPorHora horas={dados.horas ?? []} periodo={periodo} />
       </div>
 
       <div className="mt-4">
@@ -971,7 +982,7 @@ const FAIXAS: { rotulo: string; de: number; ate: number }[] = [
  * gráfico é o que carrega esse significado, e é ela que faz o tom apagado ser
  * legível como "ninguém está aqui" em vez de "outra coisa".
  */
-function LeadsPorHora({ horas, dias }: { horas: LinhaHora[]; dias: number }) {
+function LeadsPorHora({ horas, periodo }: { horas: LinhaHora[]; periodo: Periodo }) {
   const serie = useMemo(
     () =>
       horas.map((h) => ({
@@ -1002,7 +1013,7 @@ function LeadsPorHora({ horas, dias }: { horas: LinhaHora[]; dias: number }) {
       <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
         <p className="text-xs font-bold text-slate-700">Em que horário os leads chegam</p>
         <p className="text-[11px] text-slate-400">
-          soma dos últimos {dias} dias, horário de Brasília
+          soma do período ({rotuloDoPeriodo(periodo)}), horário de Brasília
         </p>
       </div>
       {/*

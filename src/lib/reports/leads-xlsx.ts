@@ -15,6 +15,8 @@
  * pacote de quem só abre o relatório e nunca baixa nada.
  */
 
+import { rotuloDoPeriodo } from "@/lib/periodo";
+
 export interface LinhaDia {
   dia: string;
   entraram: number;
@@ -44,7 +46,13 @@ export interface DadosLeads {
   /** 24 baldes, 0h a 23h, no fuso da operação. */
   horas: LinhaHora[];
   total: { entraram: number; concluiram: number; desfechos: Record<string, number> };
-  dias: number;
+  /**
+   * O recorte, em "AAAA-MM-DD". ⚠️ Era `dias: number`, e com data escolhida no
+   * calendário esse número não descreve mais o período: "7 dias" pode ser a
+   * semana passada. A planilha circula fora do CRM, então ela precisa dizer
+   * QUAIS dias — não quantos.
+   */
+  periodo: { de: string; ate: string };
   fluxoKey: string;
   fluxoNome: string;
   /** Fluxo com nó de pontuação: ganha a coluna de média de pontos. */
@@ -120,7 +128,7 @@ export async function montarWorkbookLeads(d: DadosLeads) {
   ws1.columns = [{ width: 34 }, { width: 16 }];
   ws1.addRow(["Leads do dia", ""]).font = { bold: true, size: 14 };
   ws1.addRow([d.fluxoNome, ""]).font = { bold: true, size: 11 };
-  ws1.addRow([`Período: últimos ${d.dias} dias`, ""]);
+  ws1.addRow([`Período: ${rotuloDoPeriodo(d.periodo)}`, ""]);
   ws1.addRow([]);
 
   const semDesfecho = Math.max(d.total.entraram - d.total.concluiram, 0);
@@ -349,7 +357,14 @@ export async function baixarRelatorioLeadsXlsx(d: DadosLeads): Promise<void> {
    * achando que é a outra.
    */
   const curto = d.fluxoKey.replace("triagem-", "").replace("triagem", "comercial");
-  a.download = `leads-do-dia-${curto}-${d.dias}d-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  /*
+   * ⚠️ As DATAS do recorte no nome, não a data do download: dois recortes
+   * baixados no mesmo dia tinham o mesmo nome e um sobrescrevia o outro — e é
+   * justamente quem compara períodos que baixa duas vezes seguidas.
+   */
+  const trecho =
+    d.periodo.de === d.periodo.ate ? d.periodo.de : `${d.periodo.de}_a_${d.periodo.ate}`;
+  a.download = `leads-do-dia-${curto}-${trecho}.xlsx`;
   a.click();
   URL.revokeObjectURL(url);
 }
