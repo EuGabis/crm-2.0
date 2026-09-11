@@ -7524,3 +7524,42 @@ mostrar um número redondo com cara de total. Mesma regra na grade: acima de
 vindo do PostgREST é suspeito até prova em contrário.** Foi um total redondo que
 denunciou este, e foi um total redondo que denunciou o defeito dos contatos em
 2026.
+
+## "Enviar para pipeline" ganhou o PROPRIETÁRIO (2026-09-11)
+
+Queixa do Gabriel: *"quando o Paulo vai enviar um lead para pipeline, ele não
+consegue selecionar ele como proprietário, gerando um trabalho de ter que ir em
+Contatos, buscar o contato e lá selecionar ele mesmo como proprietário."*
+
+⚠️ **Isto é consequência direta da 202609111030**, e não um descuido antigo. Ao
+parar de deixar a transferência reescrever `contacts.owner_id`, a regra ficou
+certa — propriedade não segue quem está conversando — mas o contato passou a
+nascer SEM dono e só havia um lugar para dizer de quem ele é: o cabeçalho do
+contato, a três telas dali. **Regra que tira um automatismo precisa devolver um
+caminho barato para a decisão manual**, no momento em que a pessoa já está
+tomando essa decisão.
+
+- O card já herdava o responsável da CONVERSA (um admin criando na conversa do
+  Paulo cria PARA o Paulo). Isso não mudou — virou o **padrão de um seletor
+  visível**, em vez de uma regra invisível.
+- ⚠️ **A caixa "definir também como proprietário do contato" nasce marcada só
+  quando o contato NÃO tem dono** — que é o caso da queixa. Tendo dono, nasce
+  DESMARCADA e o rótulo diz de quem é ("hoje é de Rogério"): tomar o contato de
+  um colega é decisão consciente, e um padrão que faz isso sozinho transfere
+  carteira sem ninguém perceber.
+- ⚠️ **Sucesso PARCIAL é dito.** Se a oportunidade é criada e o proprietário
+  falha, o toast é de ERRO com o motivo — um verde único mandaria a pessoa embora
+  achando que as duas coisas deram certo.
+- ⚠️ **Nada de semear os campos num efeito de abertura.** O responsável da
+  conversa e a equipe chegam de forma assíncrona, então o efeito os deixaria
+  vazios enquanto a consulta não volta (e `setState` em efeito dispara cascata, o
+  lint acusa). O padrão é DERIVADO na renderização — `ownerEscolhido ?? donoPadrao`
+  —, então ele se corrige sozinho quando o dado chega e a escolha da pessoa vence
+  a partir daí.
+- ⚠️ **O dono escolhido entra na lista mesmo com a equipe ainda carregando.** Sem
+  isso o `value` não casa com nenhuma `<option>`, o React desenha "Sem
+  proprietário" e o card nasce sem dono — o campo controlado mentindo sobre o que
+  vai gravar. Mesma armadilha do seletor de proprietário do contato e do seletor
+  de lead do calendário.
+- "Sem proprietário (do grupo)" continua sendo opção: era o comportamento
+  anterior quando a conversa estava no bot ou na fila.

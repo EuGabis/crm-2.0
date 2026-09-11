@@ -22,6 +22,8 @@ import {
 import { oppActions, usePipelineDb } from "@/lib/data/repos/db/pipeline";
 import { CURSOS } from "@/lib/data/cursos";
 import { useConversation } from "@/lib/data/repos/db/conversations";
+import { dbContactActions, useDbContact, useDbTeam } from "@/lib/data/repos/db/contacts";
+import { useMyMembership } from "@/lib/data/repos/db/team";
 import { formatBRL } from "@/lib/data/repos/opportunities";
 
 /**
@@ -49,11 +51,46 @@ export function SendToPipelineDialog({
 }) {
   const { pipelines, opportunities } = usePipelineDb();
   const conversation = useConversation(conversationId ?? null);
+  const team = useDbTeam();
+  const { me } = useMyMembership();
+  const { contact, refresh: recarregarContato } = useDbContact(contactId);
   const [pipelineId, setPipelineId] = useState("");
   const [stageId, setStageId] = useState("");
   const [value, setValue] = useState("");
   const [course, setCourse] = useState("");
+  /*
+   * ⚠️ `null` = "ainda não mexi no campo", e NÃO é preciosismo: o responsável da
+   * conversa e a equipe chegam de forma assíncrona, então semear os campos num
+   * efeito de abertura os deixaria vazios enquanto a consulta não volta — e
+   * `setState` dentro de efeito ainda dispara renderização em cascata (o lint do
+   * projeto acusa). Derivando na renderização, o padrão se corrige sozinho
+   * quando o dado chega, e o que a pessoa escolher vence a partir daí.
+   */
+  const [ownerEscolhido, setOwnerEscolhido] = useState<string | null>(null);
+  const [levarEscolhido, setLevarEscolhido] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
+
+  /**
+   * Quem o card DEVE nascer tendo, se ninguém mexer no seletor.
+   *
+   * Mantém a regra de antes — vindo da conversa, o card é do RESPONSÁVEL dela,
+   * não de quem clicou (um admin criando na conversa do Paulo cria PARA o
+   * Paulo) — e só acrescenta o fallback para quem está clicando quando a
+   * conversa ainda não tem dono (bot/fila).
+   */
+  const donoPadrao = conversation?.assignedTo ?? me?.userId ?? "";
+  const donoDoContato = contact?.ownerId || "";
+  const nomeDoDonoAtual = team.find((u) => u.id === donoDoContato)?.name ?? "";
+  const owner = ownerEscolhido ?? donoPadrao;
+  /*
+   * Marcado por padrão SÓ quando o contato ainda não tem dono — que é o caso da
+   * queixa ("tenho que ir em Contatos e me marcar como proprietário"). Tendo
+   * dono, nasce DESMARCADO: tomar o contato de um colega é decisão consciente, e
+   * um padrão que faz isso sozinho transfere carteira sem ninguém perceber.
+   */
+  const levarContato = levarEscolhido ?? !donoDoContato;
+  // Nada a fazer quando o dono escolhido JÁ é o dono do contato.
+  const mostrarCaixaDoContato = !!owner && owner !== donoDoContato;
 
   const pipeline = pipelines.find((p) => p.id === pipelineId) ?? null;
   const existing = useMemo(
@@ -69,6 +106,10 @@ export function SendToPipelineDialog({
     setPipelineId((cur) => cur || first?.id || "");
     setValue("");
     setCourse("");
+    // Volta ao padrão derivado: sem isto, a escolha feita para UM contato seguiria
+    // valendo na próxima abertura, para outro contato.
+    setOwnerEscolhido(null);
+    setLevarEscolhido(null);
   }, [open, pipelines]);
 
   useEffect(() => {
@@ -90,20 +131,45 @@ export function SendToPipelineDialog({
       value: Number(value.replace(",", ".")) || 0,
       course,
       source: "Conversas",
-      // Vindo da conversa: o card é do RESPONSÁVEL dela (null = grupo, se estiver
-      // no bot/sem dono). Fora de uma conversa, mantém o padrão (quem criou).
-      ...(conversationId ? { ownerId: conversation?.assignedTo ?? null } : {}),
+      // Agora vem do SELETOR, cujo padrão continua sendo o responsável da
+      // conversa. String vazia = "sem proprietário", que é um estado legítimo
+      // (lead do grupo) — daí `|| null` e não `?? null`.
+      ownerId: owner || null,
     });
-    setSaving(false);
     if (!ok) {
+      setSaving(false);
       toast.error("Não foi possível criar a oportunidade");
       return;
     }
+
+    /*
+     * 🔴 O motivo do pedido: *"quando o Paulo vai enviar um lead para pipeline,
+     * ele não consegue selecionar ele como proprietário, gerando o trabalho de ir
+     * em Contatos, buscar o contato e lá se marcar como proprietário."*
+     *
+     * ⚠️ Isto virou necessário quando a transferência DEIXOU de reescrever o dono
+     * do contato (202609111030). A regra continua certa — propriedade não segue a
+     * conversa —, mas ela só funciona se existir um caminho barato para a pessoa
+     * DIZER de quem é o contato. Este é o caminho, no momento em que ela já está
+     * decidindo que o lead é dela.
+     */
+    let avisoDono = "";
+    if (levarContato && mostrarCaixaDoContato) {
+      const okDono = await dbContactActions.update(contactId, { ownerId: owner });
+      if (okDono) recarregarContato();
+      // ⚠️ Sucesso PARCIAL é dito, não escondido: a oportunidade foi criada e o
+      // proprietário não mudou. Um toast verde único mandaria a pessoa embora
+      // achando que as duas coisas deram certo.
+      else avisoDono = " (não consegui definir o proprietário do contato)";
+    }
+    setSaving(false);
+
     const stageName = pipeline?.stages.find((s) => s.id === stageId)?.name ?? "";
-    toast.success(
+    const base =
       `${contactName} enviado para ${pipeline?.name} · ${stageName}` +
-        (course ? ` · ${course}` : "")
-    );
+      (course ? ` · ${course}` : "");
+    if (avisoDono) toast.error(base + avisoDono);
+    else toast.success(base);
     onOpenChange(false);
   };
 
@@ -181,6 +247,66 @@ export function SendToPipelineDialog({
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              {/*
+                🔴 O campo que faltava. Sem ele o atendente criava o card e ia a
+                Contatos procurar a pessoa só para se marcar como proprietário —
+                um caminho de três telas para uma decisão que ele já tomou aqui.
+
+                ⚠️ `<select>` nativo, como o de Curso e o "Atribuir…" do
+                Relatório: é uma lista de pessoas e o nativo dá busca por
+                digitação e a rolagem do sistema de graça.
+              */}
+              <div className="space-y-1">
+                <Label className="text-xs">Proprietário</Label>
+                <select
+                  value={owner}
+                  onChange={(e) => setOwnerEscolhido(e.target.value)}
+                  className="h-8 w-full rounded-md border bg-white px-2 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                >
+                  {/* Lead do grupo é estado legítimo — e era o comportamento
+                      anterior quando a conversa estava no bot/sem dono. */}
+                  <option value="">Sem proprietário (do grupo)</option>
+                  {/*
+                    ⚠️ O dono escolhido entra na lista mesmo que a equipe ainda
+                    não tenha carregado. Sem isto o `value` não casaria com
+                    nenhuma opção, o React desenharia "Sem proprietário" e o card
+                    nasceria sem dono — o campo controlado mentindo sobre o que
+                    vai gravar.
+                  */}
+                  {owner && !team.some((u) => u.id === owner) && (
+                    <option value={owner}>Carregando...</option>
+                  )}
+                  {team.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+                {mostrarCaixaDoContato && (
+                  <label className="flex cursor-pointer items-start gap-1.5 pt-0.5">
+                    <input
+                      type="checkbox"
+                      checked={levarContato}
+                      onChange={(e) => setLevarEscolhido(e.target.checked)}
+                      className="mt-0.5 size-3.5 accent-indigo-600"
+                    />
+                    <span className="text-[11px] leading-snug text-slate-600">
+                      {donoDoContato ? (
+                        <>
+                          Passar o <strong>contato</strong> para esta pessoa
+                          {nomeDoDonoAtual ? (
+                            <span className="text-amber-700"> (hoje é de {nomeDoDonoAtual})</span>
+                          ) : null}
+                        </>
+                      ) : (
+                        <>
+                          Definir também como <strong>proprietário do contato</strong>
+                        </>
+                      )}
+                    </span>
+                  </label>
+                )}
               </div>
               {/*
                 Curso da formação (coluna `opportunities.course`, migração 0093).
