@@ -135,6 +135,63 @@ eq(
 // para o card do funil e para a base de contatos.
 eq("palavra gigante é cortada em 80", limitarNome("a".repeat(200)).length, 80);
 
+
+/* ================================================================== *
+ * O texto que o bot envia — a quebra de linha
+ * ==================================================================
+ *
+ * 🔴 Relato de 2026-09-14: "no bot da mensagem de fim de semana, ao pular
+ * linha, quando o bot responde, não pula na mensagem".
+ *
+ * A limpeza do texto usava `\s`, e `\s` INCLUI `\n` — então `\s{2,} -> " "`
+ * engolia a linha em branco entre parágrafos. E era intermitente, o que fazia
+ * parecer defeito do WhatsApp: um Enter sobrevivia (um caractere só), dois não.
+ * Cada asserção abaixo é uma forma de pular linha que tem de chegar inteira.
+ */
+const { renderTextoDoBot } = await import("../src/lib/bot/texto.ts");
+const r = (t, v = { first_name: "Ana" }) => renderTextoDoBot(t, v);
+
+eq("um Enter é preservado", r("Olá!\nBom dia."), "Olá!\nBom dia.");
+// 🔴 O caso do relato: parágrafo separado por linha em branco.
+eq(
+  "linha em branco entre parágrafos",
+  r("Olá!\n\nNosso horário é 9h30 às 18h."),
+  "Olá!\n\nNosso horário é 9h30 às 18h.",
+);
+// ⚠️ CRLF são DOIS caracteres de espaço — colar do Word/Bloco de Notas caía aqui.
+eq("CRLF do Windows vira quebra, não espaço", r("Olá!\r\nBom dia."), "Olá!\nBom dia.");
+eq("CR sozinho (Mac antigo)", r("Olá!\rBom dia."), "Olá!\nBom dia.");
+// Indentação sobrando não pode transformar a quebra em espaço.
+eq("espaço grudado na quebra some", r("Olá!\n   Bom dia."), "Olá!\nBom dia.");
+eq("espaço ANTES da quebra some", r("Olá!   \nBom dia."), "Olá!\nBom dia.");
+// Lista de linhas: era o pior sintoma, porque metade das quebras sobrevivia.
+eq(
+  "lista com título e itens",
+  r("Horários:\n\n- Seg a sex\n- Sáb fechado"),
+  "Horários:\n\n- Seg a sex\n- Sáb fechado",
+);
+// Teto: três Enters não viram um buraco no balão.
+eq("no máximo uma linha em branco", r("a\n\n\n\nb"), "a\n\nb");
+eq("quebras nas pontas somem", r("\n\nOlá!\n\n"), "Olá!");
+
+/*
+ * ⚠️ A limpeza tinha de CONTINUAR existindo — ela é o que evita "Perfeito, !" e
+ * o espaço duplo quando `{{first_name}}` sai da frase. O erro nunca foi limpar;
+ * foi limpar a QUEBRA junto com o espaço.
+ */
+eq("dois espaços ainda viram um", r("Olá   mundo"), "Olá mundo");
+eq("espaço antes de pontuação some", r("Olá , tudo bem ?"), "Olá, tudo bem?");
+eq("variável é trocada", r("Oi {{first_name}}!"), "Oi Ana!");
+eq("sem nome, some o placeholder e a vírgula", r("Perfeito, {{first_name}}!", {}), "Perfeito!");
+// ⚠️ O mesmo defeito por outra porta: com `\s*`, remover o placeholder no fim da
+// linha comia a quebra e colava as duas linhas.
+eq(
+  "placeholder no fim da linha não come a quebra",
+  r("{{first_name}}, bom dia!\nSeu horário é 9h.", {}),
+  "Bom dia!\nSeu horário é 9h.",
+);
+eq("variável ausente vira vazio", r("Curso: {{curso}}.", { first_name: "Ana" }), "Curso:.");
+
 /* ---------------------------------------------------------------- */
 console.log("");
 if (falhas.length) {

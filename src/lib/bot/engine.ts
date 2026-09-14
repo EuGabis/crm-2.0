@@ -5,6 +5,7 @@
  * Best-effort — nunca deve quebrar o 200 do webhook.
  */
 import { sendText, sendInteractiveList } from "@/lib/whatsapp/client";
+import { renderTextoDoBot } from "./texto";
 import { toWhatsAppNumber } from "@/lib/whatsapp/phone";
 import { chat } from "@/lib/ai/openai";
 import {
@@ -105,25 +106,11 @@ async function registrarDesfecho(
   }
 }
 
-function render(text: string, vars: Record<string, any>): string {
-  // first_name é o único nome opcional. Quando vazio (a pessoa recusou/não deu o
-  // nome), remove o placeholder E a pontuação órfã ao redor pra não sair
-  // "Perfeito, !" nem ", clique...".
-  const firstName = vars.first_name != null ? String(vars.first_name).trim() : "";
-  let out = text;
-  if (!firstName) {
-    out = out
-      // "{{first_name}}, " (nome + pontuação logo depois)
-      .replace(/\{\{\s*first_name\s*\}\}\s*[,:;–-]\s*/g, "")
-      // ", {{first_name}}" (pontuação antes) ou o placeholder sozinho
-      .replace(/\s*[,:;–-]?\s*\{\{\s*first_name\s*\}\}/g, "");
-  }
-  out = out.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, k) => (vars[k] != null ? String(vars[k]) : ""));
-  out = out.replace(/\s+([,.!?;:])/g, "$1").replace(/\s{2,}/g, " ").trim();
-  // Se removemos o nome do começo, recapitaliza a 1ª letra.
-  if (!firstName && out) out = out[0].toUpperCase() + out.slice(1);
-  return out;
-}
+/**
+ * O texto do bot mora em `lib/bot/texto.ts` — função pura, com teste.
+ * Reexportado aqui porque o motor inteiro chama por `render`.
+ */
+const render = renderTextoDoBot;
 
 const NOT_A_NAME = new Set([
   "oi", "ola", "opa", "eae", "bom dia", "boa tarde", "boa noite", "quero", "preco",
