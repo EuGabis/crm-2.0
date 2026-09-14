@@ -7881,3 +7881,77 @@ com o vendedor dormindo. O `update` casa o nome **exato** "Vendas": `ilike
 ausente não recebendo com `rodizio_offline` ligado, o lead do offline indo para
 Pendentes, o prazo parado com o dono offline, e o plantão nas três combinações de
 status × contingência.
+
+## 🔴 O bot comia a quebra de linha — `\s` inclui `\n` (2026-09-14)
+
+Relato: *"no bot da mensagem de fim de semana, ao pular linha, quando o bot
+responde, não pula na mensagem"*.
+
+A causa é uma linha só, a limpeza final de `render()` no motor do bot:
+
+```ts
+out = out.replace(/\s+([,.!?;:])/g, "$1").replace(/\s{2,}/g, " ").trim();
+```
+
+⚠️ **`\s` inclui `\n`.** Então `\s{2,} → " "` engolia a linha em branco entre
+dois parágrafos e devolvia tudo grudado. Medido antes de mexer:
+
+| entrada | saía |
+|---|---|
+| `"Olá!\nBom dia."` | preservava ✅ |
+| `"Olá!\n\nNosso horário..."` | `"Olá! Nosso horário..."` ❌ |
+| `"Olá!\r\nBom dia."` | `"Olá! Bom dia."` ❌ |
+| `"Olá!\n   Bom dia."` | `"Olá! Bom dia."` ❌ |
+
+🔴 **E a intermitência é o que faz isto parecer defeito do WhatsApp.** Um Enter
+(`\n` sozinho) SOBREVIVIA, porque `\s{2,}` precisa de dois caracteres — quem
+pulava linha uma vez via funcionar. Dois Enters (o jeito normal de separar
+parágrafo) e texto colado com CRLF do Windows (`\r\n` já são dois) não. Numa
+lista, metade das quebras passava e a outra metade não:
+`"Horários:\n\n- Seg\n- Sáb"` virava `"Horários: - Seg\n- Sáb"`.
+
+Confirmado em produção: a mensagem de fim de semana saiu **93 vezes, ZERO com
+quebra**.
+
+⚠️ **A limpeza tinha de continuar existindo** — é ela que evita "Perfeito, !" e
+o espaço duplo quando `{{first_name}}` sai da frase. O erro nunca foi limpar; foi
+limpar a QUEBRA junto com o espaço. Agora todas as regras usam
+`[^\S\n]` (espaço horizontal), CRLF vira LF na entrada, e três Enters viram no
+máximo uma linha em branco.
+
+⚠️ **O mesmo defeito tinha uma SEGUNDA porta**: os regex que removem
+`{{first_name}}` quando não há nome usavam `\s*` em volta do placeholder — um
+`"{{first_name}}, bom dia!\nSeu horário..."` sem nome comia a quebra junto e
+colava as linhas. Também virou horizontal.
+
+### Onde NÃO estava o problema (e por que vale registrar)
+
+- **O editor do bot** usa `<textarea>` e a página não tem `<form>`: o Enter é
+  nativo e a quebra chega ao estado.
+- **O `save`** é upsert do rascunho, sem `trim` nem normalização.
+- **`sendText`** manda o corpo cru — `JSON.stringify` escapa `\n` e a Cloud API
+  renderiza.
+- **O balão do inbox** já tem `whitespace-pre-wrap`.
+
+Ou seja: a quebra atravessava tudo e morria na última linha antes do envio. Por
+isso o `render` saiu do motor (1.000 linhas, importa Supabase e o cliente da
+Meta) para **`src/lib/bot/texto.ts`** — função pura, com teste. Mesmo motivo de
+`devolvivel`, `limiteDoTique` e `mesclarMensagens` viverem separadas. E é o que
+permite `npm run test:bot` rodar sem o resolvedor de alias.
+
+`npm run test:bot` — **62 asserções** (15 novas), uma por forma de pular linha:
+um Enter, linha em branco, CRLF, CR sozinho, espaço antes e depois da quebra,
+lista, teto de linhas em branco, e as três que vigiam o lado oposto (dois
+espaços ainda colapsam, espaço antes de pontuação some, o placeholder sem nome
+continua saindo limpo).
+
+⏳ **A mensagem gravada continua sem quebra** — a correção é no envio, e não
+adivinha onde o texto deveria quebrar. Para valer: Canais → o bot → editar o
+texto com os Enters → Salvar.
+
+⚠️ De passagem, um achado que vale para o plantão (202609112100): o fluxo
+`secretaria-fim-de-semana` **é trocado À MÃO** no número quando o fim de semana
+começa — hoje os dois números da Secretaria apontam para `triagem-secretaria`. É
+o mesmo trabalho manual que o plantão automatiza para o rodízio, mas para o BOT
+ainda não existe agendamento: quem esquecer de trocar na sexta deixa o bot de
+triagem atendendo no sábado.
