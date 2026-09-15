@@ -8188,3 +8188,81 @@ a lista se move de qualquer jeito, e onde não há nada a proteger.
 
 `npm run test:inbox` — 26 asserções (9 novas), com o caso do relato escrito como
 regressão.
+
+## 🔴 O funil escondia 3.556 cards do ADMIN, em silêncio (2026-09-11)
+
+Relato: *"o Rogerio enviou o lead Pedro Henrique para a pipe do comercial, mas
+não aparece para mim e outros usuários"* — e, na sequência, *"eu sou o admin e
+não estou conseguindo ver"*.
+
+⚠️ **A frase "sou admin e não vejo" é o que identifica a causa**, porque inverte
+a intuição: permissão que falha atinge quem tem MENOS acesso, não quem tem mais.
+
+Conferido na RLS antes de tocar em código (transação revertida, por usuário):
+
+| quem | cards que a RLS entrega no Comercial | o card do Pedro |
+|---|---|---|
+| Moacir / João Lucas / Juliana (admin) | **937** | ✅ |
+| Rogério (dono do card) | os dele | ✅ |
+| Paulo Lopes | 436 | ❌ |
+| Alberto | 22 | ❌ |
+
+Ou seja: **a RLS entregava o card ao admin.** O que o escondia era o cliente.
+
+### A causa: `select("*")` sem `.range()` — a armadilha nº 7 pela QUARTA vez
+
+```ts
+supabase.from("opportunities").select("*").order("created_at", { ascending: false })
+```
+
+| medida | valor |
+|---|---|
+| oportunidades no banco | **4.556** |
+| o que o PostgREST devolve (Max rows, **sem erro e sem aviso**) | **1.000** |
+| posição do card do Pedro em `created_at desc` | **2.113** |
+| cards do Comercial dentro das mil | **195 de 937** |
+
+⚠️ **E o sintoma engana de um jeito específico, que vale reconhecer da próxima
+vez: aparecia para o VENDEDOR e sumia para o ADMIN.** O vendedor tem
+`only_assigned`, então a RLS o deixa abaixo do teto de mil; o admin vê tudo e
+leva o corte. Foi por isso que o caso começou como "problema de acesso" e quase
+levou a mexer em policy.
+
+⚠️ **Um card NOVO não está a salvo do corte.** O do Pedro é do mesmo dia e mesmo
+assim caiu na posição 2.113: o bot cria cards o tempo todo no Controle de Leads
+(1.518 só em NOVO LEAD), então um funil de trabalho mais lento como o Comercial é
+sistematicamente empurrado para fora da janela das mil mais recentes.
+
+`fetchAllOpportunities` pagina com `.range()` e **desempata a ordem por `id`** —
+o bot e a varredura da fila gravam em lote, várias linhas saem com o MESMO
+`created_at`, e ordem instável entre páginas repete umas e PULA outras. A pulada
+é um card que some do funil, que é exatamente o defeito que isto conserta.
+
+Conferido que as outras leituras grandes já paginam: `conversations`
+(`fetchAllConversations`), `messages` (teto de 3.000 no load do inbox),
+`payment_events`/`payment_subscriptions` (`.range()` desde a 0008). As demais
+tabelas lidas inteiras estão em outra ordem de grandeza — `appointments` 74,
+`snippets` 14, `tasks` 3.
+
+### ⏳ O que NÃO é bug, e continua valendo
+
+**Alberto e Paulo seguem sem ver o card do Rogério**, e isso é CONFIGURAÇÃO: os
+três vendedores são os únicos da empresa com `location_members.only_assigned =
+true`. A policy de `opportunities` é `sees_all(location) OR owner_id =
+auth.uid()`, e `private.sees_all` é literalmente `only_assigned = false`. Eles
+veem o funil e as 10 fases; o que some são os cards dos colegas.
+
+⚠️ **Desligar `only_assigned` resolveria o funil e abriria muito mais**: a mesma
+função governa as policies de `conversations` (SELECT/UPDATE), `messages`
+(SELECT/INSERT/UPDATE), `opportunities` (SELECT/UPDATE/DELETE) e a exclusão de
+`contacts`. Seria dar aos três o acervo de conversas da Secretaria e do
+Financeiro — o oposto do que a permissão especial `le_todas_conversas`
+(202609110930) foi criada para fazer de forma cirúrgica. Se o time comercial
+precisar ver o funil inteiro, o caminho é a policy de `opportunities` aceitar
+também "o funil foi compartilhado explicitamente comigo", não mexer no
+`only_assigned`.
+
+De passagem, dois fatos do levantamento: o funil **Comercial virou
+`scope = 'user'`** (dono João Lucas, 6 pessoas em `viewer_ids`), então Beatriz,
+Daniel e Jenifer deixaram de vê-lo; e o perfil `gabriel@avioesemusicas.com` tem
+**0 memberships e nunca acessou** — não é a conta usada no dia a dia.
