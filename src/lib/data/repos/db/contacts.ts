@@ -320,6 +320,21 @@ export function useDbContact(id: string | null) {
   return { contact: fromStore ?? fetched, loading: fetching, refresh };
 }
 
+/**
+ * Busca UM contato por id, sem hook e sem store.
+ *
+ * ⚠️ Existe porque o card do funil deixou de chamar `useDbContact` no caminho
+ * quente: com 1.518 cards numa coluna, um hook por card virava 1.518 consultas
+ * ao abrir o funil (a store de contatos não é mais carregada). A ação que
+ * precisa do telefone busca aqui, na hora do clique — uma consulta, e só quando
+ * alguém realmente clica.
+ */
+export async function fetchContactById(id: string): Promise<Contact | null> {
+  const supabase = createClient();
+  const { data } = await supabase.from("contacts").select("*").eq("id", id).maybeSingle();
+  return data ? mapContact(data) : null;
+}
+
 export function useDbTeam() {
   const team = useDbStore((s) => s.team);
   const loadTeam = useDbStore((s) => s.loadTeam);

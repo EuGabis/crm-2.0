@@ -8088,3 +8088,103 @@ seja traz as 500 PRIMEIRAS — numa conversa mais longa que isso o thread mostra
 o começo e não o fim, que é o oposto do que se espera de um chat. Não morde hoje
 (o máximo por contato neste banco é 385), mas é uma bomba-relógio silenciosa: o
 certo é buscar as últimas N em ordem decrescente e inverter.
+
+## 🔴 O funil travava porque montava 1.518 cards de uma vez (2026-09-15)
+
+Queixa: *"ao clicar e segurar para mover um card, a tela fica muito travada"* e
+*"preciso estar com o mouse bem no nome do card para poder mover"*.
+
+⚠️ **Medido antes de mexer**, e o número explica tudo: a fase **NOVO LEAD** do
+funil Controle de Leads tem **1.518 cards** (3.206 no funil inteiro). A coluna
+montava `opportunities.map(...)` — a fase INTEIRA, sem virtualização nem limite.
+Cada card carregava, sempre:
+
+| por card | × 1.518 |
+|---|---|
+| `<select>` de curso com as 45 formações | **~68 mil elementos `<option>`** |
+| `useDbContact(contactId)` | **1.518 consultas ao Supabase** ao abrir o funil |
+| um `<Dialog>` de detalhe do lead | 1.518 portais na árvore |
+
+🔴 **E o dnd-kit re-renderiza TODO draggable a cada movimento do ponteiro.** Ou
+seja: aquele DOM inteiro era reconciliado a cada pixel arrastado. Não era o
+arrasto que estava lento — era o que havia para repintar.
+
+⚠️ **O `useDbContact` por card é o mesmo erro que a 0078 corrigiu em Contatos**,
+por outra porta: a store de contatos deixou de ser carregada, então o hook cai
+no fetch por id — barato para UM card, catastrófico para mil e meio. Hoje o
+contato só é buscado quando o popover de TAGS abre (é o único lugar que precisa
+dele reativo); `openConversation` e a nota usam `opportunity.contactId`, que já
+está no card, e `call()` busca o telefone no CLIQUE
+(`fetchContactById`).
+
+**As quatro correções, em ordem de impacto:**
+
+1. ⚠️ **A coluna monta 30 cards e cresce ao rolar** (`PAGINA` em
+   `stage-column.tsx`), por `IntersectionObserver` com `rootMargin` de 400px —
+   não é botão "carregar mais": rolar continua parecendo uma lista inteira. **A
+   contagem do cabeçalho segue sendo o TOTAL da fase** — o que está montado é
+   detalhe de desenho, e um número menor ali faria a coluna mentir.
+   ⚠️ **O limite NÃO é zerado quando a lista muda** (busca, filtro, card
+   movido): zerar devolveria ao começo a rolagem de quem está lá embaixo a cada
+   card arrastado, e o `slice` já corta sozinho quando a lista encolhe. Trocar
+   de fase remonta a coluna (a `key` é o id da fase), então ali volta ao início
+   de graça.
+2. As **45 opções do curso só montam depois que o ponteiro entra no card**
+   (`ativo`). O hover chega muito antes do clique, então o menu abre completo.
+   ⚠️ A opção ATUAL fica sempre montada: sem ela o `value` do campo controlado
+   ficaria sem par e o card diria "selecionar…" num lead que tem curso — a
+   armadilha de campo controlado que o seletor de lead do calendário já teve.
+3. O **`LeadDetailDialog` só monta quando abre**. O corpo já era condicional,
+   mas o `<Dialog>` em volta não.
+4. `memo` no card.
+
+### O card inteiro passou a ser o punho do arrasto
+
+Só o "corpo" (título e os três rótulos) arrastava — daí "preciso estar bem no
+nome do card".
+
+⚠️ **O comentário que justificava isso estava errado sobre a causa.** Ele dizia
+que com os listeners no raiz "abrir um popover da barra de ações competia com o
+gesto de arrastar". O que competia não era o arrasto: é que os controles internos
+faziam `stopPropagation` **só no `onClick`**, e o gesto começa no `pointerdown`.
+Hoje cada controle (checkbox, avatar, seletor de curso e a barra de ações
+inteira) para a propagação dos DOIS eventos — e é isso que deixa todo o resto do
+card livre para arrastar sem quebrar nenhuma ação.
+
+⏳ Em toque, arrastar o card impede a rolagem vertical da coluna com o dedo. Já
+era assim no corpo do card, e o CRM é desktop (mobile segue no backlog).
+
+## A lista de conversas pulava sob o dedo de quem rola (2026-09-15)
+
+Queixa: *"quando um vendedor está com muitas mensagens e vai procurar um contato
+para mandar mensagem, ao enviar a mensagem, a tela sobe para cima e ele tem que
+descer tudo de novo"*.
+
+⚠️ **Não é scroll: é a ORDENAÇÃO.** A lista é `last_message_at desc`, então a
+conversa que ele acabou de responder PULA para o topo e empurra todas as outras
+uma casa para baixo. O `scrollTop` não muda — o conteúdo debaixo dele é que
+muda, e o que estava sob o olho dele some. Mensagem nova de qualquer outro
+cliente faz o mesmo, sem ele ter feito nada.
+
+`ordemAncorada` (`src/lib/inbox/ordem-ancorada.ts`) congela a ordem enquanto o
+usuário está ROLADO (`scrollTop > 8`) e descongela ao voltar ao topo — para onde
+a lista se move de qualquer jeito, e onde não há nada a proteger.
+
+- ⚠️ **A ordem congela; a LINHA não.** Prévia, não lidas, selo de temperatura e
+  etiqueta continuam chegando ao vivo. Congelar o conteúdo faria a lista ficar
+  velha em silêncio, que é bem pior que o defeito original.
+- ⚠️ **Conversa NOVA entra no FIM, nunca no topo:** no topo ela empurraria a
+  lista inteira para baixo — exatamente o efeito que a função existe para
+  evitar. Ela sobe para o lugar certo quando a ordem descongela.
+- A foto é só a ORDEM: quem foi finalizado, arquivado ou saiu do filtro some da
+  lista em vez de ficar preso na tela por causa do congelamento.
+- ⚠️ O `setFoto` do `onScroll` só mexe no estado na TRANSIÇÃO — o evento dispara
+  dezenas de vezes por segundo, e um `setState` por evento repintaria a lista
+  inteira enquanto a pessoa rola, que é o oposto do que se quer aqui.
+- ⚠️ A foto é tirada do `visible` do render atual, capturado pelo closure do
+  handler inline. A versão com `useRef` escrita no corpo do componente **é erro
+  de lint** (`react-hooks/refs`, "Cannot update ref during render") e
+  desnecessária: o handler é recriado a cada render e já vê o valor fresco.
+
+`npm run test:inbox` — 26 asserções (9 novas), com o caso do relato escrito como
+regressão.

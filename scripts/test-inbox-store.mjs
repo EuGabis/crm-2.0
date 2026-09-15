@@ -17,6 +17,7 @@ import {
   mesclarMensagens,
   cursorDeConversas,
 } from "../src/lib/data/repos/db/conversations.ts";
+import { ordemAncorada } from "../src/lib/inbox/ordem-ancorada.ts";
 
 let ok = 0;
 let falhas = 0;
@@ -147,6 +148,76 @@ eq("sem anterior devolve o novo intacto", preservarContato(doRealtime, undefined
       { id: "b", updatedAt: "2026-09-10T00:00:00Z" },
     ]),
     "2026-09-10T00:00:00Z",
+  );
+}
+
+
+console.log("\nordemAncorada() - a lista nao pula sob o dedo de quem rola\n");
+
+// Atalho: a lista real e de conversas, mas a funcao so olha `id`.
+const L = (...ids) => ids.map((id) => ({ id }));
+const IDS = (lista) => lista.map((c) => c.id);
+
+{
+  // Sem foto (usuario no topo) a ordem e a que a store mandou — reordenar ali
+  // e o comportamento certo, e nao ha nada sob o dedo de ninguem.
+  eq("sem foto, nada muda", IDS(ordemAncorada(L("a", "b", "c"), null)), ["a", "b", "c"]);
+  eq("foto vazia nao congela", IDS(ordemAncorada(L("a", "b"), [])), ["a", "b"]);
+}
+
+{
+  /*
+   * A REGRESSAO, com o caso do relato: a lista esta em a,b,c,d; o vendedor
+   * rolou ate `d` e respondeu. A store devolve `d` no topo. Congelada, a
+   * posicao nao muda — e e isso que o poupa de "descer tudo de novo".
+   */
+  const foto = ["a", "b", "c", "d"];
+  eq(
+    "responder nao move a conversa de lugar",
+    IDS(ordemAncorada(L("d", "a", "b", "c"), foto)),
+    ["a", "b", "c", "d"],
+  );
+  eq(
+    "mensagem de OUTRO cliente tambem nao empurra",
+    IDS(ordemAncorada(L("b", "a", "c", "d"), foto)),
+    ["a", "b", "c", "d"],
+  );
+}
+
+{
+  // ⚠️ Conversa nova entra no FIM: no topo ela empurraria a lista inteira para
+  // baixo, que e exatamente o efeito que a funcao existe para evitar.
+  eq(
+    "conversa nova entra no fim, nao no topo",
+    IDS(ordemAncorada(L("nova", "a", "b"), ["a", "b"])),
+    ["a", "b", "nova"],
+  );
+  eq(
+    "duas novas mantem a ordem que a store deu",
+    IDS(ordemAncorada(L("n2", "n1", "a"), ["a"])),
+    ["a", "n2", "n1"],
+  );
+}
+
+{
+  // A foto e so a ORDEM. Quem foi finalizado, arquivado ou saiu do filtro some,
+  // em vez de ficar preso na tela por causa do congelamento.
+  eq(
+    "conversa que saiu do filtro some",
+    IDS(ordemAncorada(L("a", "c"), ["a", "b", "c"])),
+    ["a", "c"],
+  );
+  eq("lista vazia continua vazia", IDS(ordemAncorada([], ["a", "b"])), []);
+}
+
+{
+  // O objeto devolvido e o da LISTA, nunca o da foto: e o que mantem previa,
+  // nao lidas e etiqueta chegando ao vivo com a ordem parada.
+  const lista = [{ id: "a", previa: "nova" }];
+  eq(
+    "o conteudo vem da lista, so a ordem vem da foto",
+    ordemAncorada(lista, ["a"])[0].previa,
+    "nova",
   );
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useDraggable } from "@dnd-kit/core";
 import { format } from "date-fns";
@@ -32,7 +32,12 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { LeadDetailDialog } from "@/components/pipeline/lead-detail-dialog";
-import { dbContactActions, useDbContact, useDbTeam } from "@/lib/data/repos/db/contacts";
+import {
+  dbContactActions,
+  fetchContactById,
+  useDbContact,
+  useDbTeam,
+} from "@/lib/data/repos/db/contacts";
 import { conversationActions } from "@/lib/data/repos/db/conversations";
 import { oppActions } from "@/lib/data/repos/db/pipeline";
 import { taskActions } from "@/lib/data/repos/db/contacts-module";
@@ -119,7 +124,7 @@ function ActionPopover({
   );
 }
 
-export function OpportunityCard({
+function OpportunityCardBase({
   opportunity,
   owner,
   dragging,
@@ -136,10 +141,20 @@ export function OpportunityCard({
     id: opportunity.id,
   });
   const router = useRouter();
-  const { contact } = useDbContact(opportunity.contactId);
   const team = useDbTeam();
 
   const [openAction, setOpenAction] = useState<string | null>(null);
+  /**
+   * 🔴 O que fazia a tela travar não era o arrasto: era o CUSTO DE CADA CARD.
+   * Medido em produção: a fase "NOVO LEAD" do funil Controle de Leads tem
+   * **1.518 cards**, e o funil inteiro 3.206 — todos montados de uma vez.
+   *
+   * `ativo` só liga quando o ponteiro ENTRA no card, e é o que destrava as 45
+   * opções do seletor de curso. Montadas sempre, eram ~68 mil elementos
+   * `<option>` numa coluna só; e o dnd-kit re-renderiza TODO draggable a cada
+   * movimento do ponteiro, então esse DOM era repintado a cada pixel arrastado.
+   */
+  const [ativo, setAtivo] = useState(false);
   const [tagInput, setTagInput] = useState("");
   const [note, setNote] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
@@ -149,6 +164,14 @@ export function OpportunityCard({
   const [apptTime, setApptTime] = useState("09:00");
   const [busy, setBusy] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
+  /*
+   * ⚠️ O contato só é buscado quando o popover de TAGS abre — é o único lugar
+   * que precisa dele reativo (a lista de etiquetas). As outras ações usam
+   * `opportunity.contactId`, que já está no card, ou buscam na hora do clique.
+   */
+  const { contact, refresh: recarregarContato } = useDbContact(
+    openAction === "tag" ? opportunity.contactId : null
+  );
   // Onde o dedo/ponteiro desceu. O PointerSensor do kanban só começa a arrastar
   // depois de 6px, mas o `click` do navegador dispara mesmo depois de um
   // arrasto que voltou para perto do começo — sem esta guarda, soltar o card na
@@ -159,22 +182,24 @@ export function OpportunityCard({
 
   /* ---- ações ---- */
 
-  const call = () => {
-    if (!contact?.phone?.trim()) {
+  const call = async () => {
+    // ⚠️ O telefone é buscado NO CLIQUE, não por hook: um `useDbContact` por
+    // card custava uma consulta por card ao abrir o funil.
+    const c = contact ?? (await fetchContactById(opportunity.contactId));
+    if (!c?.phone?.trim()) {
       toast.error("Contato sem telefone cadastrado");
       return;
     }
     // Quem liga é o discador do APARELHO — o webphone do CRM foi removido por
     // prometer ligação sem ter provedor de voz.
-    window.location.href = telHref(contact.phone);
+    window.location.href = telHref(c.phone);
   };
 
   const openConversation = async () => {
-    if (!contact) return;
     setBusy(true);
     // Reaproveita a conversa que o contato já tem — nunca abre um chat novo
     // por cima de um existente.
-    const res = await conversationActions.openForContact(contact.id);
+    const res = await conversationActions.openForContact(opportunity.contactId);
     setBusy(false);
     if (!res.id) {
       toast.error(res.error ?? "Não foi possível abrir a conversa");
@@ -204,30 +229,37 @@ export function OpportunityCard({
 
   const addTag = async () => {
     const t = tagInput.trim();
-    if (!t || !contact) return;
+    if (!t) return;
     setBusy(true);
-    const ok = await dbContactActions.addTag([contact.id], t);
+    const ok = await dbContactActions.addTag([opportunity.contactId], t);
     setBusy(false);
     if (!ok) {
       toast.error("Não foi possível adicionar a tag");
       return;
     }
-    toast.success(`Tag "${t}" adicionada a ${contact.firstName}`);
+    toast.success(`Tag "${t}" adicionada ao contato`);
     setTagInput("");
+    // ⚠️ O contato aqui vem de um fetch por id, não da store — `addTag` grava no
+    // banco e na store, e sem esta recarga o popover continuaria mostrando a
+    // lista de antes. Mesmo defeito que o seletor de etiquetas do composer teve.
+    recarregarContato();
   };
 
   const removeTag = async (t: string) => {
-    if (!contact) return;
-    (await dbContactActions.removeTag([contact.id], t))
-      ? toast.success(`Tag "${t}" removida`)
-      : toast.error("Não foi possível remover a tag");
+    const ok = await dbContactActions.removeTag([opportunity.contactId], t);
+    if (!ok) {
+      toast.error("Não foi possível remover a tag");
+      return;
+    }
+    toast.success(`Tag "${t}" removida`);
+    recarregarContato();
   };
 
   const saveNote = async () => {
     const body = note.trim();
-    if (!body || !contact) return;
+    if (!body) return;
     setBusy(true);
-    const conversationId = (await conversationActions.openForContact(contact.id)).id;
+    const conversationId = (await conversationActions.openForContact(opportunity.contactId)).id;
     const ok =
       !!conversationId &&
       (
@@ -296,37 +328,46 @@ export function OpportunityCard({
   };
 
   return (
+    /*
+     * O CARD INTEIRO é o punho do arrasto. Antes só o "corpo" (título e os três
+     * rótulos) arrastava, então era preciso acertar o nome do lead para mover —
+     * a queixa que originou esta mudança.
+     *
+     * ⚠️ O que fazia os listeners no raiz "competirem" com a barra de ações não
+     * era o arrasto: é que `stopPropagation` estava só no `onClick` dos
+     * controles, e o gesto começa no `pointerdown`. Cada controle interno
+     * (checkbox, avatar, seletor de curso, barra de ações) para a propagação
+     * dos DOIS eventos — é o que deixa o resto do card livre para arrastar.
+     */
     <div
       ref={setNodeRef}
+      {...listeners}
+      {...attributes}
+      onPointerEnter={() => setAtivo(true)}
+      onPointerDown={(e) => {
+        pressAt.current = { x: e.clientX, y: e.clientY };
+        setAtivo(true);
+        listeners?.onPointerDown?.(e);
+      }}
+      onClick={(e) => {
+        const from = pressAt.current;
+        pressAt.current = null;
+        if (from && Math.hypot(e.clientX - from.x, e.clientY - from.y) > 6) return;
+        setDetailOpen(true);
+      }}
+      title="Arraste para mover · clique para ver os detalhes"
       style={
         transform
           ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
           : undefined
       }
       className={cn(
-        "rounded-lg border bg-white p-2.5 shadow-sm transition-shadow hover:shadow",
+        "cursor-grab rounded-lg border bg-white p-2.5 shadow-sm transition-shadow hover:shadow active:cursor-grabbing",
         (isDragging || dragging) && "opacity-60 shadow-lg ring-2 ring-indigo-300",
         selected && "border-indigo-300 bg-indigo-50/60 ring-1 ring-indigo-300"
       )}
     >
-      {/* Só o corpo arrasta: com os listeners no card inteiro, abrir um popover
-          da barra de ações competia com o gesto de arrastar. */}
-      <div
-        {...listeners}
-        {...attributes}
-        onPointerDown={(e) => {
-          pressAt.current = { x: e.clientX, y: e.clientY };
-          listeners?.onPointerDown?.(e);
-        }}
-        onClick={(e) => {
-          const from = pressAt.current;
-          pressAt.current = null;
-          if (from && Math.hypot(e.clientX - from.x, e.clientY - from.y) > 6) return;
-          setDetailOpen(true);
-        }}
-        title="Ver detalhes do lead"
-        className="cursor-pointer"
-      >
+      <div>
         <div className="flex items-start justify-between gap-2">
           {onToggleSelect && (
             // Fora do drag: marcar não pode arrastar o card junto.
@@ -428,16 +469,36 @@ export function OpportunityCard({
           className="h-6 w-full truncate rounded border bg-white px-1 text-[10px] text-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-400"
         >
           <option value="">Curso: selecionar…</option>
-          {CURSOS.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
+          {/*
+            ⚠️ As 45 formações só montam depois que o ponteiro entra no card.
+            Montadas sempre eram ~68 mil `<option>` numa coluna de 1.518 cards —
+            a maior fatia do DOM da tela, repintada a cada pixel de arrasto.
+            O hover chega muito antes do clique, então o menu abre completo; e a
+            opção ATUAL fica sempre montada para o `value` do campo controlado
+            nunca ficar sem par (senão o card diria "selecionar…" num lead que
+            tem curso).
+          */}
+          {ativo ? (
+            CURSOS.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))
+          ) : opportunity.course ? (
+            <option value={opportunity.course}>{opportunity.course}</option>
+          ) : null}
         </select>
       </span>
 
-      <div className="mt-2 flex items-center gap-1 border-t pt-1.5">
-        <ActionButton icon={Phone} label="Ligar" onClick={call} />
+      {/* Fora do gesto de arrastar: clicar numa ação não pode mover o card.
+          Com os listeners no raiz, é ESTE `stopPropagation` no pointerdown que
+          faz os popovers continuarem abrindo. */}
+      <div
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+        className="mt-2 flex items-center gap-1 border-t pt-1.5"
+      >
+        <ActionButton icon={Phone} label="Ligar" onClick={() => void call()} />
         <ActionButton
           icon={MessageCircle}
           label="Abrir conversa"
@@ -578,11 +639,19 @@ export function OpportunityCard({
         </ActionPopover>
       </div>
 
-      <LeadDetailDialog
-        opportunity={opportunity}
-        open={detailOpen}
-        onOpenChange={setDetailOpen}
-      />
+      {/* ⚠️ Montado só quando abre. Um `<Dialog>` por card são 1.518 diálogos
+          na árvore de uma coluna só — cada um com portal, foco e escuta de
+          teclado — para uma tela que quase nunca é aberta. */}
+      {detailOpen && (
+        <LeadDetailDialog opportunity={opportunity} open onOpenChange={setDetailOpen} />
+      )}
     </div>
   );
 }
+
+/**
+ * ⚠️ `memo` não é micro-otimização aqui: o dnd-kit re-renderiza TODO draggable
+ * a cada movimento do ponteiro durante o arrasto. Com 1.518 cards na coluna,
+ * era 1.518 re-renderizações por pixel — o travamento relatado.
+ */
+export const OpportunityCard = memo(OpportunityCardBase);
