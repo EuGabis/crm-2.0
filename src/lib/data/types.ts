@@ -148,6 +148,15 @@ export interface Conversation {
   archivedBy?: string | null;
   /** Início da conversa (created_at) — usado no relatório. */
   createdAt?: string;
+  /**
+   * Última alteração de QUALQUER campo (migração 202609151100).
+   *
+   * ⚠️ É o cursor da varredura da caixa de entrada, e existe porque
+   * `lastMessageAt` NÃO cobre atribuição, finalização nem arquivamento — as
+   * mudanças que o Realtime traz e que, quando ele morre em silêncio, ninguém
+   * mais trazia.
+   */
+  updatedAt?: string;
   /** Bot pausado = humano assumiu (migração 0032). false = bot ainda ativo. */
   botPaused?: boolean;
   /** Lead quente qualificado sem ninguém online — aguardando distribuição (0056). */

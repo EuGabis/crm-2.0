@@ -7955,3 +7955,136 @@ começa — hoje os dois números da Secretaria apontam para `triagem-secretaria
 o mesmo trabalho manual que o plantão automatiza para o rodízio, mas para o BOT
 ainda não existe agendamento: quem esquecer de trocar na sexta deixa o bot de
 triagem atendendo no sábado.
+
+## 🔴 A caixa não atualiza, e o lead chega sem histórico (2026-09-15)
+
+Dois relatos do mesmo dia, que pareciam coisas diferentes e são a mesma família:
+
+1. *"muitos usuários relatam que a tela de conversas não atualiza às vezes. Ele
+   fica com a tela aberta e atualiza manualmente, e aí sim aparece"*;
+2. *"esse lead apareceu para o Paulo, mas não apareceram todas as mensagens que
+   o aluno enviou para o bot"*.
+
+### O que a medição descartou primeiro
+
+⚠️ **A RLS está exonerada, e isso importa porque era o suspeito óbvio.** O
+contato Marcelo tem **21 mensagens** gravadas, todas no mesmo canal. Simulando em
+produção (transação revertida) a conversa na mão do Paulo — que é
+`only_assigned = true`, o caso mais restrito da empresa:
+
+```
+auth.uid() = Paulo · conv_assigned_to_me = true · vê a conversa: 1 · vê mensagens: 21
+```
+
+Ou seja: **uma consulta feita naquele momento traria o fio inteiro.** A RLS é
+avaliada no instante da consulta, então ela não consegue produzir um corte por
+horário — o buraco é do cliente.
+
+### Defeito 1 — a varredura de conversas trazia mil linhas ARBITRÁRIAS
+
+```ts
+supabase.from("conversations").select(CONV_SELECT)   // sem range, sem order
+```
+
+🔴 **Armadilha nº 7 do AGENTS.md pela TERCEIRA vez.** O PostgREST corta no "Max
+rows" (1000) sem erro e sem aviso, e **sem `order` QUAIS mil voltam é
+indefinido**. Medido: **4.049 conversas**. Cada aba aberta baixava mil linhas com
+join de contato POR MINUTO, e a conversa recém-visível podia não estar entre
+elas — sintoma errático por construção.
+
+🔴 **E ela só ACRESCENTAVA** (`filter(c => !known.has(c.id))`). Conversa já
+conhecida nunca era atualizada — e **atribuir, transferir, finalizar e arquivar
+não mexem em `last_message_at`**, então escapam também do `syncInboxDelta`, que
+busca mensagens. Essas mudanças só chegavam pelo Realtime. Quando o websocket
+morre, a lista congela e **nada mais a conserta**: é literalmente o relato 1.
+
+### Defeito 2 — a varredura de mensagens NÃO OLHA PARA TRÁS
+
+`syncInboxDelta` busca `created_at > cursor`, e o cursor é **a mensagem mais
+recente da store INTEIRA**. Some a isso que o Realtime é ao vivo, não retroativo:
+
+| momento | o que acontece na sessão do Paulo |
+|---|---|
+| 10:52–10:55 | o cliente conversa com o bot. A conversa é invisível para ele (`only_assigned`), então o Realtime não entrega nada |
+| 10:55:27 | o rodízio atribui a ele → a conversa entra na lista |
+| a partir daí | a varredura traz `created_at > cursor` — e **o histórico do bot está no PASSADO do cursor** |
+
+A conversa nasce na lista com o fio começando no instante da atribuição. O
+`loadMessagesFor` do thread preencheria ao ABRIR, mas isso deixa o histórico
+dependendo do momento em que a pessoa clica.
+
+⏳ **O que NÃO ficou provado**, e vale dizer: por que, no caso do print, o
+`loadMessagesFor` não completou o fio. Ele roda ao abrir e busca tudo. Restam
+duas explicações que eu não consigo distinguir com o que tenho — o print foi
+tirado entre o clique e a volta da consulta, ou a consulta falhou uma vez (aí ela
+desmarca e a próxima abertura resolve). A correção fecha na ORIGEM: a conversa
+passa a nascer completa, e o caso deixa de depender do instante do clique.
+
+### A migração 202609151100: `conversations.updated_at`
+
+Revalidar sem carimbo de alteração significa **rebaixar a lista inteira** — e foi
+isso que tornou a varredura cara a ponto de alguém tê-la escrito com um teto de
+mil linhas. Com o carimbo, a pergunta vira "o que mudou desde X", que é a mesma
+forma do `syncInboxDelta` para mensagens e custa algumas linhas por minuto.
+
+- ⚠️ **GATILHO, não `set updated_at = now()` em cada escrita** — a lição da
+  202608281530 e da 0085: a conversa é escrita por mais de uma dezena de lugares
+  (webhook, bot, rodízio, funções definer, a tela), e o próximo que alguém criar
+  esqueceria. Carimbo que falha em UM caminho é pior que carimbo nenhum: a
+  varredura passa a perder exatamente aquele tipo de mudança, em silêncio.
+- ⚠️ **O backfill vem ANTES do gatilho**, e a ordem não é estética: o
+  `default now()` carimba as 4.049 linhas com o instante do ALTER (toda conversa
+  "atualizada agora", e a primeira varredura de cada aba baixaria o banco
+  inteiro), e com o gatilho já criado o próprio `update` do backfill gravaria
+  `now()` de novo — anulando a correção em silêncio.
+- A migração termina com um `raise warning` se TODAS as conversas ficarem com
+  `updated_at` na última hora. É a conferência que este arquivo já cobra desde
+  02609102300: *migração que altera dado tem de dizer o que fez.*
+
+### Defeito 3 — o canal ZUMBI, que é o que fazia o F5 ser a única saída
+
+`subscribeInbox` só marca `realtime: "off"` quando o Supabase AVISA
+(`CLOSED`/`CHANNEL_ERROR`/`TIMED_OUT`). Mas um websocket pode morrer **sem
+aviso** — notebook que suspende, wi-fi trocando de rede, proxy cortando conexão
+ociosa: o socket fica meio-aberto, o callback nunca vem, o selo segue dizendo
+"Ao vivo" e nada chega. E o único lugar que reassinava fora do callback era o
+`visibilitychange` — que **não dispara para quem fica com a aba aberta**.
+
+⚠️ **A varredura é a única testemunha possível**: se ELA achou mensagem que o
+Realtime deveria ter entregado, o canal está morto. Duas varreduras seguidas
+nessa condição → reassina.
+
+⚠️ **Duas, e não uma**: a primeira varredura depois do `load()` pega legitimamente
+o que chegou entre a consulta e a inscrição, e reassinar ali derrubaria um canal
+saudável a cada abertura da caixa. Mensagem que o próprio usuário envia não
+conta — ela entra na store de forma otimista e o filtro por id a descarta nos
+dois lados.
+
+### O resto do conserto
+
+- **Conversa que ENTRA na lista ganha o histórico** — no upsert do Realtime e nas
+  novas do resync, `loadMessagesFor(id)`. É idempotente e dá uma consulta por
+  conversa nova (~40/dia nesta operação).
+- **`resyncConversations` atualiza as existentes**, mesclando com
+  `preservarContato`. A linha vem com o JOIN (`CONV_SELECT`), então substituir é
+  seguro — diferente do payload cru do Realtime, que não traz o contato e apagava
+  nome e etiqueta (2026-09-09); o `preservarContato` aqui é rede para o dia em
+  que alguém passar uma linha sem join.
+- ⚠️ **Sem a coluna, cai na lista inteira — porém PAGINADA** (`fetchAllConversations`).
+  Neste projeto o código vai ao ar ANTES da migração, e pedir coluna inexistente
+  faz o PostgREST recusar a consulta inteira: a varredura pararia de trazer
+  qualquer coisa, que é o oposto do conserto.
+- ⚠️ **Um `updatedAt` ausente derruba o cursor inteiro** (`cursorDeConversas`
+  devolve null). Um cursor "pela metade" pularia justamente as conversas sem
+  carimbo, em silêncio; sem cursor, a varredura é mais cara e está CERTA.
+- **`markRead` grava no banco ANTES de tocar a store** (conferido), então a
+  varredura que agora atualiza as existentes nunca ressuscita o selo de não
+  lida.
+
+`npm run test:inbox` — 17 asserções (5 novas, sobre o cursor).
+
+⏳ **Fica em aberto:** `loadMessagesFor` usa `.order("created_at").limit(500)`, ou
+seja traz as 500 PRIMEIRAS — numa conversa mais longa que isso o thread mostraria
+o começo e não o fim, que é o oposto do que se espera de um chat. Não morde hoje
+(o máximo por contato neste banco é 385), mas é uma bomba-relógio silenciosa: o
+certo é buscar as últimas N em ordem decrescente e inverter.
