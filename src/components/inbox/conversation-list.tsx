@@ -64,6 +64,7 @@ import {
 } from "@/lib/data/repos/db/conversations";
 import { useMyMembership, useTeam } from "@/lib/data/repos/db/team";
 import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
+import { ordemAncorada } from "@/lib/inbox/ordem-ancorada";
 import { cn } from "@/lib/utils";
 import { SORT_OPTIONS, scopeLabel, statusLabel, useInboxUi } from "./inbox-filters";
 import { BulkTemplateDialog, type BulkTarget } from "./bulk-template-dialog";
@@ -431,7 +432,7 @@ export function ConversationList({
   );
 
   const q = query.trim().toLowerCase();
-  const visible = q
+  const filtradas = q
     ? sorted.filter((conv) => {
         const name = `${conv.contactFirstName ?? ""} ${conv.contactLastName ?? ""}`.toLowerCase();
         return (
@@ -441,6 +442,15 @@ export function ConversationList({
         );
       })
     : sorted;
+
+  /*
+   * A ordem congela enquanto o usuário está ROLADO, e descongela ao voltar ao
+   * topo. Ver `ordemAncorada`: sem isso, responder uma conversa a joga para o
+   * topo e desloca tudo o que estava na tela — a queixa do "tem que descer tudo
+   * de novo". Fica no topo? Nada a proteger: é para lá que a lista se move.
+   */
+  const [foto, setFoto] = useState<string[] | null>(null);
+  const visible = ordemAncorada(filtradas, foto);
 
   return (
     <div className="flex h-full w-[300px] shrink-0 flex-col border-r bg-white">
@@ -736,7 +746,20 @@ export function ConversationList({
           />
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-width:thin]">
+      <div
+        onScroll={(e) => {
+          const rolada = e.currentTarget.scrollTop > 8;
+          // Só mexe no estado na TRANSIÇÃO: o onScroll dispara dezenas de vezes
+          // por segundo, e um setState por evento repintaria a lista inteira
+          // enquanto a pessoa rola — que é o oposto do que se quer aqui.
+          setFoto((atual) => {
+            if (rolada && atual === null) return visible.map((c) => c.id);
+            if (!rolada && atual !== null) return null;
+            return atual;
+          });
+        }}
+        className="min-h-0 flex-1 overflow-y-auto [scrollbar-width:thin]"
+      >
         {visible.map((conv) => {
           // Fallback: se o contato ainda não carregou/não é visível, a linha NÃO
           // pode sumir (senão a conversa não aparece). Mostra "Contato" até vir.
