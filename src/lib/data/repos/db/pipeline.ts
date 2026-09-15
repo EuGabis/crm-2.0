@@ -48,6 +48,45 @@ interface PipelineDbState {
   patch: (p: Partial<Pick<PipelineDbState, "pipelines" | "opportunities">>) => void;
 }
 
+/** Linhas por página na leitura das oportunidades. */
+const PAGINA = 1000;
+
+/**
+ * Traz TODAS as oportunidades, em páginas.
+ *
+ * 🔴 Era `select("*")` sem `.range()`, e isso escondia cards em silêncio — a
+ * armadilha nº 7 deste projeto pela quarta vez. Medido no dia do relato: **4.556
+ * oportunidades** no banco, o PostgREST corta no "Max rows" (1000) **sem erro**,
+ * e o card recém-enviado ao funil Comercial estava na **posição 2.113** da
+ * ordenação por `created_at desc`. O admin recebia **195 dos 937 cards** do
+ * Comercial e não tinha como saber.
+ *
+ * ⚠️ E o sintoma engana de um jeito específico: aparecia para o VENDEDOR (a RLS
+ * o limita a poucas centenas, abaixo do teto) e sumia para o ADMIN, que vê
+ * tudo. O contrário do que a intuição diz sobre permissão — foi por isso que o
+ * caso começou como "problema de acesso".
+ *
+ * ⚠️ A ordem desempata por `id`: o bot e a varredura da fila gravam cards em
+ * lote, então várias linhas saem com o MESMO `created_at` e a ordem instável
+ * entre páginas repete umas e PULA outras — e a pulada é um card que some do
+ * funil, que é exatamente o defeito que isto conserta.
+ */
+async function fetchAllOpportunities(supabase: ReturnType<typeof createClient>) {
+  const linhas: any[] = [];
+  for (let de = 0; ; de += PAGINA) {
+    const { data, error } = await supabase
+      .from("opportunities")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .order("id")
+      .range(de, de + PAGINA - 1);
+    if (error) return { data: null, error };
+    linhas.push(...(data ?? []));
+    if ((data?.length ?? 0) < PAGINA) break;
+  }
+  return { data: linhas, error: null };
+}
+
 /**
  * Busca pipelines + fases + oportunidades e devolve o formato da store.
  * Separado do `load` para que `reload` reaproveite exatamente a mesma leitura —
@@ -60,7 +99,7 @@ async function fetchPipelineState(): Promise<
   const [pipes, stages, opps] = await Promise.all([
     supabase.from("pipelines").select("*").order("position").order("created_at"),
     supabase.from("stages").select("*").order("position"),
-    supabase.from("opportunities").select("*").order("created_at", { ascending: false }),
+    fetchAllOpportunities(supabase),
   ]);
   if (pipes.error || stages.error || opps.error) return null;
   const stagesByPipe = new Map<string, Stage[]>();
