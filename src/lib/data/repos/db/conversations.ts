@@ -110,6 +110,14 @@ const mapConversation = (r: any): Conversation => ({
   botPaused: r.bot_paused ?? false,
   awaitingDistribution: r.awaiting_distribution ?? false,
   assignedOffline: r.assigned_offline ?? false,
+  /*
+   * Carimbo de qualquer alteração da conversa (202609151100). É o cursor da
+   * varredura: atribuição, finalização e arquivamento NÃO mexem em
+   * `last_message_at`, então sem ele revalidar significava rebaixar a lista
+   * inteira. `undefined` enquanto a migração não for aplicada — e aí a varredura
+   * cai no modo antigo em vez de parar.
+   */
+  updatedAt: r.updated_at ?? undefined,
   ...contatoDoJoin(r),
 });
 
@@ -430,6 +438,18 @@ export function subscribeInbox() {
            */
           set({ conversations: [conv, ...s.conversations] });
           void completarContato(conv.id);
+          /*
+           * 🔴 **E o HISTÓRICO, que é o relato de 2026-09-15** (*"o lead apareceu
+           * para o Paulo, mas não apareceram todas as mensagens que o aluno
+           * enviou para o bot"*).
+           *
+           * Tudo o que o cliente falou com o bot foi gravado enquanto esta
+           * conversa era invisível para quem a recebeu — o Realtime é AO VIVO,
+           * não retroativo, e `syncInboxDelta` só busca `created_at > cursor`,
+           * ou seja **não olha para trás**. Sem esta linha a conversa nasce na
+           * lista com um fio que começa no instante da atribuição.
+           */
+          void loadMessagesFor(conv.id);
         }
       )
       .subscribe((status) => {
@@ -517,23 +537,125 @@ export async function syncInboxDelta(): Promise<number> {
 }
 
 /**
- * Rebusca as conversas VISÍVEIS e adiciona na store só as que ainda não estão lá —
- * pega conversas que ficaram visíveis sem uma mensagem nova (ex.: atribuídas ao
- * atendente por rodízio/transferência enquanto ele estava offline). Barato: sai
- * sem mexer na store quando não há nada novo. Não substitui as existentes (o
- * Realtime e o delta já cuidam disso).
+ * Revalida as conversas: traz o que MUDOU desde a última varredura, atualiza o
+ * que já está na lista e acrescenta o que ficou visível agora.
+ *
+ * 🔴 **Ela fazia `select(CONV_SELECT)` seco — sem `range` e sem `order`.** É a
+ * armadilha nº 7 do AGENTS.md pela terceira vez: o PostgREST corta no "Max rows"
+ * (1000) sem erro e sem aviso, e sem `order` QUAIS mil voltam é indefinido.
+ * Medido em 2026-09-15: **4.049 conversas**. Cada aba aberta baixava mil linhas
+ * com join de contato POR MINUTO — caras e arbitrárias —, e a conversa que
+ * acabou de ficar visível podia não estar entre elas. Sintoma errático por
+ * construção.
+ *
+ * 🔴 **E ela só ACRESCENTAVA.** Conversa já conhecida era ignorada, então
+ * atribuir, transferir, finalizar e arquivar — que **não mexem em
+ * `last_message_at`** e portanto escapam também do `syncInboxDelta` — só
+ * chegavam pelo Realtime. Quando o websocket morre em silêncio, a lista congela
+ * e nada mais a conserta: é literalmente o relato *"fica com a tela aberta e não
+ * atualiza; atualizo manualmente e aí aparece"*.
+ *
+ * ⚠️ **O cursor é `updated_at`, não `last_message_at`** (migração 202609151100).
+ * Era justamente por não existir carimbo de alteração que revalidar significava
+ * rebaixar a lista inteira — e é isso que tornava a varredura cara a ponto de
+ * ter sido escrita com um teto de mil linhas.
+ *
+ * ⚠️ **Sem a coluna, cai no modo antigo — porém PAGINADO.** Neste projeto o
+ * código chega à produção ANTES da migração, e pedir coluna inexistente faz o
+ * PostgREST recusar a consulta inteira: a varredura pararia de trazer qualquer
+ * coisa, que é o oposto do conserto.
  */
+/**
+ * Teto de uma varredura por cursor. Não é desempenho: é rede contra o dia em que
+ * alguém fizer uma escrita em massa nas conversas (uma migração, um
+ * rebalanceamento) — sem teto, a aba baixaria o banco inteiro numa tacada. O que
+ * passar disso vem na varredura seguinte, porque o cursor só avança até onde
+ * chegou.
+ */
+const RESYNC_PAGE = 500;
+
+/**
+ * O instante da conversa mais recentemente alterada que já temos.
+ *
+ * ⚠️ `undefined` em QUALQUER conversa derruba o cursor para nulo e a varredura
+ * cai na lista inteira — de propósito: enquanto a migração não estiver aplicada,
+ * um cursor pela metade pularia justamente as conversas sem carimbo, e em
+ * silêncio.
+ */
+export function cursorDeConversas(convs: Conversation[]): string | null {
+  if (convs.length === 0) return null;
+  let max: string | null = null;
+  for (const c of convs) {
+    if (!c.updatedAt) return null;
+    if (!max || c.updatedAt > max) max = c.updatedAt;
+  }
+  return max;
+}
+
 export async function resyncConversations(): Promise<void> {
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from("conversations")
-    .select(CONV_SELECT);
-  if (error || !data) return;
   const s = useConvStore.getState();
-  const known = new Set(s.conversations.map((c) => c.id));
-  const novas = data.filter((c: any) => !known.has(c.id)).map(mapConversation);
-  if (novas.length === 0) return;
-  useConvStore.setState({ conversations: [...novas, ...s.conversations] });
+  const cursor = cursorDeConversas(s.conversations);
+
+  let linhas: any[] | null = null;
+  if (cursor) {
+    const { data, error } = await supabase
+      .from("conversations")
+      .select(CONV_SELECT)
+      .gt("updated_at", cursor)
+      .order("updated_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(0, RESYNC_PAGE - 1);
+    if (!error) linhas = data ?? [];
+  }
+  if (linhas === null) {
+    // Sem cursor (primeira varredura, ou coluna ainda não aplicada): lista
+    // inteira, mas pelo pager — nunca mais a página indefinida de mil.
+    const { data, error } = await fetchAllConversations(supabase);
+    if (error || !data) return;
+    linhas = data;
+  }
+  if (linhas.length === 0) return;
+
+  const cur = useConvStore.getState();
+  const byId = new Map(linhas.map((r: any) => [r.id as string, mapConversation(r)]));
+  const conhecidas = new Set(cur.conversations.map((c) => c.id));
+  /*
+   * ⚠️ A linha vem com o JOIN do contato (`CONV_SELECT`), então substituir é
+   * seguro — diferente do payload cru do Realtime, que não traz o contato e
+   * apagava nome e etiqueta ao substituir (2026-09-09). Aqui o `preservarContato`
+   * é rede para o dia em que alguém passar uma linha sem join.
+   */
+  const atualizadas = cur.conversations.map((c) => {
+    const nova = byId.get(c.id);
+    return nova ? preservarContato(nova, c) : c;
+  });
+  const novas = [...byId.values()].filter((c) => !conhecidas.has(c.id));
+  useConvStore.setState({ conversations: [...novas, ...atualizadas] });
+
+  /*
+   * 🔴 **Conversa que ENTRA agora não tem histórico na store, e ninguém o
+   * buscava.**
+   *
+   * Relato de 2026-09-15: *"esse lead apareceu para o Paulo, mas não apareceram
+   * todas as mensagens que o aluno enviou para o bot"*. O fio dele começava
+   * exatamente onde o cursor da varredura de MENSAGENS estava.
+   *
+   * A causa é a soma de três coisas, e nenhuma delas é a RLS — conferido em
+   * produção: com a conversa na mão do Paulo ele enxerga as 21 mensagens.
+   *   1. enquanto a conversa era do bot, ela era invisível para ele
+   *      (`only_assigned`), então o Realtime nunca lhe entregou nada dela;
+   *   2. ao ser atribuída, ela entra na lista — mas `syncInboxDelta` só busca
+   *      `created_at > cursor`, e o histórico do bot está no PASSADO do cursor:
+   *      **a varredura de mensagens não olha para trás**;
+   *   3. o `loadMessagesFor` do thread só roda ao ABRIR, e marca a conversa como
+   *      carregada para sempre.
+   *
+   * Buscar aqui fecha o buraco na origem: a conversa nasce na lista já com o
+   * atendimento inteiro. É idempotente e uma consulta por conversa NOVA — ~40
+   * por dia nesta operação.
+   */
+  for (const c of novas) void loadMessagesFor(c.id);
 }
 
 export function useConversations(filter: ConversationFilter = "all") {
@@ -1860,6 +1982,8 @@ export function useInboxLiveSync(intervalMs = 15000) {
     let alive = true;
     let running = false;
     let ticks = 0;
+    // Varreduras seguidas que acharam mensagem com o canal se dizendo vivo.
+    let semRealtime = 0;
 
     const tick = async () => {
       // Uma varredura por vez: numa conexão lenta, duas rodando juntas
@@ -1868,9 +1992,43 @@ export function useInboxLiveSync(intervalMs = 15000) {
       if (document.hidden) return;
       running = true;
       try {
-        await syncInboxDelta();
+        const novas = await syncInboxDelta();
+        /*
+         * 🔴 **Detector de canal ZUMBI.**
+         *
+         * O `subscribe` só marca `realtime: "off"` quando o Supabase avisa
+         * (`CLOSED`/`CHANNEL_ERROR`/`TIMED_OUT`). Mas um websocket pode morrer
+         * SEM aviso — notebook que suspende, wi-fi trocando de rede, proxy
+         * corporativo cortando conexão ociosa: o socket fica meio-aberto, o
+         * callback nunca vem, e o CRM segue exibindo "Ao vivo" sem receber nada.
+         * É o relato de 2026-09-15: *"fica com a tela aberta e não atualiza;
+         * atualizo manualmente e aí aparece"* — o F5 era a única saída porque
+         * NADA reassinava.
+         *
+         * A varredura é a única testemunha possível: se ELA achou mensagem que o
+         * Realtime deveria ter entregado, o canal está morto. Reassinar devolve
+         * o tempo real em vez de deixar a pessoa dependendo de uma varredura de
+         * 15 s que só traz mensagem (e não atribuição, finalização, arquivamento).
+         *
+         * ⚠️ **Duas varreduras seguidas, não uma.** A primeira depois do `load()`
+         * pega legitimamente o que chegou entre a consulta e a inscrição, e
+         * reassinar ali seria derrubar um canal saudável a cada abertura da
+         * caixa. Mensagem que o próprio usuário envia não conta: ela entra na
+         * store de forma otimista e o filtro por id a descarta nos dois lados.
+         */
+        if (ticks > 0 && novas > 0 && useConvStore.getState().realtime === "on") {
+          semRealtime++;
+          if (semRealtime >= 2) {
+            semRealtime = 0;
+            subscribeInbox();
+          }
+        } else {
+          semRealtime = 0;
+        }
         // A cada ~1 min, rebusca conversas inteiras — pega as que viraram visíveis
-        // sem mensagem nova (ex.: lead distribuído/transferido pra este atendente).
+        // sem mensagem nova (ex.: lead distribuído/transferido pra este atendente)
+        // E as que mudaram de estado sem mensagem nova (atribuída, finalizada,
+        // arquivada), que é o que o `syncInboxDelta` nunca enxerga.
         if (ticks % 4 === 0) await resyncConversations();
         ticks++;
       } finally {

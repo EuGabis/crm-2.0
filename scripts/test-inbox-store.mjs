@@ -12,7 +12,11 @@
  *
  * Roda direto no Node 24 (`npm run test:inbox`), sem runner de teste.
  */
-import { preservarContato, mesclarMensagens } from "../src/lib/data/repos/db/conversations.ts";
+import {
+  preservarContato,
+  mesclarMensagens,
+  cursorDeConversas,
+} from "../src/lib/data/repos/db/conversations.ts";
 
 let ok = 0;
 let falhas = 0;
@@ -94,6 +98,56 @@ eq("sem anterior devolve o novo intacto", preservarContato(doRealtime, undefined
   const recentes = [{ id: "m2" }];
   const existentes = [{ id: "m1" }, { id: "m2" }];
   eq("mesclarMensagens nao duplica", mesclarMensagens(recentes, existentes), [{ id: "m2" }, { id: "m1" }]);
+}
+
+/* ================================================================== *
+ * O cursor da varredura de CONVERSAS
+ * ==================================================================
+ *
+ * 🔴 Relato de 2026-09-15: "a tela de conversas nao atualiza as vezes; fica com
+ * a tela aberta e atualiza manualmente, e ai sim aparece".
+ *
+ * `resyncConversations` fazia `select()` sem `range` e sem `order` — a armadilha
+ * no 7 do AGENTS.md pela TERCEIRA vez: o PostgREST corta em 1000 sem erro, e sem
+ * `order` QUAIS mil voltam e indefinido. Sao 4.049 conversas neste banco. Agora
+ * ela pergunta "o que mudou desde X", e este cursor e o X.
+ *
+ * ⚠️ Um erro aqui NAO da erro nenhum: varre demais (caro) ou pula conversa (a
+ * lista congela). E o tipo de regra que so aparece como reclamacao dias depois.
+ */
+{
+  eq("store vazia nao tem cursor", cursorDeConversas([]), null);
+  eq(
+    "o cursor e a conversa alterada mais RECENTE",
+    cursorDeConversas([
+      { id: "a", updatedAt: "2026-09-15T10:00:00Z" },
+      { id: "b", updatedAt: "2026-09-15T12:00:00Z" },
+      { id: "c", updatedAt: "2026-09-15T11:00:00Z" },
+    ]),
+    "2026-09-15T12:00:00Z",
+  );
+  /*
+   * ⚠️ UMA conversa sem carimbo derruba o cursor inteiro, e isso e deliberado:
+   * enquanto a migracao 202609151100 nao estiver aplicada o campo chega
+   * `undefined`, e um cursor "pela metade" pularia justamente as conversas sem
+   * carimbo — em silencio. Sem cursor, a varredura cai na lista inteira
+   * (paginada), que e mais cara e esta CERTA.
+   */
+  eq(
+    "conversa sem carimbo derruba o cursor",
+    cursorDeConversas([{ id: "a", updatedAt: "2026-09-15T10:00:00Z" }, { id: "b" }]),
+    null,
+  );
+  eq("nenhuma tem carimbo (migracao nao aplicada)", cursorDeConversas([{ id: "a" }]), null);
+  // Texto ISO compara cronologicamente — e o que permite o `>` sem virar Date.
+  eq(
+    "compara como texto ISO",
+    cursorDeConversas([
+      { id: "a", updatedAt: "2026-09-09T23:59:59Z" },
+      { id: "b", updatedAt: "2026-09-10T00:00:00Z" },
+    ]),
+    "2026-09-10T00:00:00Z",
+  );
 }
 
 console.log(`\n${ok} assercoes ok, ${falhas} falha(s)\n`);
