@@ -8382,3 +8382,76 @@ está conversando, então um card criado corretamente e depois transferido a
 conversa DEVE continuar com quem trabalhou o lead. Separar um do outro exigiria
 saber quem era o responsável no instante da criação, e isso não está gravado.
 Corrigir caso a caso é pelo seletor de responsável do card.
+
+## Leads por trás do número + tempo online (migração 202609161400)
+
+Pedido do Gabriel (2026-09-16): clicar nos números do quadro "Por atendente" e
+VER os leads, com frio/quente, o contato à mão e o botão de abrir a conversa; e,
+na aba Agentes, quanto tempo o atendente ficou online.
+
+### 🔴 Tempo online NÃO era calculável — e isso precisou ser dito antes
+
+O CRM guardava só o ESTADO ATUAL da presença: `location_members.last_seen_at` e
+`online_desde` (o início da temporada em curso). **Nenhum histórico.** Então a
+coluna começa a valer A PARTIR DA MIGRAÇÃO, e não há passado para reconstruir.
+
+`public.presence_sessions` é alimentada pelo `touch_presence` que já existe:
+- ⚠️ **`fim` é o ÚLTIMO PING, não um logout.** Nada garante que alguém deslogue
+  (fechar a aba não avisa ninguém), então a sessão fecha sozinha no último sinal
+  de vida — a única definição que não depende de um evento que pode nunca
+  acontecer.
+- ⚠️ **Ausente NÃO acumula**, e isso É a definição da coluna: ela mede o tempo em
+  que a pessoa esteve DISPONÍVEL para receber lead, que é o que o seletor da
+  barra superior promete. Contar o ausente faria "online" na tela de gestão
+  significar coisa diferente de "online" na barra do CRM.
+- ⚠️ **Quem já estava online quando a migração subiu ganha sessão no primeiro
+  ping** (`if not found`). Sem isso o tempo dele só começaria a contar depois de
+  passar 15 minutos offline.
+- **Sem policy de escrita**: quem grava é a função definer. Tempo online é
+  medida de trabalho — se a própria pessoa pudesse escrever ali, o número
+  deixaria de significar algo.
+- ⚠️ **Na tela, `null` NÃO é zero.** Zero afirma que a pessoa não abriu o CRM;
+  null diz que ninguém mediu, e a coluna escreve "—". A distinção é o ponto
+  inteiro, porque o histórico nasceu hoje.
+- ⚠️ A `tempo_online` recorta a sessão que COMEÇOU antes da janela
+  (`greatest(s.inicio, v_de)`): sem isso, quem estava online na virada do
+  período levaria para dentro dele um tempo que é de fora.
+- ⚠️ `db:check` acusa `touch_presence` por definer sem checagem de empresa —
+  **falso positivo**, igual a `definir_disponibilidade`: a linha é decidida por
+  `auth.uid()`, nunca por parâmetro.
+
+### O drilldown do quadro
+
+`triagem_leads` passou a devolver `contato_id`, `contato` e `telefone`, e a rota
+manda as LINHAS junto dos agregados. ⚠️ Resolver contato por contato no navegador
+seria uma consulta por linha numa lista de centenas; e uma segunda chamada por
+clique re-executaria a RPC inteira, tirando do recorte a resposta imediata que é
+a razão de ele existir.
+
+- ⚠️ **A coluna "Frios" é própria, não `recebeu - qualificados`.** Quente e frio
+  são os dois lados de uma NOTA do bot; quem abandonou a triagem não recebeu
+  nota e não é nem um nem outro. Calcular por subtração inventaria uma
+  reprovação que nunca houve — e as condutas são opostas (frio recebe conteúdo,
+  quem desistiu precisa ser retomado). O diálogo mostra os três: quentes, frios
+  e "sem nota".
+- 🔴 **`lib/reports/quadro-leads.ts` existe para o número e a lista saírem do
+  MESMO predicado.** A rota soma no servidor e o diálogo filtra no navegador;
+  escritos em dois lugares, divergem na primeira mudança e o quadro diz "95"
+  abrindo uma lista de 93 — sem erro nenhum, só minando a confiança no relatório
+  inteiro. `npm run test:quadro` (21 asserções) trava isso: para cada coluna, o
+  número contado tem de ser o tamanho da lista filtrada.
+- ⚠️ **As duas ações são LINKS de verdade** (`<Link href>`), não botões que
+  navegam: conferir lead a lead sem perder o relatório de vista é o uso desta
+  lista, e é o `href` que devolve Ctrl+clique e "abrir em nova guia".
+- ⚠️ **Zero não é clicável.** Abrir lista vazia não responde nada e ensina que o
+  clique às vezes não faz nada — o que tira a confiança nos que funcionam.
+- ⚠️ O recorte "Outros setores" repete a regra de agrupamento da rota: ali
+  `atendente` é uma chave sintética (`__fora__`), não o id de ninguém, então
+  filtrar por igualdade traria lista vazia.
+- Os números só viram botão quando a rota mandou as linhas — enquanto a migração
+  não estiver aplicada, o quadro segue como antes em vez de prometer um clique
+  que abriria uma lista de uuids.
+
+⏳ `triagem_leads` ganhou `order by chegou.created_at desc, chegou.id` — a
+consulta final **não tinha ordem nenhuma**, e sem ela a paginação de `paginarRpc`
+ficaria indefinida entre páginas.

@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { formatBRL } from "@/lib/data/repos/opportunities";
 import { usePipelineDb } from "@/lib/data/repos/db/pipeline";
 import { useMyMembership } from "@/lib/data/repos/db/team";
+import { type LeadDoQuadro } from "@/components/reports/leads-do-atendente-dialog";
 import {
   CarteiraPorAtendente,
   type Carteira,
@@ -219,10 +220,32 @@ interface AgenteRow {
   respostas_medidas: number;
   /** Conversas dele em que o cliente NUNCA recebeu resposta humana. */
   nao_respondidas: number;
+  /**
+   * Minutos em que esteve ONLINE no período.
+   *
+   * ⚠️ `null` NÃO é zero. Zero afirma que a pessoa não abriu o CRM; null diz
+   * que ninguém mediu — e o histórico de presença só existe a partir da
+   * 202609161400, porque antes o CRM guardava apenas o estado atual.
+   */
+  minutos_online?: number | null;
+  /** Desde quando há medida para esta pessoa (ISO). */
+  online_desde?: string | null;
   templates_enviados_30d: number;
   ganhos: number;
   perdidos: number;
   receita_ganha: number;
+}
+
+/**
+ * Minutos em horas legíveis. `0` é um valor VÁLIDO aqui (esteve zero minutos
+ * online no período) e precisa aparecer como "0min" — quem não tem medida nunca
+ * chega nesta função.
+ */
+function fmtDuracao(min: number): string {
+  if (min < 60) return `${Math.round(min)}min`;
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  return m === 0 ? `${h}h` : `${h}h ${m}min`;
 }
 
 /** Desempenho por agente com dados REAIS (rota /api/relatorios/agentes). */
@@ -257,7 +280,9 @@ function AgentesReport() {
       <p className="mb-4 text-xs text-slate-500">
         Conversas, resposta e templates dos últimos 30 dias. ⚠️ Ganhos, perdidos e receita são
         o ACUMULADO do atendente — recortar em 30 dias mostraria zero para quem fechou no mês
-        passado.
+        passado. “Tempo online” conta só o tempo com o status <strong>Online</strong> — quem
+        marca <strong>Ausente</strong> continua no CRM e não acumula, porque a coluna mede
+        disponibilidade para receber lead.
       </p>
       {error && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-700">
@@ -283,6 +308,7 @@ function AgentesReport() {
                   "Resposta típica",
                   "Sem resposta",
                   "Templates (30d)",
+                  "Tempo online",
                   "Ganhos",
                   "Perdidos",
                   "Receita ganha",
@@ -309,6 +335,22 @@ function AgentesReport() {
                     {a.nao_respondidas}
                   </td>
                   <td className="px-4 py-2.5">{a.templates_enviados_30d}</td>
+                  {/*
+                    ⚠️ "—" quando não há medida, e NÃO "0h": um zero ali acusaria
+                    a pessoa de não ter aberto o CRM num período em que ninguém
+                    estava medindo. A distinção entre "zero" e "sem medida" é o
+                    ponto inteiro desta coluna.
+                  */}
+                  <td
+                    className="whitespace-nowrap px-4 py-2.5 text-slate-600"
+                    title={
+                      a.online_desde
+                        ? `Medido desde ${new Date(a.online_desde).toLocaleDateString("pt-BR")}. Tempo marcado como "Ausente" não conta.`
+                        : "Ainda não há medida de presença para esta pessoa"
+                    }
+                  >
+                    {a.minutos_online == null ? "—" : fmtDuracao(a.minutos_online)}
+                  </td>
                   <td className="px-4 py-2.5 text-emerald-600">{a.ganhos}</td>
                   <td className="px-4 py-2.5 text-slate-500">{a.perdidos}</td>
                   <td className="px-4 py-2.5">{formatBRL(a.receita_ganha)}</td>
@@ -316,7 +358,7 @@ function AgentesReport() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-6 text-center text-slate-400">
+                  <td colSpan={9} className="px-4 py-6 text-center text-slate-400">
                     Sem dados de equipe ainda.
                   </td>
                 </tr>
@@ -621,6 +663,8 @@ function LeadsDoDiaPainel({ periodo: pedido, fluxo }: { periodo: Periodo; fluxo:
     carteiras?: Carteira[];
     cursos?: CursoContado[];
     semCurso?: number;
+    /** As linhas por trás dos números do quadro (drilldown). */
+    leads?: LeadDoQuadro[];
     /** Teto de paginação mordeu: o relatório está incompleto e tem de DIZER. */
     truncado?: boolean;
     /** O recorte que a ROTA respondeu — pode não ser exatamente o pedido. */
@@ -936,6 +980,7 @@ function LeadsDoDiaPainel({ periodo: pedido, fluxo }: { periodo: Periodo; fluxo:
           cursos={dados.cursos ?? []}
           semCurso={dados.semCurso ?? 0}
           mostraGanhos={fluxo.mostraGanhos}
+          leads={dados.leads}
         />
       </div>
 

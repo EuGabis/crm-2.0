@@ -19,7 +19,8 @@
     "test:periodo": "node scripts/test-periodo.mjs",
     "test:phone": "node scripts/test-phone.mjs",
     "test:rodizio": "node --import ./scripts/lib/alias-register.mjs scripts/test-rodizio.mjs",
-    "test:webhook": "node --import ./scripts/lib/alias-register.mjs scripts/test-webhook-reenvio.mjs"
+    "test:webhook": "node --import ./scripts/lib/alias-register.mjs scripts/test-webhook-reenvio.mjs",
+    "test:quadro": "node scripts/test-quadro-leads.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
