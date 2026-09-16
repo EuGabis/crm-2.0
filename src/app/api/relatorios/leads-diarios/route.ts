@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { paginarRpc } from "@/lib/supabase/paginar-rpc";
 import { canAccess } from "@/lib/auth/module-access";
 import {
   PERIODO_MAX_DIAS,
@@ -193,12 +194,26 @@ export async function GET(request: Request) {
     de = somaDias(ate, -(dias - 1));
   }
 
-  const { data, error } = await supabase.rpc("triagem_leads", {
-    p_location: membership.location_id,
-    p_de: de,
-    p_ate: ate,
-    p_flow: flow,
-  });
+  /*
+   * 🔴 **PAGINA.** Era uma chamada só, e o PostgREST corta em 1000 linhas SEM
+   * ERRO E SEM AVISO — inclusive em RPC. Medido em 16/09/2026, quando a
+   * divergência foi relatada: 30 dias do fluxo comercial têm **3.296 leads**, a
+   * tela mostrava `Entraram 1000`, e o dia 15/09 aparecia com **187** dentro do
+   * período contra **615** filtrado sozinho. Um dia cabe em mil linhas; trinta
+   * não cabem — e era essa a divergência.
+   *
+   * ⚠️ A ordem por `conversa` (uuid único) é o que torna a paginação correta: a
+   * consulta final da função não tinha `order by` NENHUM, então sem isto cada
+   * página seria uma execução de ordem indefinida, repetindo umas linhas e
+   * pulando outras. A tela agrega por dia e por hora, então a ordem em si não
+   * importa aqui — a ESTABILIDADE importa.
+   */
+  const { data, truncado, error } = await paginarRpc(
+    supabase,
+    "triagem_leads",
+    { p_location: membership.location_id, p_de: de, p_ate: ate, p_flow: flow },
+    [{ coluna: "conversa" }]
+  );
   if (error) {
     /*
      * ⚠️ O motivo VAI para a tela. Uma rota que respondia só "não foi possível
@@ -380,6 +395,12 @@ export async function GET(request: Request) {
   return Response.json({
     linhas,
     horas,
+    /*
+     * ⚠️ Vai para a TELA. Se o teto de páginas morder, o relatório precisa DIZER
+     * que está incompleto — um número redondo com cara de total foi exatamente o
+     * que escondeu esta divergência por semanas.
+     */
+    truncado,
     carteiras: temCarteira ? carteiras : undefined,
     cursos: temCarteira ? cursos : undefined,
     /*

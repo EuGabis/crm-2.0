@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { paginarRpc } from "@/lib/supabase/paginar-rpc";
 import { canAccess } from "@/lib/auth/module-access";
 import { diaBr, type SlaLinha } from "@/lib/reports/sla";
 
@@ -71,16 +72,37 @@ export async function GET(req: Request) {
   const ate = new Date();
   const de = new Date(ate.getTime() - dias * 24 * 60 * 60 * 1000);
 
-  const [{ data: linhas, error }, { data: profiles }] = await Promise.all([
-    supabase.rpc("sla_conversations", {
-      p_location: membership.location_id,
-      p_from: de.toISOString(),
-      p_to: ate.toISOString(),
-      p_target_min: meta,
-    }),
+  /*
+   * 🔴 **PAGINA.** Era uma chamada só, e o PostgREST corta em 1000 linhas SEM
+   * ERRO E SEM AVISO — inclusive em RPC. Medido em 16/09/2026: 30 dias têm
+   * **4.415 conversas** e a aba lia 1.000 — ou seja, **77% do atendimento ficava
+   * de fora** de todos os KPIs, da mediana, do p90, da distribuição, do recorte
+   * por responsável e da fila de ação. E a aba nasceu justamente para acabar com
+   * uma métrica que mentia.
+   *
+   * ⚠️ A ordem termina em `conversation_id` (uuid único) porque a função ordena
+   * só por `primeira_entrada`: sem desempate, duas páginas da mesma consulta
+   * podem repetir uma conversa e PULAR outra — e a pulada some do relatório.
+   */
+  const [{ data: linhas, truncado, error }, { data: profiles }] = await Promise.all([
+    paginarRpc(
+      supabase,
+      "sla_conversations",
+      {
+        p_location: membership.location_id,
+        p_from: de.toISOString(),
+        p_to: ate.toISOString(),
+        p_target_min: meta,
+      },
+      [{ coluna: "primeira_entrada", desc: true }, { coluna: "conversation_id" }]
+    ),
     supabase.from("profiles").select("id, name"),
   ]);
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (error) {
+    // O motivo VAI para a tela: `code` + `message`, a lição do 42804 de 03/09.
+    const detalhe = [error.code, error.message].filter(Boolean).join(" · ");
+    return Response.json({ error: `Não foi possível carregar: ${detalhe}` }, { status: 500 });
+  }
 
   const rows = ((linhas ?? []) as any[]).map(
     (r): SlaLinha => ({
@@ -119,5 +141,7 @@ export async function GET(req: Request) {
     linhas: rows,
     nomes,
     dias_do_periodo,
+    // ⚠️ Vai para a tela: relatório incompleto tem de DIZER que está incompleto.
+    truncado,
   });
 }

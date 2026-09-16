@@ -1,6 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
+import { paginarRpc } from "@/lib/supabase/paginar-rpc";
 
 export const dynamic = "force-dynamic";
 
@@ -38,39 +37,28 @@ export async function GET(request: Request) {
   const dias = Math.min(90, Math.max(1, Number(new URL(request.url).searchParams.get("dias")) || 1));
 
   /*
-   * 🔴 **PAGINA. O PostgREST corta em 1000 linhas SEM ERRO E SEM AVISO** — a
-   * armadilha nº 7 deste projeto, a mesma que apagou o nome do contato em todas
-   * as conversas depois da importação.
+   * 🔴 **PAGINA.** O PostgREST corta em 1000 linhas SEM ERRO E SEM AVISO — a
+   * armadilha nº 7 deste projeto. Sem isto a tela mostrava "805 atribuídos de
+   * 1000" num dia com mais de mil leads: o 1000 não era o total, era o teto. E
+   * um log de auditoria que erra o total é pior que não existir, porque as
+   * porcentagens do rateio saem erradas.
    *
-   * Sem isto a tela mostrava "805 atribuídos de 1000" num dia com mais de mil
-   * leads: o 1000 não era o total, era o teto. E um log de auditoria que erra o
-   * total é pior que não existir, porque as porcentagens do rateio saem erradas
-   * e alguém decide com base nelas.
-   *
-   * ⚠️ Teto de segurança em `MAX_PAGINAS`: a resposta vai inteira para o
-   * navegador, e 30 dias no volume atual passariam de 30 mil linhas. Quando o
-   * teto morde, a rota DIZ (`truncado`) em vez de devolver um número redondo
-   * com cara de total.
+   * ⚠️ A ordem termina em `conversation_id` (uuid único). A função ordena por
+   * `atribuida_em`/`chegou_em`, e carimbo de tempo empata: o bot e a varredura
+   * da fila gravam em rajada, e duas páginas sem desempate repetiriam uma linha
+   * e PULARIAM outra.
    */
-  const PAGINA = 1000;
-  const MAX_PAGINAS = 10;
-  const linhas: any[] = [];
-  let truncado = false;
-  for (let p = 0; ; p++) {
-    if (p >= MAX_PAGINAS) {
-      truncado = true;
-      break;
-    }
-    const { data, error } = await supabase
-      .rpc("log_do_bot", { p_location: membership.location_id, p_dias: dias })
-      .range(p * PAGINA, p * PAGINA + PAGINA - 1);
-    if (error) return erroDoRpc(error);
-    const veio = data?.length ?? 0;
-    linhas.push(...(data ?? []));
-    // ⚠️ `< PAGINA` e não `=== 0`: página incompleta já é a última, e pedir mais
-    // uma seria uma ida e volta a mais em toda carga.
-    if (veio < PAGINA) break;
-  }
+  const { data: linhas, truncado, error } = await paginarRpc(
+    supabase,
+    "log_do_bot",
+    { p_location: membership.location_id, p_dias: dias },
+    [
+      { coluna: "atribuida_em", desc: true },
+      { coluna: "chegou_em", desc: true },
+      { coluna: "conversation_id" },
+    ]
+  );
+  if (error) return erroDoRpc(error);
 
   return Response.json({ dias, linhas, truncado });
 }

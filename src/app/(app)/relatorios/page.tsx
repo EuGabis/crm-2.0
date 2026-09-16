@@ -621,6 +621,8 @@ function LeadsDoDiaPainel({ periodo: pedido, fluxo }: { periodo: Periodo; fluxo:
     carteiras?: Carteira[];
     cursos?: CursoContado[];
     semCurso?: number;
+    /** Teto de paginação mordeu: o relatório está incompleto e tem de DIZER. */
+    truncado?: boolean;
     /** O recorte que a ROTA respondeu — pode não ser exatamente o pedido. */
     periodo?: Periodo;
   } | null>(null);
@@ -768,6 +770,18 @@ function LeadsDoDiaPainel({ periodo: pedido, fluxo }: { periodo: Periodo; fluxo:
           );
         })}
       </div>
+
+      {/*
+        ⚠️ Relatório incompleto tem de DIZER que está incompleto. Um número
+        redondo com cara de total foi exatamente o que escondeu a divergência de
+        16/09 (30 dias mostravam "1000" quando o real era 3.296).
+      */}
+      {dados.truncado && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+          <strong>Período grande demais para somar inteiro.</strong> Os números abaixo cobrem
+          apenas os primeiros 12.000 leads — use um período menor para conferir os totais.
+        </div>
+      )}
 
       {/* ---------- Manchete + download ---------- */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-white px-4 py-3">
