@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { noRecorte } from "@/lib/reports/quadro-leads";
 import { paginarRpc } from "@/lib/supabase/paginar-rpc";
 import { canAccess } from "@/lib/auth/module-access";
 import {
@@ -54,6 +55,11 @@ interface Lead {
   ganha: boolean;
   /** Curso marcado no card. `null` = ninguém marcou. */
   curso: string | null;
+  /* Identificação — só existe depois da 202609161400. Ver `temContato`. */
+  conversa: string | null;
+  contatoId: string | null;
+  contato: string | null;
+  telefone: string | null;
 }
 
 /** Uma linha do quadro "por atendente". */
@@ -61,6 +67,12 @@ interface Carteira {
   atendente: string | null;
   recebeu: number;
   qualificados: number;
+  /**
+   * ⚠️ Frio é quem PONTUOU e não alcançou o limiar — não é "o resto". Quem
+   * abandonou a triagem não recebeu nota e não é frio nem quente; somá-lo aqui
+   * inventaria uma reprovação que o bot nunca deu.
+   */
+  frios: number;
   finalizadas: number;
   ganhas: number;
   /** Quantos leads dele têm cada curso marcado. */
@@ -68,7 +80,15 @@ interface Carteira {
 }
 
 function carteira(atendente: string | null): Carteira {
-  return { atendente, recebeu: 0, qualificados: 0, finalizadas: 0, ganhas: 0, cursos: {} };
+  return {
+    atendente,
+    recebeu: 0,
+    qualificados: 0,
+    frios: 0,
+    finalizadas: 0,
+    ganhas: 0,
+    cursos: {},
+  };
 }
 
 /** Um balde de agregação — por dia ou por hora, a conta é a mesma. */
@@ -241,6 +261,10 @@ export async function GET(request: Request) {
     finalizada: r.finalizada === true,
     ganha: r.ganha === true,
     curso: (r.curso as string | null) ?? null,
+    conversa: (r.conversa as string | null) ?? null,
+    contatoId: (r.contato_id as string | null) ?? null,
+    contato: (r.contato as string | null) ?? null,
+    telefone: (r.telefone as string | null) ?? null,
   }));
 
   /*
@@ -294,6 +318,16 @@ export async function GET(request: Request) {
   const temCarteira =
     (data ?? []).length > 0 &&
     Object.prototype.hasOwnProperty.call((data as any[])[0], "atendente");
+
+  /*
+   * ⚠️ Mesma tolerância, pelo mesmo motivo: o código vai ao ar ANTES da
+   * migração. Sem as colunas de contato da 202609161400, o drilldown
+   * simplesmente não é enviado e a tela não torna os números clicáveis — em vez
+   * de abrir uma lista de uuids sem nome.
+   */
+  const temContato =
+    (data ?? []).length > 0 &&
+    Object.prototype.hasOwnProperty.call((data as any[])[0], "contato");
 
   /*
    * 🔴 **O TIME do recorte: quem é dos departamentos que atendem estes números.**
@@ -362,12 +396,20 @@ export async function GET(request: Request) {
     const fora = !!l.atendente && recortaTime && !doTime.has(l.atendente);
     const chave = fora ? FORA : (l.atendente ?? "");
     const c = porAtendente.get(chave) ?? carteira(fora ? FORA : l.atendente);
+    /*
+     * ⚠️ O MESMO predicado que o diálogo usa para filtrar a lista. Contado aqui
+     * com `if (l.resultado === "quente")` e filtrado lá com outra escrita, os
+     * dois divergem na primeira mudança — e o quadro diria "95" abrindo uma
+     * lista de 93, sem erro nenhum.
+     *
+     * "Qualificado" só existe onde o bot pontua; no fluxo da secretaria as
+     * colunas ficam zeradas e a tela não as mostra.
+     */
     c.recebeu++;
-    // "Qualificado" só existe onde o bot pontua; no fluxo da secretaria a coluna
-    // fica zerada e a tela não a mostra.
-    if (l.resultado === "quente") c.qualificados++;
-    if (l.finalizada) c.finalizadas++;
-    if (l.ganha) c.ganhas++;
+    if (noRecorte(l, "qualificados")) c.qualificados++;
+    if (noRecorte(l, "frios")) c.frios++;
+    if (noRecorte(l, "finalizadas")) c.finalizadas++;
+    if (noRecorte(l, "ganhas")) c.ganhas++;
     if (l.curso) {
       c.cursos[l.curso] = (c.cursos[l.curso] ?? 0) + 1;
       cursosTotal[l.curso] = (cursosTotal[l.curso] ?? 0) + 1;
@@ -402,6 +444,34 @@ export async function GET(request: Request) {
      */
     truncado,
     carteiras: temCarteira ? carteiras : undefined,
+    /*
+     * 🔴 **As LINHAS vão junto, e é o que permite clicar num número do quadro e
+     * ver QUAIS leads são** (pedido do Gabriel, 16/09). Sem elas, cada clique
+     * exigiria uma segunda chamada que re-executaria a RPC inteira — e o recorte
+     * deixaria de ser imediato, que é a razão de existir do clique.
+     *
+     * ⚠️ Enxutas de propósito: só o que a lista desenha. Mandar o objeto cru da
+     * função dobraria a resposta com campos que ninguém lê.
+     *
+     * ⚠️ Só quando a função devolveu o CONTATO (202609161400 aplicada). Sem
+     * nome nem telefone a lista seria uma coluna de uuids — pior que não ter o
+     * clique, porque promete e não entrega.
+     */
+    leads: temContato
+      ? leads.map((l) => ({
+          conversa: l.conversa,
+          contatoId: l.contatoId,
+          contato: l.contato,
+          telefone: l.telefone,
+          dia: l.dia,
+          resultado: l.resultado,
+          pontos: l.pontos,
+          atendente: l.atendente,
+          finalizada: l.finalizada,
+          ganha: l.ganha,
+          curso: l.curso,
+        }))
+      : undefined,
     cursos: temCarteira ? cursos : undefined,
     /*
      * ⚠️ Quantos leads NÃO têm curso marcado. Sem este número, um quadro de

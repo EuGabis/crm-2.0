@@ -1,7 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTeam } from "@/lib/data/repos/db/team";
+import {
+  LeadsDoAtendenteDialog,
+  type LeadDoQuadro,
+  type Recorte,
+} from "./leads-do-atendente-dialog";
 import { cn } from "@/lib/utils";
 
 /** Uma linha do quadro por atendente, como a rota devolve. */
@@ -9,6 +14,8 @@ export interface Carteira {
   atendente: string | null;
   recebeu: number;
   qualificados: number;
+  /** Pontuou e NÃO alcançou o limiar. Quem não concluiu a triagem fica fora. */
+  frios: number;
   finalizadas: number;
   ganhas: number;
   cursos: Record<string, number>;
@@ -71,14 +78,40 @@ export function CarteiraPorAtendente({
   semCurso,
   /** O fluxo termina em venda? Decide as colunas "Qualificados" e "Ganhos". */
   mostraGanhos,
+  /**
+   * As linhas por trás dos números. Ausente enquanto a 202609161400 não estiver
+   * aplicada — e aí os números não viram botão, em vez de abrirem uma lista
+   * vazia que pareceria defeito.
+   */
+  leads,
 }: {
   carteiras: Carteira[];
   cursos: CursoContado[];
   semCurso: number;
   mostraGanhos: boolean;
+  leads?: LeadDoQuadro[];
 }) {
   const { members } = useTeam();
   const nomes = useMemo(() => new Map(members.map((m) => [m.userId, m.name])), [members]);
+  const [aberto, setAberto] = useState<{ atendente: string | null; recorte: Recorte } | null>(
+    null
+  );
+
+  /*
+   * ⚠️ O recorte por atendente repete a MESMA regra de agrupamento da rota,
+   * inclusive o `FORA`: sem isso a lista de "Outros setores" viria vazia, porque
+   * `atendente` ali é a chave sintética e não o id de ninguém.
+   */
+  const doTime = useMemo(
+    () => new Set(carteiras.map((c) => c.atendente).filter((a): a is string => ehPessoa(a))),
+    [carteiras]
+  );
+  const leadsDe = (quem: string | null): LeadDoQuadro[] => {
+    if (!leads) return [];
+    if (quem === FORA) return leads.filter((l) => !!l.atendente && !doTime.has(l.atendente));
+    if (quem === null) return leads.filter((l) => !l.atendente);
+    return leads.filter((l) => l.atendente === quem);
+  };
 
   if (carteiras.length === 0) return null;
 
@@ -88,6 +121,40 @@ export function CarteiraPorAtendente({
   const maior = Math.max(...carteiras.map((c) => c.recebeu), 1);
   const comCurso = cursos.reduce((a, c) => a + c.leads, 0);
 
+  /**
+   * Um número do quadro. Vira botão só quando HÁ o que abrir.
+   *
+   * ⚠️ Zero não é clicável: abrir uma lista vazia não responde nada e ensina
+   * que o clique às vezes não faz nada — o que tira a confiança nos que
+   * funcionam.
+   */
+  function Numero({
+    valor,
+    de,
+    recorte,
+    className,
+  }: {
+    valor: number;
+    de: string | null;
+    recorte: Recorte;
+    className?: string;
+  }) {
+    const clicavel = !!leads && valor > 0;
+    if (!clicavel) return <span className={className}>{valor}</span>;
+    return (
+      <button
+        onClick={() => setAberto({ atendente: de, recorte })}
+        title="Ver estes leads"
+        className={cn(
+          className,
+          "rounded px-1 underline decoration-dotted underline-offset-2 hover:bg-indigo-50 hover:text-indigo-700"
+        )}
+      >
+        {valor}
+      </button>
+    );
+  }
+
   return (
     <div className="grid gap-4 lg:grid-cols-[3fr_2fr]">
       <div className="rounded-xl border bg-white p-4">
@@ -96,6 +163,7 @@ export function CarteiraPorAtendente({
           Onde os leads do período estão hoje. Quem não é do setor entra em{" "}
           <strong>Outros setores</strong>.
           {mostraGanhos && " “Ganhos” vem da oportunidade mais recente do contato."}
+          {leads && " Clique num número para ver quais leads são."}
         </p>
         {/* Tabela larga rola no PRÓPRIO container — o corpo da página nunca
             rola de lado. */}
@@ -106,6 +174,7 @@ export function CarteiraPorAtendente({
                 <th className="pb-2 font-medium">Atendente</th>
                 <th className="pb-2 text-right font-medium">Recebeu</th>
                 {mostraGanhos && <th className="pb-2 text-right font-medium">Qualificados</th>}
+                {mostraGanhos && <th className="pb-2 text-right font-medium">Frios</th>}
                 <th className="pb-2 text-right font-medium">Finalizadas</th>
                 {mostraGanhos && <th className="pb-2 text-right font-medium">Ganhos</th>}
                 <th className="pb-2 pl-3 font-medium">Cursos marcados</th>
@@ -135,17 +204,28 @@ export function CarteiraPorAtendente({
                       />
                     </td>
                     <td className="py-2 text-right font-semibold tabular-nums text-slate-900">
-                      {c.recebeu}
+                      <Numero valor={c.recebeu} de={c.atendente} recorte="recebeu" />
                     </td>
                     {mostraGanhos && (
-                      <td className="py-2 text-right tabular-nums text-slate-600">
-                        {c.qualificados}
+                      <td className="py-2 text-right tabular-nums text-emerald-700">
+                        <Numero
+                          valor={c.qualificados}
+                          de={c.atendente}
+                          recorte="qualificados"
+                        />
                       </td>
                     )}
-                    <td className="py-2 text-right tabular-nums text-slate-600">{c.finalizadas}</td>
+                    {mostraGanhos && (
+                      <td className="py-2 text-right tabular-nums text-blue-700">
+                        <Numero valor={c.frios} de={c.atendente} recorte="frios" />
+                      </td>
+                    )}
+                    <td className="py-2 text-right tabular-nums text-slate-600">
+                      <Numero valor={c.finalizadas} de={c.atendente} recorte="finalizadas" />
+                    </td>
                     {mostraGanhos && (
                       <td className="py-2 text-right font-semibold tabular-nums text-emerald-700">
-                        {c.ganhas}
+                        <Numero valor={c.ganhas} de={c.atendente} recorte="ganhas" />
                       </td>
                     )}
                     <td className="py-2 pl-3">
@@ -180,6 +260,18 @@ export function CarteiraPorAtendente({
           </table>
         </div>
       </div>
+
+      {/* Montado só quando aberto: o diálogo filtra a lista inteira de leads, e
+          fazer isso para cada linha do quadro seria trabalho jogado fora. */}
+      {aberto && (
+        <LeadsDoAtendenteDialog
+          open
+          onOpenChange={(v) => !v && setAberto(null)}
+          titulo={rotulo(aberto.atendente, nomes)}
+          recorte={aberto.recorte}
+          leads={leadsDe(aberto.atendente)}
+        />
+      )}
 
       <div className="rounded-xl border bg-white p-4">
         <h3 className="text-xs font-semibold text-slate-700">Cursos marcados</h3>

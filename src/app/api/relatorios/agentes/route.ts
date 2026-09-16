@@ -50,11 +50,29 @@ export async function GET(request: Request) {
 
   const dias = Math.min(365, Math.max(1, Number(new URL(request.url).searchParams.get("dias")) || 30));
 
-  const { data, error } = await supabase.rpc("agentes_desempenho", {
-    p_location: membership.location_id,
-    p_dias: dias,
-    p_meta_min: 15,
-  });
+  /*
+   * ⚠️ **Tempo online vem de uma consulta SEPARADA, e não de dentro de
+   * `agentes_desempenho`.** Juntar exigiria reescrever uma função de 13 colunas
+   * para acrescentar uma — e `returns table` que muda de forma obriga
+   * `drop`+`create`, com o risco que isso traz numa função que a tela inteira
+   * depende. Duas fontes casadas na rota é o mesmo desenho já usado aqui para
+   * os nomes dos atendentes.
+   *
+   * ⚠️ **`tempo_online` só existe depois da 202609161400**, e o código vai ao ar
+   * ANTES da migração: falhar aqui não pode derrubar a aba, então o erro é
+   * engolido e a coluna some — em vez de a tela inteira parar por causa de um
+   * campo novo.
+   */
+  const [{ data, error }, online] = await Promise.all([
+    supabase.rpc("agentes_desempenho", {
+      p_location: membership.location_id,
+      p_dias: dias,
+      p_meta_min: 15,
+    }),
+    supabase
+      .rpc("tempo_online", { p_location: membership.location_id, p_dias: dias })
+      .then((r) => (r.error ? null : (r.data as any[]))),
+  ]);
   if (error) {
     /*
      * ⚠️ **O motivo VAI para a tela, não para o lixo.** A primeira versão
@@ -85,6 +103,22 @@ export async function GET(request: Request) {
     );
   }
 
+  const porUsuario = online
+    ? new Map(
+        online.map((r: any) => [
+          r.usuario as string,
+          { minutos: Number(r.minutos ?? 0), desde: (r.desde as string | null) ?? null },
+        ])
+      )
+    : null;
+  /*
+   * ⚠️ Quem TEM medida e não aparece na lista ficou zero minutos online — isso é
+   * informação. Quem não tem medida nenhuma (a migração não rodou) recebe
+   * `null`, e a tela escreve "—" em vez de um zero que acusaria a pessoa.
+   */
+  const minutosDe = (id: string): number | null =>
+    porUsuario ? porUsuario.get(id)?.minutos ?? 0 : null;
+
   const agentes = (data ?? [])
     .map((r: any) => ({
       userId: r.user_id,
@@ -102,6 +136,15 @@ export async function GET(request: Request) {
       ganhos: Number(r.ganhos ?? 0),
       perdidos: Number(r.perdidos ?? 0),
       receita_ganha: Number(r.receita_ganha ?? 0),
+      /*
+       * Minutos em que a pessoa esteve ONLINE no período. `null` = não há
+       * medida — e null NÃO é zero: zero afirma que ela não abriu o CRM, null
+       * diz que ninguém mediu. A distinção importa porque o histórico começa na
+       * 202609161400 e não existe passado para reconstruir.
+       */
+      minutos_online: minutosDe(r.user_id),
+      /** Desde quando há medida para esta pessoa (ISO), ou null. */
+      online_desde: porUsuario?.get(r.user_id)?.desde ?? null,
     }))
     // Mais ativo primeiro.
     .sort((a: any, b: any) => b.conversas_atribuidas - a.conversas_atribuidas);
