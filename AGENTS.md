@@ -8266,3 +8266,81 @@ De passagem, dois fatos do levantamento: o funil **Comercial virou
 `scope = 'user'`** (dono João Lucas, 6 pessoas em `viewer_ids`), então Beatriz,
 Daniel e Jenifer deixaram de vê-lo; e o perfil `gabriel@avioesemusicas.com` tem
 **0 memberships e nunca acessou** — não é a conta usada no dia a dia.
+
+## 🔴 Os RELATÓRIOS também levavam o corte de 1000 — em RPC (2026-09-16)
+
+Relato: *"terça 15/09 aparece com 187 leads no filtro de 30 dias e com 615
+quando filtro só aquele dia. Muitos dados de todos os relatórios estão com
+divergências."*
+
+⚠️ **O que denunciou foi o KPI "Entraram **1000**" em 30 dias.** Número redondo
+num total vindo do PostgREST é suspeito até prova em contrário — este projeto já
+tinha aprendido isso no log do bot e nos contatos, e a lição não tinha sido
+aplicada às outras rotas.
+
+**`supabase.rpc(...)` também é cortada no "Max rows" (1000), sem erro e sem
+aviso.** Não é só `.from().select()`. Medido em produção, como usuário real
+(como `service_role` a guarda de empresa devolve zero linhas e não prova nada):
+
+| RPC | linhas reais | o que a tela recebia |
+|---|---|---|
+| `triagem_leads` comercial, 30 dias | **3.296** | 1.000 — **perdia 70%** |
+| `triagem_leads` comercial, só 15/09 | 615 | 615 ✅ |
+| `sla_conversations`, 30 dias | **4.415** | 1.000 — **perdia 77%** |
+| `log_do_bot`, 2 dias | 1.589 | já paginava |
+
+⚠️ **É por isso que a divergência parecia impossível:** um dia CABE em mil linhas
+e trinta não cabem. O mesmo dia dava dois números conforme o período em volta
+dele — e a tela não tinha como saber.
+
+⚠️ **A aba Atendimento é o caso mais grave, e o mais irônico:** ela nasceu para
+acabar com uma métrica que mentia ("ficção em quatro camadas", 0079) e estava
+calculando KPIs, mediana, p90, distribuição, recorte por responsável e fila de
+ação sobre **23% do atendimento**.
+
+### 🔴 Paginar sem ordem ESTÁVEL troca um defeito por outro
+
+Cada página é uma execução NOVA da função. Conferido antes de paginar:
+
+| função | `order by` |
+|---|---|
+| `triagem_leads` | **NENHUM** na consulta final (o `order by` que aparece no corpo é de uma CTE interna) |
+| `sla_conversations` | só `e.t_in desc` — sem desempate |
+| `log_do_bot` | `atribuida_em desc, created_at desc` — sem desempate |
+
+Sem desempate, duas páginas podem repetir uma linha e **PULAR** outra — e a
+pulada some do relatório, que é o mesmo defeito por outra porta. Empates medidos
+hoje: 0 — mas o bot e a varredura da fila gravam conversas em rajada, e o
+desempate custa nada.
+
+⚠️ **A ordem é imposta pelo POSTGREST, não por migração.** RPC `returns setof`
+aceita `order` como se fosse tabela, então quem pagina controla a própria ordem
+— sem reescrever o corpo de três funções `security definer` só para acrescentar
+uma cláusula. A última entrada de `ordem` é SEMPRE uma coluna única (o
+`conversation_id`), e é ela que torna a paginação correta por construção.
+
+### `paginarRpc` — uma função, não três cópias
+
+`src/lib/supabase/paginar-rpc.ts`. O log do bot já tinha a sua cópia; as outras
+duas rotas não. **A cópia seguinte é sempre a que esquece** — a mesma razão de
+`CONV_SELECT` existir.
+
+- ⚠️ **Deduplica pela coluna única e AVISA no log quando encontra repetição.**
+  Repetição infla total (tão ruim quanto o corte) e é o único sintoma observável
+  de ordem instável: sem isso, uma função nova passada com a coluna errada
+  entregaria número errado em silêncio.
+- **Teto de 12 páginas**, e quando morde a rota devolve `truncado: true` — as
+  duas telas mostram faixa âmbar. Relatório incompleto tem de DIZER que está
+  incompleto; foi um total com cara de total que escondeu isto.
+- `< PAGINA` e não `=== 0` para parar: página incompleta já é a última.
+
+⏳ **O que fica em aberto, e é o próximo limite:** 4.415 linhas em 30 dias vão
+inteiras para o navegador. O `AGENTS.md` da 0079 já dizia *"o dia em que 245
+virar 20 mil é o dia de voltar a agregar no servidor"* — estamos em 4.4 mil e
+subindo rápido. Agregar no servidor hoje custaria os gráficos clicáveis (o
+recorte é feito no client, em `useMemo`), então a troca é real e não foi feita
+agora.
+
+⏳ **`conversas_paradas` (485) e `sector_conversations` (500, com limite próprio)
+ainda cabem**, mas a primeira decide DEVOLUÇÃO de conversa: quando passar de mil,
+o rodízio vai parar de enxergar parte da fila — em silêncio, como tudo isto.

@@ -52,6 +52,8 @@ interface Resposta {
   linhas: SlaLinha[];
   nomes: Record<string, string>;
   dias_do_periodo: string[];
+  /** Teto de paginação mordeu: o relatório está incompleto e tem de DIZER. */
+  truncado?: boolean;
 }
 
 /** Verde/âmbar/vermelho pelo cumprimento — a cor é o resumo da linha. */
@@ -248,6 +250,16 @@ export function ServiceSlaReport() {
 
   return (
     <>
+      {/*
+        ⚠️ Esta aba já nasceu para acabar com uma métrica que mentia — um total
+        cortado em silêncio seria o mesmo defeito por outra porta.
+      */}
+      {dados?.truncado && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+          <strong>Período grande demais para somar inteiro.</strong> Os números abaixo cobrem
+          apenas as primeiras 12.000 conversas — use um período menor para conferir os totais.
+        </div>
+      )}
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-lg font-bold text-slate-900">Análise de atendimento</h1>

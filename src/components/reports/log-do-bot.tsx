@@ -254,7 +254,7 @@ export function LogDoBot() {
       {truncado && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
           <strong>Período grande demais para listar inteiro.</strong> Os números abaixo cobrem
-          apenas as primeiras 10.000 linhas — use um período menor para conferir o rateio.
+          apenas as primeiras 12.000 linhas — use um período menor para conferir o rateio.
         </div>
       )}
 
