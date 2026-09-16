@@ -49,7 +49,7 @@ import { useDbAppointments } from "@/lib/data/repos/db/appointments";
 import { useDbContact, useDbTeam } from "@/lib/data/repos/db/contacts";
 import { useContactsModule } from "@/lib/data/repos/db/contacts-module";
 import { useContactActivityCounts } from "@/lib/data/repos/db/contact-files";
-import { conversationActions } from "@/lib/data/repos/db/conversations";
+import { conversationActions, useConversation } from "@/lib/data/repos/db/conversations";
 import { oppActions, usePipelineDb } from "@/lib/data/repos/db/pipeline";
 import { useMyMembership } from "@/lib/data/repos/db/team";
 import { formatBRL } from "@/lib/data/repos/opportunities";
@@ -234,8 +234,29 @@ export function ContactPanel({
   // Seções abertas do acordeão. Controlado (e não `defaultValue`) porque
   // "Resumo pagamentos" só consulta a Guru quando o usuário abre a seção.
   const [sections, setSections] = useState<string[]>(["contato"]);
-  const { can } = useMyMembership();
+  const { can, me, isAdmin } = useMyMembership();
   const canPayments = can("pagamentos");
+  const conversation = useConversation(conversationId ?? null);
+  /*
+   * 🔴 **Quem manda o lead ao funil é quem está ATENDENDO — ou um admin.**
+   *
+   * Relato de 16/09/2026: um lead entrou para o Paulo, foi transferido para o
+   * Alberto minutos depois, e o Paulo ainda assim mandou o contato para o funil
+   * Comercial — criando um card em "Qualificado" com ele como responsável,
+   * sobre uma conversa que ele nunca atendeu. O card mente sobre quem trabalhou
+   * o lead, e é dele que saem o relatório por atendente e a comissão.
+   *
+   * ⚠️ Conversa SEM responsável (na fila do setor) também não passa: não há
+   * "quem está atendendo". O caminho é assumir a conversa antes — que é
+   * exatamente o ato que o card vai registrar.
+   *
+   * ⚠️ Isto NÃO é controle de acesso, e não pretende ser: a RLS de
+   * `opportunities` só olha a empresa, e criar card pela tela de Leads continua
+   * livre (lá não há conversa nem responsável, então a regra não teria sentido).
+   * É disciplina de processo no ponto em que o processo acontece.
+   */
+  const souOResponsavel = !!me?.userId && conversation?.assignedTo === me.userId;
+  const podeEnviarAoFunil = isAdmin || souOResponsavel;
   const { contact } = useDbContact(contactId);
   const team = useDbTeam();
   const { pipelines, opportunities: allOpps } = usePipelineDb();
@@ -285,12 +306,28 @@ export function ContactPanel({
                   aba "Ações": saber que o contato JÁ está num pipeline é a
                   informação que evita mandar o mesmo lead duas vezes — não
                   pode depender de trocar de aba pra aparecer. */}
+              {/* ⚠️ Desabilitado e NÃO escondido: sumir faz quem já usou o botão
+                  achar que ele quebrou, e não diz o que fazer. Desabilitado com
+                  o motivo, a conduta fica óbvia — assuma a conversa. */}
               <button
                 onClick={() => setPipelineOpen(true)}
-                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 py-1.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
+                disabled={!podeEnviarAoFunil}
+                title={
+                  podeEnviarAoFunil
+                    ? undefined
+                    : "Só quem está com a conversa (ou um administrador) manda o lead ao funil"
+                }
+                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 py-1.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
               >
                 <Target className="size-3" /> Enviar para pipeline
               </button>
+              {!podeEnviarAoFunil && (
+                <p className="mt-1 text-[10px] leading-tight text-slate-400">
+                  {conversation?.assignedTo
+                    ? "A conversa está com outro atendente — assuma para mandar ao funil."
+                    : "Assuma a conversa para mandar o lead ao funil."}
+                </p>
+              )}
               {/* Pendências à vista, sem trocar de painel: o atendente abre a
                   conversa e já vê que existe tarefa em aberto ou reunião
                   marcada — que é o ponto de "não esquecer". */}
@@ -535,8 +572,10 @@ export function ContactPanel({
           </Tooltip>
         ))}
       </div>
+      {/* Segunda barreira: o botão já está desabilitado, e o diálogo nem monta
+          para quem não pode — um `open` vindo de outro caminho não abriria. */}
       <SendToPipelineDialog
-        open={pipelineOpen}
+        open={pipelineOpen && podeEnviarAoFunil}
         onOpenChange={setPipelineOpen}
         contactId={contact.id}
         contactName={contactName(contact)}
