@@ -8344,3 +8344,41 @@ agora.
 ⏳ **`conversas_paradas` (485) e `sector_conversations` (500, com limite próprio)
 ainda cabem**, mas a primeira decide DEVOLUÇÃO de conversa: quando passar de mil,
 o rodízio vai parar de enxergar parte da fila — em silêncio, como tudo isto.
+
+## "Enviar para pipeline": só quem ATENDE, ou admin (2026-09-16)
+
+Relato: *"esse contato entrou pro Paulo e foi criada uma pipe com o nome dele em
+qualificado, mas mudou para o Alberto logo depois. O Paulo continuou como
+proprietário, mas ele não teve contato com o lead. E ainda assim conseguia
+mandar para pipeline."*
+
+Regra do Gabriel, literal: **a opção de mandar para o funil vale apenas para
+quem está como responsável da conversa, ou para administrador.**
+
+⚠️ **O card não é cosmético: é ele que vira o relatório por atendente.** Um card
+em "Qualificado" com o nome de quem nunca falou com o lead credita trabalho à
+pessoa errada — e a aba de desempenho, a carteira e a comissão saem daí.
+
+- ⚠️ **Conversa SEM responsável (na fila do setor) também não passa.** Não existe
+  "quem está atendendo", e o caminho é assumir antes — que é exatamente o ato
+  que o card vai registrar.
+- ⚠️ **Botão DESABILITADO, não escondido**, com a frase dizendo o que fazer
+  ("assuma a conversa"). Sumir faz quem já usou o botão achar que ele quebrou, e
+  não aponta conduta nenhuma.
+- ⚠️ **Isto NÃO é controle de acesso, e não pretende ser.** A RLS de
+  `opportunities` só olha a empresa, e **criar card pela tela de Leads continua
+  livre** — lá não há conversa nem responsável, então a regra não teria sentido.
+  É disciplina de processo no ponto em que o processo acontece. Uma policy que
+  exigisse ser responsável quebraria o bot, o rodízio e o "Adicionar
+  oportunidade" de uma vez.
+- O diálogo nem monta para quem não pode (`open && podeEnviarAoFunil`), então um
+  `open` vindo de outro caminho também não abriria.
+
+⏳ **Os cards já criados assim NÃO foram tocados.** Medido: 370 dos 1.425 cards
+com `source = 'Conversas'` dos últimos 30 dias têm dono diferente do atendente
+atual da conversa — **mas esse número não mede o defeito.** A maior parte é o
+comportamento CERTO: a 202609111030 estabeleceu que propriedade não segue quem
+está conversando, então um card criado corretamente e depois transferido a
+conversa DEVE continuar com quem trabalhou o lead. Separar um do outro exigiria
+saber quem era o responsável no instante da criação, e isso não está gravado.
+Corrigir caso a caso é pelo seletor de responsável do card.
