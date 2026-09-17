@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { ehDiaValido, hojeSP, somaDias } from "@/lib/periodo";
 import { paginarRpc } from "@/lib/supabase/paginar-rpc";
 
 export const dynamic = "force-dynamic";
@@ -34,7 +35,24 @@ export async function GET(request: Request) {
     return Response.json({ error: "apenas administradores" }, { status: 403 });
   }
 
-  const dias = Math.min(90, Math.max(1, Number(new URL(request.url).searchParams.get("dias")) || 1));
+  const url = new URL(request.url);
+  const dias = Math.min(90, Math.max(1, Number(url.searchParams.get("dias")) || 1));
+  /*
+   * 🔴 **Período por DATA, não "últimas N horas".** `dias = 1` significava
+   * `now() - 24h`: escolher "hoje" trazia desde ontem no mesmo horário, e foi
+   * isso que fez o log mostrar 152/157 num dia de ~60 por pessoa (medido em
+   * 17/09). Quem escolhe um dia quer o DIA.
+   *
+   * ⚠️ Data malformada NÃO cai no padrão em silêncio: um período diferente do
+   * pedido é a tela mentindo sobre o próprio recorte, e quem lê os números não
+   * tem como perceber.
+   */
+  const deQ = url.searchParams.get("de");
+  const ateQ = url.searchParams.get("ate");
+  if ((deQ || ateQ) && !(deQ && ateQ && ehDiaValido(deQ) && ehDiaValido(ateQ) && deQ <= ateQ)) {
+    return Response.json({ error: "período inválido" }, { status: 400 });
+  }
+  const periodo = deQ && ateQ ? { de: deQ, ate: ateQ } : { de: somaDias(hojeSP(), -(dias - 1)), ate: hojeSP() };
 
   /*
    * 🔴 **PAGINA.** O PostgREST corta em 1000 linhas SEM ERRO E SEM AVISO — a
@@ -51,7 +69,7 @@ export async function GET(request: Request) {
   const { data: linhas, truncado, error } = await paginarRpc(
     supabase,
     "log_do_bot",
-    { p_location: membership.location_id, p_dias: dias },
+    { p_location: membership.location_id, p_dias: dias, p_de: periodo.de, p_ate: periodo.ate },
     [
       { coluna: "atribuida_em", desc: true },
       { coluna: "chegou_em", desc: true },
@@ -60,7 +78,7 @@ export async function GET(request: Request) {
   );
   if (error) return erroDoRpc(error);
 
-  return Response.json({ dias, linhas, truncado });
+  return Response.json({ dias, periodo, linhas, truncado });
 }
 
 function erroDoRpc(error: { code?: string; message?: string }) {

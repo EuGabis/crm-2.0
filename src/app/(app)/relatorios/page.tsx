@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Fragment, Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -33,7 +33,13 @@ import {
   type CursoContado,
 } from "@/components/reports/leads-por-atendente";
 import { useAiAnalyses } from "@/lib/data/repos/db/ai";
-import { resolvePreset, rotuloDoPeriodo, type Periodo } from "@/lib/periodo";
+import {
+  hojeSP,
+  resolvePreset,
+  rotuloDoPeriodo,
+  somaDias,
+  type Periodo,
+} from "@/lib/periodo";
 import { cn } from "@/lib/utils";
 import { useIsSupervisor } from "@/lib/data/repos/db/sector";
 import { SectorReport } from "@/components/relatorios/sector-report";
@@ -248,16 +254,72 @@ function fmtDuracao(min: number): string {
   return m === 0 ? `${h}h` : `${h}h ${m}min`;
 }
 
+/**
+ * Tempo online dia a dia, para UMA pessoa.
+ *
+ * ⚠️ **Dia sem medida aparece com "—", não com "0min".** Zero afirma que ela não
+ * abriu o CRM; "—" diz que não há registro — e o histórico de presença só existe
+ * desde 16/09/2026, então a distinção é o ponto inteiro da coluna.
+ */
+function DetalheOnline({
+  dias,
+  periodo,
+}: {
+  dias: Record<string, number>;
+  periodo: Periodo;
+}) {
+  const lista: { dia: string; min: number | null }[] = [];
+  for (let d = periodo.de; d <= periodo.ate; d = somaDias(d, 1)) {
+    lista.push({ dia: d, min: dias[d] ?? null });
+  }
+  const maior = Math.max(1, ...lista.map((l) => l.min ?? 0));
+  return (
+    <ul className="space-y-1">
+      {lista.map((l) => (
+        <li key={l.dia} className="flex items-center gap-2 text-[11px]">
+          <span className="w-24 shrink-0 text-slate-500">
+            {l.dia.split("-").reverse().join("/")}
+          </span>
+          {/* A barra é do MESMO número ao lado: realce de grandeza, não uma
+              segunda medida — por isso sem legenda e sem cor categórica. */}
+          <span
+            aria-hidden
+            className="h-1.5 rounded-full bg-indigo-500/70"
+            style={{ width: `${l.min ? Math.max((l.min / maior) * 60, 2) : 0}%` }}
+          />
+          <span className="tabular-nums text-slate-700">
+            {l.min == null ? "—" : fmtDuracao(l.min)}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** Desempenho por agente com dados REAIS (rota /api/relatorios/agentes). */
 function AgentesReport() {
   const [rows, setRows] = useState<AgenteRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /*
+   * Período do TEMPO ONLINE (pedido de 17/09). ⚠️ Só ele: conversas, resposta e
+   * templates continuam sendo os últimos 30 dias, e ganhos/receita seguem o
+   * ACUMULADO — dizer isso no subtítulo é o que evita a leitura de que o
+   * seletor recorta a tabela inteira.
+   */
+  const [periodo, setPeriodo] = useState<Periodo>(() => ({
+    de: somaDias(hojeSP(), -6),
+    ate: hojeSP(),
+  }));
+  const [porDia, setPorDia] = useState<Record<string, Record<string, number>> | null>(null);
+  const [aberto, setAberto] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     void (async () => {
       try {
-        const res = await fetch("/api/relatorios/agentes");
+        const res = await fetch(
+          `/api/relatorios/agentes?de=${periodo.de}&ate=${periodo.ate}`
+        );
         const json = await res.json().catch(() => ({}));
         if (!active) return;
         if (!res.ok) {
@@ -265,6 +327,7 @@ function AgentesReport() {
           return;
         }
         setRows(json.agentes ?? []);
+        setPorDia(json.online_por_dia ?? null);
       } catch {
         if (active) setError("Falha de conexão");
       }
@@ -272,17 +335,22 @@ function AgentesReport() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [periodo]);
 
   return (
     <>
-      <h1 className="mb-1 text-lg font-bold text-slate-900">Desempenho por agente</h1>
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-lg font-bold text-slate-900">Desempenho por agente</h1>
+        {/* ⚠️ O seletor recorta SÓ o tempo online — está dito no subtítulo. */}
+        <PeriodoPicker periodo={periodo} onChange={setPeriodo} />
+      </div>
       <p className="mb-4 text-xs text-slate-500">
         Conversas, resposta e templates dos últimos 30 dias. ⚠️ Ganhos, perdidos e receita são
         o ACUMULADO do atendente — recortar em 30 dias mostraria zero para quem fechou no mês
-        passado. “Tempo online” conta só o tempo com o status <strong>Online</strong> — quem
-        marca <strong>Ausente</strong> continua no CRM e não acumula, porque a coluna mede
-        disponibilidade para receber lead.
+        passado. “Tempo online” é do PERÍODO escolhido acima (só ele muda com o seletor) e conta
+        apenas o status <strong>Online</strong> — quem marca <strong>Ausente</strong> continua no
+        CRM e não acumula, porque a coluna mede disponibilidade para receber lead.{" "}
+        {porDia && <>Clique no tempo para ver dia a dia.</>}
       </p>
       {error && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-700">
@@ -319,7 +387,8 @@ function AgentesReport() {
             </thead>
             <tbody>
               {rows.map((a) => (
-                <tr key={a.userId} className="border-b last:border-0">
+                <Fragment key={a.userId}>
+                <tr className="border-b last:border-0">
                   <td className="px-4 py-2.5 font-medium text-slate-800">{a.nome}</td>
                   <td className="px-4 py-2.5">{a.conversas_atribuidas}</td>
                   <td className="px-4 py-2.5" title={`Mediana de ${a.respostas_medidas} respostas, em minutos de expediente`}>
@@ -349,12 +418,36 @@ function AgentesReport() {
                         : "Ainda não há medida de presença para esta pessoa"
                     }
                   >
-                    {a.minutos_online == null ? "—" : fmtDuracao(a.minutos_online)}
+                    {a.minutos_online == null ? (
+                      "—"
+                    ) : porDia ? (
+                      /* ⚠️ Só vira botão quando HÁ detalhe para abrir: um clique
+                         que não faz nada ensina a não clicar nos que funcionam. */
+                      <button
+                        onClick={() => setAberto(aberto === a.userId ? null : a.userId)}
+                        className="rounded px-1 underline decoration-dotted underline-offset-2 hover:bg-indigo-50 hover:text-indigo-700"
+                      >
+                        {fmtDuracao(a.minutos_online)}
+                      </button>
+                    ) : (
+                      fmtDuracao(a.minutos_online)
+                    )}
                   </td>
                   <td className="px-4 py-2.5 text-emerald-600">{a.ganhos}</td>
                   <td className="px-4 py-2.5 text-slate-500">{a.perdidos}</td>
                   <td className="px-4 py-2.5">{formatBRL(a.receita_ganha)}</td>
                 </tr>
+                {aberto === a.userId && porDia && (
+                  <tr className="border-b bg-slate-50/70">
+                    <td colSpan={9} className="px-4 py-3">
+                      <p className="mb-2 text-[11px] font-semibold text-slate-600">
+                        Tempo online por dia · {a.nome}
+                      </p>
+                      <DetalheOnline dias={porDia[a.userId] ?? {}} periodo={periodo} />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
               {rows.length === 0 && (
                 <tr>

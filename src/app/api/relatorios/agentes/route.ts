@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { ehDiaValido, hojeSP, somaDias } from "@/lib/periodo";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -48,7 +49,19 @@ export async function GET(request: Request) {
     return Response.json({ error: "apenas administradores" }, { status: 403 });
   }
 
-  const dias = Math.min(365, Math.max(1, Number(new URL(request.url).searchParams.get("dias")) || 30));
+  const url = new URL(request.url);
+  const dias = Math.min(365, Math.max(1, Number(url.searchParams.get("dias")) || 30));
+  /*
+   * Período por DATA para o tempo online (pedido de 17/09: "ver quanto tempo ele
+   * ficou online em CADA DIA"). Sem `de`/`ate` cai nos últimos `dias`, que é o
+   * comportamento de sempre do resto da aba.
+   */
+  const deQ = url.searchParams.get("de");
+  const ateQ = url.searchParams.get("ate");
+  const periodo =
+    deQ && ateQ && ehDiaValido(deQ) && ehDiaValido(ateQ) && deQ <= ateQ
+      ? { de: deQ, ate: ateQ }
+      : { de: somaDias(hojeSP(), -(dias - 1)), ate: hojeSP() };
 
   /*
    * ⚠️ **Tempo online vem de uma consulta SEPARADA, e não de dentro de
@@ -63,7 +76,7 @@ export async function GET(request: Request) {
    * engolido e a coluna some — em vez de a tela inteira parar por causa de um
    * campo novo.
    */
-  const [{ data, error }, online] = await Promise.all([
+  const [{ data, error }, online, onlinePorDia] = await Promise.all([
     supabase.rpc("agentes_desempenho", {
       p_location: membership.location_id,
       p_dias: dias,
@@ -71,6 +84,20 @@ export async function GET(request: Request) {
     }),
     supabase
       .rpc("tempo_online", { p_location: membership.location_id, p_dias: dias })
+      .then((r) => (r.error ? null : (r.data as any[]))),
+    /*
+     * ⚠️ Por DIA, e numa consulta separada da do total: são perguntas
+     * diferentes ("quanto no total" × "quanto em cada dia"), e recalcular o
+     * total somando os dias no navegador daria margem a divergir do número da
+     * coluna ao lado. Só existe depois da 202609171100 — falhar aqui não pode
+     * derrubar a aba, então o erro é engolido e o detalhe some.
+     */
+    supabase
+      .rpc("tempo_online_por_dia", {
+        p_location: membership.location_id,
+        p_de: periodo.de,
+        p_ate: periodo.ate,
+      })
       .then((r) => (r.error ? null : (r.data as any[]))),
   ]);
   if (error) {
@@ -149,5 +176,22 @@ export async function GET(request: Request) {
     // Mais ativo primeiro.
     .sort((a: any, b: any) => b.conversas_atribuidas - a.conversas_atribuidas);
 
-  return Response.json({ agentes, dias });
+  /*
+   * Mapa `{ userId: { "AAAA-MM-DD": minutos } }` — a tela desenha o detalhe do
+   * atendente sem refazer conta nenhuma.
+   */
+  const porDia: Record<string, Record<string, number>> = {};
+  for (const r of (onlinePorDia ?? []) as any[]) {
+    const u = r.usuario as string;
+    (porDia[u] ??= {})[String(r.dia)] = Number(r.minutos ?? 0);
+  }
+
+  return Response.json({
+    agentes,
+    dias,
+    periodo,
+    // `undefined` (e não `{}`) enquanto a 202609171100 não estiver aplicada: a
+    // tela não desenha o detalhe em vez de mostrar zeros para todo mundo.
+    online_por_dia: onlinePorDia ? porDia : undefined,
+  });
 }

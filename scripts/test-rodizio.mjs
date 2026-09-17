@@ -1044,6 +1044,33 @@ const contarPorPessoa = (db) => {
 };
 
 {
+  /*
+   * 🔴 O INCIDENTE de 17/09/2026, escrito como regressao.
+   *
+   * Rogerio marcado "Ausente"; Alberto e Paulo online. Ate esta correcao o
+   * denominador era o dos DISPONIVEIS (2), a cota de 90 dava 45 por pessoa e os
+   * dois levavam a fila inteira — medido em producao: Alberto 59, Paulo 63,
+   * Rogerio 0.
+   *
+   * A regra do Gabriel: "temos 90 leads, o Alberto recebe 30, o Paulo recebe 30
+   * e o Rogerio recebe 30 — justa para os 3". Com um ausente, a fatia dele FICA
+   * PENDENTE.
+   */
+  const st = timeDeVendas(["paulo", "alberto"]);
+  st.location_members.find((m) => m.user_id === "rogerio").disponibilidade = "ausente";
+  const db = fakeDb(st);
+  const r = await distributeDepartment(db, "loc1", "dep1", filaDe(90), 1, null, ["ch1"]);
+  const por = contarPorPessoa(db);
+  eq("[incidente 17/09] o ausente nao recebe", por.rogerio ?? 0, 0);
+  eq(
+    "[incidente 17/09] os dois presentes levam 30 cada, NAO 45",
+    Object.values(por).sort((a, b) => b - a),
+    [30, 30],
+  );
+  eq("[incidente 17/09] os 30 do ausente FICAM na fila", r.retidas, 30);
+}
+
+{
   // Os tres online: 100 leads saem 34/33/33 — a divisao inteira de 100 por 3.
   const db = fakeDb(timeDeVendas(["paulo", "alberto", "rogerio"]));
   const r = await distributeDepartment(db, "loc1", "dep1", filaDe(100), 1, null, ["ch1"]);
@@ -1179,7 +1206,19 @@ function comFila(st, convs) {
   await distribuirFilaDoSetor(db, "loc1");
   const por = contarPorPessoa(db);
   eq("[regra] o AUSENTE nao recebe nada", por.alberto ?? 0, 0);
-  eq("[regra] tudo foi para quem nao esta ausente (offline inclusive)", por.rogerio, 3);
+  /*
+   * 🔴 REESCRITO em 17/09. A versao anterior exigia `por.rogerio === 3` — "tudo
+   * para quem nao esta ausente" —, e foi essa regra que produziu o despejo
+   * medido: com um dos tres ausente, o denominador virou 2 e a fila de 122 deu
+   * 61 por pessoa.
+   *
+   * Aqui o TIME sao 2 (alberto ausente + rogerio), e a cota de 3 leads da
+   * ceil(3/2) = 2: o Rogerio leva a fatia dele e o terceiro ESPERA o Alberto.
+   * Lead parado esperando quem nao esta e o preco declarado de "dividir
+   * igualmente entre os 3".
+   */
+  eq("[regra] a cota divide pelo TIME, ausente incluso no denominador", por.rogerio, 2);
+  eq("[regra] so ele recebeu — o resto FICA na fila", Object.keys(por).length, 1);
 }
 
 {

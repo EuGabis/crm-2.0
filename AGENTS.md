@@ -8519,3 +8519,117 @@ ressalva do "% da fase anterior" no painel.
 
 ⏳ `contatos/[id]/page.tsx` continua com **1 erro de lint** pré-existente
 (`react-hooks/set-state-in-effect`, agora ~linha 52), anterior a esta mudança.
+
+## 🔴 O AUSENTE saía do denominador — e foi o terceiro despejo (2026-09-17)
+
+Relato: *"o Alberto recebeu por volta de 60 leads quando logou. O Paulo logou e
+não recebeu nenhum; alguns minutos depois recebeu uns 30... o vendedor não pode
+logar e receber todos os leads de uma vez."*
+
+Regra do Gabriel, literal: *"temos 90 leads, o Alberto logou recebe 30, o Paulo
+logou depois recebe 30 e o Rogério logou depois — os outros 30 pendentes. A regra
+precisa ser justa para os 3!"*
+
+### A causa, medida antes de tocar em código
+
+| | |
+|---|---|
+| hoje, 09:00 | **Alberto 59 · Paulo 63 · Rogério 0** |
+| `Rogerio.disponibilidade` | **`ausente`** |
+| `dividir_igualmente` em Vendas | `true` (a cota estava ligada) |
+
+🔴 **A cota existia e estava certa; o DENOMINADOR é que encolheu.** Desde
+11/09 eu passava `elegiveis` (pool menos ausentes) como `poolParaCota`. Com o
+Rogério ausente o time virou 2, a fila de ~122 deu **61 por pessoa**, e os dois
+presentes levaram tudo. A cota trabalhou exatamente como programada — para o
+número errado de pessoas.
+
+⚠️ **É a terceira vez que este mesmo sintoma volta por uma causa diferente**:
+10/09 foi a fórmula que inflava, 11/09 foi o total que crescia a cada entrega, e
+agora o denominador. As duas primeiras correções estavam certas — e nenhuma
+cobria esta.
+
+### A reversão, e o preço que ela cobra
+
+O denominador volta a ser o **POOL (o time)**, nos DOIS caminhos que distribuem
+(`distributeOne` e `distributeDepartment` — a lição de "conte os caminhos", que
+este arquivo já registrou duas vezes).
+
+⚠️ **O argumento de 11/09 não era errado, era outro caso:** reservar a fatia de
+quem declarou indisponibilidade deixa lead parado. Com a regra do Gabriel isso
+passa a ser o comportamento DESEJADO — os 30 do Rogério ficam pendentes na fila
+do setor, visíveis a todos, até ele entrar. Lead esperando o dono é o preço
+declarado de dividir por igual; lead despejado em quem chegou primeiro é o
+defeito.
+
+⏳ **Consequência assumida:** quem some por dias (férias) segura a própria fatia.
+A saída é tirá-lo do `lead_pool` do setor — **não** mexer nesta conta.
+
+O teste que eu havia escrito em 11/09 ("tudo foi para quem não está ausente")
+**foi reescrito**: ele codificava a regra antiga. E o incidente virou regressão —
+90 leads, 2 presentes e 1 ausente: 30/30 e **30 retidos**.
+`npm run test:rodizio` — 153 asserções.
+
+## 🔴 O Log do bot mostrava 24 HORAS quando se pedia "Hoje" (2026-09-17)
+
+Relato: *"a tela de Log do bot está confusa... no filtro da data de hoje mostra
+que o Alberto está com 154, Paulo com 157, está estranho."*
+
+Estava estranho porque estava errado, e por DOIS motivos somados:
+
+1. ⚠️ **`dias = 1` era `now() - 24h`, não o dia.** Conferido em produção: com
+   "Hoje", a atribuição mais antiga da lista era de **ontem às 10:05**. Quem
+   escolhe um dia quer o dia.
+2. ⚠️ **O filtro misturava DOIS eixos**: `created_at >= desde OR atribuida_em >=
+   desde`. Um lead que CHEGOU há três semanas e foi atribuído hoje entrava pelo
+   segundo; um que chegou hoje e ainda espera entrava pelo primeiro. Somados por
+   atendente, o número não respondia nem "quantos ele recebeu" nem "quantos
+   chegaram".
+
+Agora o recorte é por **data em São Paulo** (`PeriodoPicker`, o mesmo calendário
+da aba "Leads do dia") e cada linha entra por UM eixo: **quem tem atendente pela
+ATRIBUIÇÃO; quem está na fila, pela CHEGADA** — ela não tem carimbo de
+atribuição, e esconder a fila tiraria justamente o número que diz se a divisão
+está segurando ou despejando.
+
+Conferido depois da correção: hoje passou de **152/157** para **64/63 + 37 na
+fila** — que bate com a contagem direta em `conversations`.
+
+⚠️ `p_dias` continua existindo com default, então a produção não percebeu nada
+entre a migração e o merge. E o `drop function if exists` cai nas DUAS
+assinaturas: sem a segunda linha, reexecutar o arquivo responde
+`42723 function already exists with same argument types` — toda migração daqui
+tem de poder rodar duas vezes.
+
+## Tempo online por DIA (migração 202609171100)
+
+Pedido: *"na tela Agentes que mostra o tempo online, tem que ter o filtro para
+ver quanto tempo ele ficou online em cada dia."*
+
+`public.tempo_online_por_dia(location, de, ate)`, e o `PeriodoPicker` no
+cabeçalho da aba. Clicar no tempo abre o detalhe dia a dia.
+
+- ⚠️ **A sessão é PARTIDA por dia, não atribuída ao dia em que começou.** Quem
+  entra às 22h e fica até 1h tem duas linhas. Jogar tudo no dia de início faria a
+  coluna de segunda mostrar trabalho de terça.
+- ⚠️ **Função nova, e `tempo_online` continua**: são perguntas diferentes
+  ("quanto no total" × "quanto em cada dia"), e recalcular o total somando os
+  dias no navegador daria margem a divergir do número da coluna ao lado.
+- ⚠️ **Dia sem medida é "—", nunca "0min"** — a mesma distinção da coluna.
+- ⚠️ **O seletor recorta SÓ o tempo online.** Conversas, resposta e templates
+  seguem os últimos 30 dias e ganhos/receita seguem o acumulado; o subtítulo diz
+  isso, senão o seletor parece recortar a tabela inteira.
+
+### ⏳ O número de "tempo online" é ABA ABERTA, e hoje ele exagera
+
+Medido ao conferir a função: a sessão do Paulo vai de **16/09 19:32 a 17/09
+10:09 — 878 minutos ininterruptos**; a da Beatriz, 973. O `touch_presence` só
+pinga se houve mouse/teclado nos últimos 5 minutos (`ATIVIDADE_MS`), então
+tecnicamente houve atividade a noite toda — mas 14 horas seguidas é CRM aberto,
+não pessoa trabalhando.
+
+⚠️ Isso não foi mexido porque a definição é decisão do Gabriel, não minha: hoje a
+coluna responde *"por quanto tempo o CRM ficou aberto e ativo"*, e usá-la como
+medida de trabalho vai superestimar quem deixa a aba aberta. Se ela tiver de
+medir trabalho, o caminho é cortar a sessão num limite de inatividade — e aí a
+`presence_sessions` precisa guardar os pings, não só início e fim.
