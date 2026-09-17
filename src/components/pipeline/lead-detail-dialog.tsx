@@ -17,6 +17,8 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { ContactActivity } from "@/components/contacts/contact-activity";
+import { ContactConversations } from "@/components/contacts/contact-conversations";
 import { PaymentsProfileView } from "@/components/payments/lead-payments-panel";
 import { contactName } from "@/lib/data/repos/contacts";
 import { useDbContact, useDbTeam } from "@/lib/data/repos/db/contacts";
@@ -177,10 +179,38 @@ function LeadDetailBody({
             {profile.matchKey ? ` (${profile.totals?.salesCount ?? 0})` : ""}
           </TabsTrigger>
         )}
+        {/*
+          🔴 **Visualização, não atendimento.** O pedido (16/09) foi poder
+          acompanhar a conversa do vendedor sem tomá-la dele: abrir na caixa de
+          entrada ZERA o contador de não lidas — `conversations.unread_count` é UM
+          contador por conversa, não por pessoa, então quem lê zera para todos.
+          Estas duas abas só LEEM, e é por isso que elas existem em vez de um
+          atalho para a caixa.
+        */}
+        <TabsTrigger value="conversas" className="text-xs">
+          Conversas
+        </TabsTrigger>
+        <TabsTrigger value="atividade" className="text-xs">
+          Atividade
+        </TabsTrigger>
         <TabsTrigger value="comentarios" className="text-xs">
           Comentários{notes.length > 0 ? ` (${notes.length})` : ""}
         </TabsTrigger>
       </TabsList>
+
+      {/* ---------------- Conversas (somente leitura) ---------------- */}
+      {/* Montadas só quando a aba está aberta: as duas fazem consulta própria,
+          e pagá-las em todo card do funil aberto seria desperdício. */}
+      <TabsContent value="conversas" className="mt-4 overflow-y-auto">
+        {tab === "conversas" && contact && (
+          <ContactConversations contactId={contact.id} contatoNome={contactName(contact)} />
+        )}
+      </TabsContent>
+
+      {/* ---------------- Atividade ---------------- */}
+      <TabsContent value="atividade" className="mt-4 overflow-y-auto">
+        {tab === "atividade" && contact && <ContactActivity contactId={contact.id} />}
+      </TabsContent>
 
       {/* ---------------- Resumo ---------------- */}
       <TabsContent value="resumo" className="mt-4 space-y-4 overflow-y-auto">

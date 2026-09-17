@@ -51,6 +51,7 @@ import { useContactsModule } from "@/lib/data/repos/db/contacts-module";
 import { useContactActivityCounts } from "@/lib/data/repos/db/contact-files";
 import { conversationActions, useConversation } from "@/lib/data/repos/db/conversations";
 import { oppActions, usePipelineDb } from "@/lib/data/repos/db/pipeline";
+import { ContactActivity } from "@/components/contacts/contact-activity";
 import { useMyMembership } from "@/lib/data/repos/db/team";
 import { formatBRL } from "@/lib/data/repos/opportunities";
 import type { Opportunity, Pipeline, Stage, User as TeamUser } from "@/lib/data/types";
@@ -229,7 +230,7 @@ export function ContactPanel({
   conversationId?: string;
 }) {
   const [panel, setPanel] = useState<Panel>("campos");
-  const [tab, setTab] = useState<"todos" | "resumo" | "dnd" | "acoes">("todos");
+  const [tab, setTab] = useState<"todos" | "resumo" | "atividade" | "dnd" | "acoes">("todos");
   const [pipelineOpen, setPipelineOpen] = useState(false);
   // Seções abertas do acordeão. Controlado (e não `defaultValue`) porque
   // "Resumo pagamentos" só consulta a Guru quando o usuário abre a seção.
@@ -399,6 +400,7 @@ export function ContactPanel({
                 [
                   ["todos", "Todos os campos"],
                   ["resumo", "Resumo"],
+                  ["atividade", "Atividade"],
                   ["dnd", "DND"],
                   ["acoes", "Ações"],
                 ] as const
@@ -460,6 +462,11 @@ export function ContactPanel({
                   )}
                 </Accordion>
               )}
+              {/* ⚠️ Só monta com a aba aberta: a linha do tempo faz seis
+                  consultas próprias, e o painel monta em TODA conversa aberta —
+                  pagá-las sem ninguém olhar seria o mesmo erro do "Resumo
+                  pagamentos", que também só consulta quando a seção abre. */}
+              {tab === "atividade" && <ContactActivity contactId={contactId} />}
               {tab === "dnd" && (
                 <div className="space-y-2 text-xs text-slate-600">
                   <p className="font-semibold">Não Perturbe (DND)</p>

@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ChannelIcon } from "@/components/shared/channel-icon";
+import { ContactActivity } from "@/components/contacts/contact-activity";
 import { ContactConversations } from "@/components/contacts/contact-conversations";
 import { CustomFieldsInputs } from "@/components/contacts/custom-fields-inputs";
 import { TagBadges } from "@/components/contacts/tag-badges";
@@ -381,6 +382,14 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
 
       <div className="mt-4">
         <ContactConversations contactId={contact.id} contatoNome={contactName(contact)} />
+      </div>
+
+      {/* A linha do tempo fica ABAIXO das conversas e não numa aba: aqui a
+          página inteira já é sobre este contato, e esconder a atividade atrás de
+          um clique só acrescentaria um passo. */}
+      <div className="mt-4 rounded-xl border bg-white p-4">
+        <h2 className="mb-3 text-xs font-semibold text-slate-700">Atividade</h2>
+        <ContactActivity contactId={contact.id} />
       </div>
 
       <div className="mt-4">

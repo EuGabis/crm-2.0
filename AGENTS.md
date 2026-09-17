@@ -8455,3 +8455,67 @@ a razão de ele existir.
 ⏳ `triagem_leads` ganhou `order by chegou.created_at desc, chegou.id` — a
 consulta final **não tinha ordem nenhuma**, e sem ela a paginação de `paginarRpc`
 ficaria indefinida entre páginas.
+
+## Visualizar conversa e ATIVIDADE no funil e no contato (2026-09-16)
+
+Relato do Gabriel: *"se eu abro a conversa aqui, ela some de 'não lidas' para
+ele. Preciso visualizar as conversas em andamento, mas tem que ter apenas um
+módulo de visualização... Ao selecionar o contato, tem uma janela de visualização
+das conversas e também de atividades, como quando foi criado um card, para quem
+foi associado."*
+
+🔴 **A queixa está certa e a causa é estrutural: `conversations.unread_count` é UM
+contador por conversa, não por pessoa.** Não existe estado de leitura por usuário
+no schema. Então QUALQUER pessoa que abra a conversa na caixa zera o selo para
+todo mundo — não há ajuste possível na caixa de entrada, e é por isso que a saída
+é um caminho que só LÊ.
+
+⚠️ **O visualizador já era seguro e já existia** (`ContactConversations`, criado
+em 11/09 para a tela do contato): consulta própria, nenhum `markRead`, nenhuma
+escrita. O que faltava era ele estar onde o gestor olha. Agora está em três
+lugares — tela do contato, **detalhe do lead do funil** (aba "Conversas") e
+**barra lateral das Conversas**.
+
+### A linha do tempo: só entra o que o banco REALMENTE guarda
+
+Levantado antes de escrever uma linha:
+
+| o que | existe? |
+|---|---|
+| atribuição / transferência / devolução | ✅ `messages.type='event'` — **13.182 eventos em 30 dias**, 3.496 conversas |
+| criação do card no funil | ✅ `opportunities.created_at` |
+| triagem do bot (quente/frio, pontos) | ✅ `bot_desfechos` |
+| tarefa e compromisso criados | ✅ |
+| **mudança de FASE do card** | ❌ **não é gravada em lugar nenhum** |
+| **troca de dono do card** | ❌ só o estado atual |
+
+⚠️ **"Para quem foi associado" existe porque o gatilho da 202608281530 existe** —
+e o texto do evento já vem pronto do banco ("Atribuída a João Lucas · Jenifer
+Martins · transferida por outra pessoa"). A tela o exibe COMO ESTÁ: reescrevê-lo
+criaria uma segunda redação da mesma coisa, para divergir na primeira mudança.
+
+🔴 **As duas últimas linhas da tabela são o motivo de a tela DIZER o que ela não
+sabe**, num rodapé fixo. Uma linha do tempo que omite a mudança de fase em
+silêncio leva quem lê a concluir que o card nunca se moveu — é o mesmo cuidado da
+ressalva do "% da fase anterior" no painel.
+
+### Decisões
+
+- ⚠️ **Consulta PRÓPRIA**, como `db/notes.ts` e `db/contact-conversations.ts`: o
+  `load()` da caixa traz as 3.000 mensagens mais recentes da empresa inteira, e
+  ler dali para montar a linha do tempo de UM contato seria pagar o preço errado.
+- ⚠️ **Teto de 200 eventos** (e 50 em tarefas/compromissos): um contato que passou
+  por dezenas de devoluções encheria a tela sem acrescentar nada, e os mais
+  recentes são justamente os que respondem "para quem foi associado".
+- ⚠️ **Ordem desempatada por `id`.** O bot cria conversa, card e desfecho em
+  sequência — vários itens nascem no mesmo instante, e ordem instável faria a
+  lista embaralhar entre montagens.
+- ⚠️ **Só monta com a aba ABERTA**, nos três lugares. São seis consultas, e o
+  painel do inbox monta em TODA conversa aberta — pagá-las sem ninguém olhar é o
+  mesmo erro que o "Resumo pagamentos" evitou ao virar acordeão controlado.
+- Na tela do contato a atividade fica **abaixo** das conversas, sem aba: a página
+  inteira já é sobre aquele contato, e esconder atrás de um clique só somaria um
+  passo.
+
+⏳ `contatos/[id]/page.tsx` continua com **1 erro de lint** pré-existente
+(`react-hooks/set-state-in-effect`, agora ~linha 52), anterior a esta mudança.
