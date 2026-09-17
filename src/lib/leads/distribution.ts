@@ -341,15 +341,23 @@ export function escolherPorCarga(
   filaRestante: number,
   cursor: number,
   /**
-   * Entre QUEM a fila é dividida. Padrão: o pool inteiro.
+   * Entre QUEM a fila é dividida. É o TIME — o pool inteiro.
    *
-   * 🔴 **O AUSENTE não entra aqui, e foi um teste que pegou isso.** A cota
-   * reserva a fatia de quem está offline de propósito — ele volta e recebe a
-   * dele, que é o "não perde a vez" do pedido. Mas reservar a fatia de quem
-   * marcou "Ausente" deixa o lead esperando por alguém que declarou que NÃO
-   * está disponível: com um ausente e um presente diante de 3 leads, a cota dava
-   * 2 e o terceiro ficava parado. O pedido é explícito — ausente é retirado da
-   * distribuição.
+   * 🔴 **REVERSÃO da decisão de 2026-09-11, e ela custou um incidente.** Aquela
+   * versão tirava o AUSENTE do denominador, com o argumento de que reservar a
+   * fatia de quem declarou indisponibilidade deixa lead parado. Medido em
+   * 17/09: com o Rogério em "Ausente", o denominador virou **2**, a fila de ~122
+   * deu cota de **61 por pessoa**, e Alberto (59) e Paulo (63) levaram tudo —
+   * exatamente o despejo que a cota existe para impedir.
+   *
+   * A regra do Gabriel é o TIME: *"temos 90 leads, o Alberto logou recebe 30, o
+   * Paulo recebe 30, o Rogério recebe 30 — a regra precisa ser justa para os
+   * 3"*. A fatia de quem não está fica PENDENTE na fila do setor, visível a
+   * todos, até ele entrar. Lead esperando o dono é o preço declarado de dividir
+   * por igual; lead despejado em quem chegou primeiro é o defeito.
+   *
+   * ⚠️ Consequência assumida: quem some por dias (férias) segura a própria
+   * fatia. A saída é tirá-lo do `lead_pool` do setor — não mexer nesta conta.
    */
   poolParaCota?: string[],
 ): string | null {
@@ -823,7 +831,11 @@ export async function distributeOne(
     const cargas =
       args.cargas ??
       (await recebidosNoDiaPorAtendente(db, args.locationId, args.channelIds ?? [], pool));
-    user = escolherPorCarga(list, cargas, pool, args.filaRestante ?? 1, cursor, elegiveis);
+    /*
+     * ⚠️ O denominador é o POOL (o time), NÃO os elegíveis — passar `elegiveis`
+     * aqui foi a causa do despejo de 17/09. Ver `poolParaCota`.
+     */
+    user = escolherPorCarga(list, cargas, pool, args.filaRestante ?? 1, cursor, pool);
     if (!user) return null;
     // O mapa acompanha a atribuição: o próximo lead do MESMO tique já vê a carga
     // nova e vai para outra pessoa. Sem isso, dez leads seguidos iriam todos
@@ -1037,7 +1049,8 @@ export async function distributeDepartment(
        * de um clique de "30%" ela cairia para 9 e o botão pararia cedo demais —
        * a mesma razão pela qual a varredura passa prontas + retidas.
        */
-      user = escolherPorCarga(list, cargas, pool, convs.length - feitas, cursor + feitas, elegiveis);
+      // Mesmo denominador do outro caminho: o TIME. Ver `poolParaCota`.
+      user = escolherPorCarga(list, cargas, pool, convs.length - feitas, cursor + feitas, pool);
       // Ninguém abaixo da cota: o RESTO FICA NA FILA, visível a todos, em vez de
       // ser empurrado para quem já está cheio. "Todos" pode não levar todos.
       if (!user) break;

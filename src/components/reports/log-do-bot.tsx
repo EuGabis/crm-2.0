@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { PeriodoPicker } from "@/components/shared/period-picker";
+import { hojeSP, type Periodo } from "@/lib/periodo";
 import { cn } from "@/lib/utils";
 
 interface Linha {
@@ -18,12 +20,6 @@ interface Linha {
   desfecho: string;
   na_fila: boolean;
 }
-
-const PERIODOS = [
-  { label: "Hoje", dias: 1 },
-  { label: "7 dias", dias: 7 },
-  { label: "30 dias", dias: 30 },
-];
 
 /**
  * Teto de linhas desenhadas por grade.
@@ -97,7 +93,15 @@ function origemDe(motivo: string): { curto: string; classe: string } {
 }
 
 export function LogDoBot() {
-  const [dias, setDias] = useState(1);
+  /*
+   * 🔴 **Período por DATA.** O seletor de "N dias" recortava as últimas 24/168
+   * horas CORRIDAS, então "Hoje" trazia desde ontem no mesmo horário — a causa
+   * medida de o log mostrar 152/157 num dia de ~60 por pessoa. O `PeriodoPicker`
+   * é o mesmo da aba "Leads do dia": um seletor de data só no CRM.
+   */
+  const [periodo, setPeriodo] = useState<Periodo>(() => ({ de: hojeSP(), ate: hojeSP() }));
+  // Mais de um dia no recorte → as colunas de hora precisam mostrar a data.
+  const dias = periodo.de === periodo.ate ? 1 : 2;
   const [linhas, setLinhas] = useState<Linha[]>([]);
   const [truncado, setTruncado] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -116,7 +120,7 @@ export function LogDoBot() {
     void (async () => {
       setCarregando(true);
       setErro(null);
-      const r = await fetch(`/api/relatorios/log-bot?dias=${dias}`);
+      const r = await fetch(`/api/relatorios/log-bot?de=${periodo.de}&ate=${periodo.ate}`);
       const j = await r.json().catch(() => ({}));
       if (!vivo) return;
       if (!r.ok) setErro(j.error ?? "Não foi possível carregar");
@@ -129,7 +133,7 @@ export function LogDoBot() {
     return () => {
       vivo = false;
     };
-  }, [dias]);
+  }, [periodo]);
 
   const fluxos = useMemo(
     () => Array.from(new Set(linhas.map((l) => l.fluxo).filter(Boolean))).sort(),
@@ -190,24 +194,12 @@ export function LogDoBot() {
           <h2 className="text-sm font-bold text-slate-900">Log do bot</h2>
           <p className="text-[11px] text-slate-500">
             Cada lead que entrou por um número com setor: quem recebeu, quando chegou, quando foi
-            atribuído e por qual caminho.
+            atribuído e por qual caminho. ⚠️ Quem TEM atendente entra pela data da{" "}
+            <strong>atribuição</strong>; quem está na fila, pela data de <strong>chegada</strong>.
           </p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
-          {PERIODOS.map((p) => (
-            <button
-              key={p.dias}
-              onClick={() => setDias(p.dias)}
-              className={cn(
-                "h-7 rounded-md border px-2 text-[11px] font-medium",
-                dias === p.dias
-                  ? "border-indigo-300 bg-indigo-50 text-indigo-700"
-                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
-              )}
-            >
-              {p.label}
-            </button>
-          ))}
+          <PeriodoPicker periodo={periodo} onChange={setPeriodo} />
           {canais.length > 1 && (
             <select
               value={canal}
