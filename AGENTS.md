@@ -8677,3 +8677,85 @@ lê o `handler_type` (`vide` / `soun`).
 
 `npm run test:audio` — 90 asserções (10 novas). Metade vigia o lado oposto: vídeo
 com som, vídeo mudo e arquivo sem `moov` continuam sendo tratados como antes.
+
+## 🔴 A devolução e a varredura brigando no MESMO tique (2026-09-18)
+
+Relato: *"o lead estava com o Alberto, mas voltou pra fila às 10 e foi atribuído
+ao Paulo. Porém o Alberto conseguiu enviar mensagem às 10h09, quando já não
+estava mais com ele."*
+
+⚠️ **Medido primeiro, e o estado real é outro:** a conversa **está com o
+Alberto** — ele a recebeu de VOLTA às 10:00:08, pela varredura da fila. Ele podia
+mandar mensagem, e o cabeçalho da conversa mostra o nome dele. O relato leu o fio
+(onde "Atribuída a Paulo" aparece) sem ver o evento seguinte, 2 segundos depois.
+
+**Mas isso expôs um defeito pior**, e é o que foi corrigido:
+
+```
+10:00:06  Devolvida à fila do setor · cliente esperava 21 min sem resposta
+10:00:06  Atribuída a Paulo Lopes · redistribuída após 21 min de espera
+10:00:08  Atribuída a Alberto · varredura da fila do setor     ← 2 segundos depois
+```
+
+🔴 **Duas coisas atribuíram a MESMA conversa no mesmo tique.** A devolução soltou
+e reatribuiu ao Paulo; a varredura, que tinha lido a fila ANTES, escreveu por
+cima e devolveu o lead exatamente a quem acabara de perdê-lo por não responder.
+**Seis casos em três dias, todos entre 2 e 4 segundos.** A devolução vira teatro,
+e o fio fica com três atribuições no mesmo minuto — ilegível.
+
+A causa é `assignLeadTo` fazer `update(...).eq("id", conversationId)`
+**incondicional**: quem escreve por último ganha.
+
+- **`exigirSemDono`** (compare-and-set): a escrita vira
+  `update ... where id = X and assigned_to is null`, e `.select("id")` diz se
+  alguma linha foi mesmo afetada. ⚠️ UPDATE que não casa linha **não vem com
+  erro** — volta calado, a mesma armadilha de `removeMessage` e da rota de mídia.
+- ⚠️ **Vale SÓ para quem tira lead da FILA.** Transferência, plantão e a escolha
+  do administrador atribuem conversa que PODE ter dono; exigir `null` ali faria
+  essas ações falharem em silêncio, o que é pior que a corrida.
+- Perdendo a corrida, `distributeOne` devolve `null` e o chamador conta como "não
+  distribuí este" — sem somar carga de uma entrega que não aconteceu.
+
+⚠️ **O banco falso do teste precisou aprender o `.is(col, null)` no UPDATE.** Sem
+isso ele diria que a escrita aconteceu e o teste da corrida passaria sem testar
+nada. E precisou distinguir **"a condição não casou"** de **"não conheço a
+linha"**: vários casos passam a fila por PARÂMETRO
+(`distributeDepartment(..., filaDe(2), ...)`), e tratar "não encontrei" como
+recusa faria metade da bateria medir a corrida em vez do que ela existe para
+medir. `npm run test:rodizio` — 159 asserções.
+
+## Só ADMIN muda o proprietário do contato (migração 202609181500)
+
+Pedido: *"os usuários que não são administrador estão conseguindo mudar o
+proprietário do contato, mas apenas administrador pode fazer isso."*
+
+🔴 **Reverte uma decisão minha da 202609111030**, que dizia "não é admin-only:
+travar só a tela daria impressão de proteção sem proteger nada". O argumento
+continua verdadeiro — e é exatamente por isso que a regra foi para o BANCO. O que
+mudou foi a regra, não o mecanismo.
+
+⚠️ **Gatilho, não policy: a RLS do Postgres é por LINHA, não por coluna.** Uma
+policy de UPDATE exigindo `is_admin` trancaria o cadastro INTEIRO do contato para
+quem atende — nome, telefone, etiqueta, DND —, que é o trabalho do dia a dia.
+`private.protege_owner_do_contato` recusa só a troca de `owner_id`, e sai do
+caminho quando a coluna não mudou (99% dos updates).
+
+⚠️ **`grant` por coluna também não serviria**, pelo mesmo motivo de
+`payment_integration_status` ter virado casca sobre função definer: admin e
+atendente são o MESMO role (`authenticated`), e quem os separa é a RLS.
+
+⚠️ **`auth.uid()` nulo (service role) passa.** Webhook, bot, rodízio e importação
+não têm sessão e precisam gravar o dono — `dbContactActions.add` grava no
+cadastro individual. Bloquear o sistema junto com o atendente quebraria a criação
+de contato.
+
+Conferido em produção, os três lados (transação revertida):
+
+| quem | resultado |
+|---|---|
+| Paulo (user) troca o proprietário | ✅ recusado — *"apenas administradores podem mudar o proprietário"* |
+| Moacir (admin) troca | ✅ permitido |
+| Paulo edita nome/DND | ✅ **continua funcionando** (a regressão que o gatilho evita) |
+
+Na tela, o não-admin vê o nome em texto em vez do seletor — não é a proteção, é
+não OFERECER uma ação que responderia erro.

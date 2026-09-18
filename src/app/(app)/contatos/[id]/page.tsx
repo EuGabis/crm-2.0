@@ -18,6 +18,7 @@ import { CustomFieldsInputs } from "@/components/contacts/custom-fields-inputs";
 import { TagBadges } from "@/components/contacts/tag-badges";
 import { contactName } from "@/lib/data/repos/contacts";
 import { dbContactActions, useDbContact, useDbTeam } from "@/lib/data/repos/db/contacts";
+import { useMyMembership } from "@/lib/data/repos/db/team";
 import { conversationActions } from "@/lib/data/repos/db/conversations";
 import { ContactPaymentsPanel, formatDoc } from "@/components/payments/lead-payments-panel";
 import { useContactsModule } from "@/lib/data/repos/db/contacts-module";
@@ -29,6 +30,9 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
   const router = useRouter();
   const { contact, loading, refresh } = useDbContact(id);
   const team = useDbTeam();
+  // Só admin troca o proprietário — a regra vive no gatilho (202609181500); aqui
+  // ela só evita oferecer um seletor que responderia erro.
+  const { isAdmin } = useMyMembership();
   const [openingChat, setOpeningChat] = useState(false);
   const [salvandoDono, setSalvandoDono] = useState(false);
   const { fields } = useContactsModule();
@@ -191,10 +195,18 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
               <span className="inline-flex items-center gap-1">
                 Proprietário:
                 {/*
-                  ⚠️ `<select>` nativo, como no "Atribuir…" do Relatório e no
-                  seletor de curso: são dezenas de nomes, e o nativo dá busca por
-                  digitação e a rolagem do sistema de graça.
+                  🔴 **Só ADMIN troca o proprietário** (pedido de 18/09). A tela
+                  não é a proteção — quem recusa é o gatilho
+                  `protege_owner_do_contato` (202609181500), porque a RLS de
+                  `contacts` autoriza qualquer membro a editar a linha. Aqui o
+                  ponto é não OFERECER uma ação que vai falhar: um seletor que
+                  responde erro ao ser usado é pior que um texto fixo.
                 */}
+                {!isAdmin ? (
+                  <strong className="font-medium text-slate-700">
+                    {owner?.name ?? "sem proprietário"}
+                  </strong>
+                ) : (
                 <select
                   value={contact.ownerId ?? ""}
                   onChange={(e) => void trocarDono(e.target.value)}
@@ -219,6 +231,7 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
                     </option>
                   ))}
                 </select>
+                )}
               </span>
             </p>
           </div>

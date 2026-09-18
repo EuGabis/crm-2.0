@@ -517,10 +517,25 @@ export async function assignLeadTo(
      * uma rodada aqui (a redistribuição de 10/09 pegou 1 motivo entre 7).
      */
     plantaoId?: string | null;
+    /**
+     * 🔴 **Só atribui se a conversa AINDA estiver sem dono** (compare-and-set).
+     *
+     * Medido em 18/09: no MESMO tique, a devolução soltou a conversa do Alberto
+     * e a entregou ao Paulo (10:00:06), e **2 segundos depois** a varredura da
+     * fila — que tinha lido a lista antes — a entregou de volta ao Alberto
+     * (10:00:08). Seis casos em três dias, todos entre 2 e 4 segundos. O
+     * `update ... eq(id)` é incondicional, então quem escreve por último ganha:
+     * a devolução vira teatro e o fio fica com três atribuições no mesmo minuto.
+     *
+     * ⚠️ Vale SÓ para quem tira lead da fila. Transferência, plantão e a escolha
+     * do administrador atribuem conversa que PODE ter dono — exigir `null` ali
+     * faria essas ações falharem em silêncio, que é pior que a corrida.
+     */
+    exigirSemDono?: boolean;
   },
   userId: string,
   offline = false,
-) {
+): Promise<boolean> {
   const patch: Record<string, unknown> = {
       assigned_to: userId,
       bot_paused: true,
@@ -553,16 +568,33 @@ export async function assignLeadTo(
    * o campo entra normalmente.
    */
   if (p.plantaoId) patch.plantao_id = p.plantaoId;
-  const r = await db.from("conversations").update(patch).eq("id", p.conversationId);
+  /*
+   * ⚠️ `.select("id")` é o que permite saber se a linha foi mesmo escrita: um
+   * UPDATE que não casa nenhuma linha (porque alguém atribuiu antes) NÃO vem com
+   * erro — volta calado, a mesma armadilha já documentada em `removeMessage` e
+   * na rota de mídia.
+   */
+  const escrever = async (corpo: Record<string, unknown>) => {
+    let q = db.from("conversations").update(corpo).eq("id", p.conversationId);
+    if (p.exigirSemDono) q = q.is("assigned_to", null);
+    return q.select("id");
+  };
+  let r = await escrever(patch);
   if (r?.error && p.plantaoId) {
     // Sem a coluna ainda: atribui do mesmo jeito, sem a marca. Perder a marca é
     // ruim; não atribuir o lead é pior.
     delete patch.plantao_id;
-    await db.from("conversations").update(patch).eq("id", p.conversationId);
+    r = await escrever(patch);
   }
+  /*
+   * Outra coisa pegou a conversa entre a leitura e a escrita: desiste em
+   * silêncio. O lead tem dono, que é o que importa — insistir criaria a terceira
+   * atribuição no mesmo minuto.
+   */
+  if (p.exigirSemDono && (r?.error || !(r?.data?.length ?? 0))) return false;
 
   const pid = await leadsPipelineId(db, p.locationId, p.pipelineName);
-  if (!pid) return;
+  if (!pid) return true;
   const { data: opp } = await db
     .from("opportunities")
     .select("id, owner_id")
@@ -580,6 +612,7 @@ export async function assignLeadTo(
   if (opp && podeTrocarDonoDoCard(opp.owner_id, p.donoAnterior)) {
     await db.from("opportunities").update({ owner_id: userId }).eq("id", opp.id);
   }
+  return true;
 }
 
 /** Um plantão vigente (202609112100). */
@@ -650,6 +683,12 @@ export async function distributeOne(
      * — e o resultado seria um evento de transferência a cada tique, para sempre.
      */
     excluir?: string[];
+    /**
+     * Só atribui se a conversa ainda estiver SEM DONO. Ver `exigirSemDono` em
+     * `assignLeadTo` — a corrida medida em 18/09 entre a devolução e a
+     * varredura, que devolvia o lead a quem acabara de perdê-lo.
+     */
+    exigirSemDono?: boolean;
     /** Motivo repassado ao `assignLeadTo` → coluna `assign_reason` → evento. */
     reason?: string;
     /**
@@ -847,7 +886,7 @@ export async function distributeOne(
   }
   const offline = !online.includes(user); // marca "offline" se o escolhido não está online
   await db.from("departments").update({ rr_cursor: cursor + 1 }).eq("id", args.deptId);
-  await assignLeadTo(
+  const ok = await assignLeadTo(
     db,
     {
       conversationId: args.conversationId,
@@ -856,10 +895,17 @@ export async function distributeOne(
       pipelineName: args.pipelineName,
       reason: args.reason,
       donoAnterior: args.donoAnterior,
+      exigirSemDono: args.exigirSemDono,
     },
     user,
     offline,
   );
+  /*
+   * Perdeu a corrida (alguém atribuiu entre a leitura e a escrita): devolve
+   * `null`, e quem chamou trata como "não distribuí este" — sem contar a carga
+   * de uma entrega que não aconteceu.
+   */
+  if (!ok) return null;
   return user;
 }
 
@@ -1820,6 +1866,9 @@ export async function distribuirFilaDoSetor(
         contactId: conv.contact_id,
         pipelineName: "Controle de Leads",
         reason: "varredura da fila do setor",
+        // ⚠️ A varredura tira lead DA FILA: se ele já tem dono, ela não é mais
+        // quem deve decidir. Ver `exigirSemDono`.
+        exigirSemDono: true,
         cargas,
         // 🔴 DECRESCE. Com `filaTotal` fixo aqui, cada entrega inflava a cota em
         // 1/pool e a pessoa online nunca batia no teto — o despejo de 10 e 11/09.

@@ -20,6 +20,7 @@
  * Roda direto no Node 24 (`npm run test:rodizio`), sem runner de teste.
  */
 import {
+  distributeOne,
   distribuirFilaDoSetor,
   devolvivel,
   cotaPorAtendente,
@@ -58,18 +59,39 @@ function fakeDb(estado) {
 
   function resolver(f) {
     if (f.patch) {
-      escritas.push({ tabela: f.tabela, patch: f.patch, filtros: f.filtros });
       /*
        * ⚠️ O update é APLICADO ao estado, não só registrado. Sem isso o
        * `rr_cursor` que `distributeOne` grava em `departments` nunca avançava e
        * o rodízio parecia despejar tudo na primeira pessoa — um falso alarme
        * que custou uma rodada aqui. É também o que torna as asserções de
        * alternância verdadeiras em vez de decorativas.
+       *
+       * 🔴 **E o `.is(coluna, null)` do compare-and-set vale AQUI TAMBÉM.** A
+       * varredura da fila só escreve quando a conversa segue sem dono
+       * (`exigirSemDono`); um banco falso que ignorasse essa condição diria que
+       * a escrita aconteceu e o teste da corrida de 18/09 passaria sem testar
+       * nada.
        */
-      for (const l of estado[f.tabela] ?? []) {
-        if (Object.entries(f.filtros).every(([c, v]) => l[c] === v)) Object.assign(l, f.patch);
-      }
-      return { data: null, error: null };
+      const porFiltro = (estado[f.tabela] ?? []).filter((l) =>
+        Object.entries(f.filtros).every(([c, v]) => l[c] === v),
+      );
+      const alvos = porFiltro.filter((l) => f.nulos.every((c) => (l[c] ?? null) === null));
+      for (const l of alvos) Object.assign(l, f.patch);
+      /*
+       * ⚠️ **Linha que o estado NÃO conhece conta como escrita.** Vários casos
+       * passam a fila por PARÂMETRO (`distributeDepartment(..., filaDe(2), ...)`)
+       * e essas conversas não estão em `estado.conversations`. Tratar "não
+       * encontrei" como "o CAS recusou" faria metade dos testes medir a corrida
+       * em vez do que eles existem para medir.
+       *
+       * A recusa de verdade é o outro caso: a linha EXISTE e o `.is(col, null)`
+       * não casou — aí a escrita não aconteceu mesmo.
+       */
+      const recusado = porFiltro.length > 0 && alvos.length === 0;
+      if (!recusado) escritas.push({ tabela: f.tabela, patch: f.patch, filtros: f.filtros });
+      // `.select("id")` depois do update: quem chama confere as LINHAS afetadas.
+      const afetadas = alvos.length ? alvos : recusado ? [] : [{ id: f.filtros.id ?? "?" }];
+      return { data: afetadas.map((l) => ({ id: l.id })), error: null };
     }
     let linhas = (estado[f.tabela] ?? []).slice();
     for (const [c, v] of Object.entries(f.filtros)) linhas = linhas.filter((l) => l[c] === v);
@@ -1400,6 +1422,79 @@ const parada = (extra = {}) => ({
     devolvivel({ ...parada(), dono_online: undefined, minutos_de_sla: undefined }, ["ch1"], 20, true),
     true,
   );
+}
+
+
+console.log("\nA corrida entre a devolucao e a varredura (18/09)\n");
+
+{
+  /*
+   * 🔴 O CASO MEDIDO: no mesmo tique, a devolucao soltou a conversa do Alberto e
+   * a entregou ao Paulo (10:00:06); 2 segundos depois a varredura da fila — que
+   * tinha lido a lista ANTES — a entregou de volta ao Alberto (10:00:08). Seis
+   * casos em tres dias. O fio ficava com tres atribuicoes no mesmo minuto e a
+   * devolucao virava teatro.
+   *
+   * Com `exigirSemDono`, a varredura so escreve se a conversa AINDA estiver sem
+   * dono. Aqui ela ja tem (alguem pegou entre a leitura e a escrita), entao a
+   * varredura desiste e o dono continua sendo quem pegou.
+   */
+  const st = cenario({});
+  st.conversations = [naFila("c1")];
+  st.bot_sessions = [{ conversation_id: "c1", status: "concluido" }];
+  // Alguem atribuiu entre a leitura da fila e a escrita da varredura.
+  st.conversations[0].assigned_to = "paulo";
+  const db = fakeDb(st);
+  const user = await distributeOne(db, {
+    locationId: "loc1",
+    deptId: "dep1",
+    conversationId: "c1",
+    contactId: "ct1",
+    reason: "varredura da fila do setor",
+    exigirSemDono: true,
+  });
+  eq("[corrida] a varredura NAO rouba conversa que ja tem dono", user, null);
+  eq("[corrida] o dono continua sendo quem pegou primeiro", st.conversations[0].assigned_to, "paulo");
+  eq("[corrida] nenhuma atribuicao foi registrada", db.atribuicoes().length, 0);
+}
+
+{
+  // O lado oposto: conversa REALMENTE livre continua sendo distribuida.
+  const st = cenario({});
+  st.conversations = [naFila("c1")];
+  st.bot_sessions = [{ conversation_id: "c1", status: "concluido" }];
+  const db = fakeDb(st);
+  const user = await distributeOne(db, {
+    locationId: "loc1",
+    deptId: "dep1",
+    conversationId: "c1",
+    contactId: "ct1",
+    reason: "varredura da fila do setor",
+    exigirSemDono: true,
+  });
+  eq("[corrida] conversa livre continua sendo atribuida", typeof user, "string");
+  eq("[corrida] e a escrita aconteceu", db.atribuicoes().length, 1);
+}
+
+{
+  /*
+   * ⚠️ Transferencia, plantao e a escolha do administrador NAO exigem conversa
+   * livre: eles atribuem conversa que PODE ter dono, e exigir `null` ali faria a
+   * acao falhar em silencio — pior que a corrida.
+   */
+  const st = cenario({});
+  st.conversations = [naFila("c1")];
+  st.bot_sessions = [{ conversation_id: "c1", status: "concluido" }];
+  st.conversations[0].assigned_to = "paulo";
+  const db = fakeDb(st);
+  const user = await distributeOne(db, {
+    locationId: "loc1",
+    deptId: "dep1",
+    conversationId: "c1",
+    contactId: "ct1",
+    reason: "escolha do administrador no relatorio",
+  });
+  eq("[corrida] sem exigirSemDono, atribui mesmo com dono", typeof user, "string");
 }
 
 console.log(`\n${ok} assercoes ok, ${falhas} falha(s)\n`);
