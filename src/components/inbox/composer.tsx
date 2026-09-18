@@ -69,6 +69,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { Channel, Message } from "@/lib/data/types";
+import { trilhasDoMp4 } from "@/lib/whatsapp/audio";
 import { cn } from "@/lib/utils";
 
 const CHANNELS: Channel[] = ["whatsapp", "sms", "email"];
@@ -408,7 +409,36 @@ export function Composer({ conversationId }: { conversationId: string }) {
       return falhar(`${file.name}: aceito imagem, vídeo, áudio, PDF ou DOCX`);
     }
     // Áudio ANTES de vídeo — ver o aviso em `isAudio`.
-    const kind = isImg ? "image" : isAudio ? "audio" : isVideo ? "video" : "file";
+    let kind: "image" | "audio" | "video" | "file" =
+      isImg ? "image" : isAudio ? "audio" : isVideo ? "video" : "file";
+
+    /*
+     * 🔴 **Um `.mp4` pode ser SÓ ÁUDIO, e a extensão não conta isso.**
+     *
+     * Relato de 18/09: um vendedor anexou o áudio pronto que ele manda todo dia,
+     * num `.mp4` legítimo, e a Meta respondeu *"No video stream found in given
+     * video file"*. A regra da extensão (correção de 02/09) resolve o `.m4a`
+     * tipado como `video/mp4` — ali a extensão está CERTA e o mime errado. Aqui
+     * é o contrário: `.mp4` é um CONTÊINER, não um conteúdo, e nenhuma regra
+     * sobre o nome resolve. Só os bytes sabem.
+     *
+     * ⚠️ `null` (não deu para afirmar) NÃO reclassifica: tratar incerteza como
+     * "não tem vídeo" mandaria um vídeo de verdade como áudio, trocando uma
+     * recusa por outra. Só age quando os bytes DIZEM que não há trilha de vídeo.
+     */
+    // ⚠️ Só para contêiner MP4: é onde a ambiguidade existe, e evita puxar 15 MB
+    // de um `.webm` para a memória do navegador só para descobrir que o parser
+    // não serve para ele (`trilhasDoMp4` devolveria `null` de qualquer jeito).
+    const ehMp4 =
+      name.endsWith(".mp4") || name.endsWith(".m4a") || file.type === "video/mp4";
+    if (kind === "video" && ehMp4) {
+      try {
+        const t = trilhasDoMp4(await file.arrayBuffer());
+        if (t && !t.video && t.audio) kind = "audio";
+      } catch {
+        // Ler o arquivo é diagnóstico: falhar aqui não pode impedir o envio.
+      }
+    }
     // ⚠️ Quem liga/desliga `uploading` é `enviarArquivos`: aqui dentro, num lote
     // de cinco, o clipe piscaria entre habilitado e desabilitado cinco vezes.
     const res = await conversationActions.sendMedia(conversationId, {
