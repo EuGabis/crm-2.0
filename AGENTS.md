@@ -8633,3 +8633,47 @@ coluna responde *"por quanto tempo o CRM ficou aberto e ativo"*, e usá-la como
 medida de trabalho vai superestimar quem deixa a aba aberta. Se ela tiver de
 medir trabalho, o caminho é cortar a sessão num limite de inatividade — e aí a
 `presence_sessions` precisa guardar os pings, não só início e fim.
+
+## 🔴 `.mp4` de áudio-só saindo como VÍDEO (2026-09-18)
+
+Relato: um vendedor anexou o áudio pronto que ele manda todo dia — um `.mp4` — e
+o balão mostrou **"Não foi entregue: No video stream found in given video file"**.
+
+⚠️ **A frase é a mesma de 02/09, e a causa é OUTRA.** Vale distinguir, porque
+quem só reconhecer o texto vai concluir que a correção anterior não funcionou:
+
+| | 02/09 | 18/09 |
+|---|---|---|
+| arquivo | `audio-2s.m4a.mp4` | `.mp4` legítimo |
+| o que mentia | o **mime** (`video/mp4` num `.m4a`) | a **extensão** |
+| correção | a extensão decide antes do mime | os **bytes** decidem |
+
+A correção de 02/09 continua certa e continua necessária: lá a extensão estava
+CERTA. Aqui ela está errada — **`.mp4` é um contêiner, não um conteúdo**, e
+nenhuma regra sobre o NOME resolve. Um `.mp4` pode ter só som, e `EXT_VIDEO`
+inclui `.mp4`, então o arquivo caía em `kind: "video"` e a Meta recusava.
+
+`trilhasDoMp4` (em `lib/whatsapp/audio.ts`) desce `moov → trak → mdia → hdlr` e
+lê o `handler_type` (`vide` / `soun`).
+
+- ⚠️ **Descida por caixas, NUNCA busca de texto.** A sequência "hdlr" aparece por
+  acaso dentro do `mdat` (megabytes de dados comprimidos), e um falso positivo
+  ali classificaria áudio como vídeo de novo — o próprio defeito. Está escrito
+  como teste, com um `mdat` que contém "hdlr"+"vide" de propósito.
+- ⚠️ **`null` = não deu para afirmar, e NÃO "não tem vídeo".** Só reclassifica
+  quando os bytes DIZEM que não há trilha de vídeo; tratar incerteza como
+  negativa mandaria vídeo de verdade como áudio, trocando uma recusa da Meta por
+  outra. É a lição do `null` de canais lido como "está mono".
+- **Nos DOIS lugares**: no composer (para o balão nascer com o tipo certo) e na
+  ROTA — que é o único ponto por onde passam todos os caminhos de envio (clipe,
+  arrastar, colar, e o próximo que alguém criar). *Conte os caminhos* é a lição
+  que este arquivo já registrou três vezes.
+- ⚠️ No composer a leitura só acontece para contêiner MP4: sem isso, anexar um
+  `.webm` de 15 MB puxaria o arquivo inteiro para a memória do navegador só para
+  o parser devolver `null`.
+- `mp4SemVideoViraAudio: true` entrou em `GET /api/whatsapp/send-media` — a
+  recusa da Meta chega pelo webhook de forma assíncrona, e sem marcador "a
+  correção subiu?" volta a ser dedução (a lição que custou seis rodadas).
+
+`npm run test:audio` — 90 asserções (10 novas). Metade vigia o lado oposto: vídeo
+com som, vídeo mudo e arquivo sem `moov` continuam sendo tratados como antes.

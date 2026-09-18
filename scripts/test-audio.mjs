@@ -30,6 +30,7 @@ const {
   crcOgg,
   corrigirPreSkip,
   analisarMp4,
+  trilhasDoMp4,
   retratoDoAudio,
 } = mod;
 
@@ -591,6 +592,82 @@ console.log("  retratoDoAudio — análise do contêiner certo");
   verdade("ogg válido: sem lista de problemas", !/problemas\[/.test(r), r);
 }
 
+/* -------------------------------------------------------------------------- */
+/*  trilhasDoMp4 — o que a EXTENSAO nao sabe                                   */
+/* -------------------------------------------------------------------------- */
+
+console.log("\ntrilhasDoMp4() - MP4 de audio-so nao pode sair como video\n");
+
+/*
+ * ⚠️ Reusa `caixa` e `juntar`, que ja existem neste arquivo — duas versoes do
+ * mesmo montador divergiriam no primeiro caso novo. `caixa` recebe UMA carga,
+ * entao aninhar e `caixa("moov", juntarU8(a, b))`.
+ */
+const juntarU8 = (...partes) => new Uint8Array(juntar(...partes));
+/** hdlr: version+flags (4) · pre_defined (4) · handler_type (4). */
+const hdlrDe = (h) => {
+  const c = new Uint8Array(12);
+  c.set([...h].map((x) => x.charCodeAt(0)), 8);
+  return caixa("hdlr", c);
+};
+const trakDe = (h) => caixa("trak", caixa("mdia", hdlrDe(h)));
+const ftypIsom = caixa("ftyp", new Uint8Array([0x69, 0x73, 0x6f, 0x6d]));
+const mp4Com = (...traks) =>
+  juntar(ftypIsom, caixa("moov", juntarU8(...traks)), caixa("mdat", new Uint8Array(64)));
+
+{
+  // 🔴 O CASO DO RELATO (18/09): .mp4 legitimo, so com som. Ate esta correcao o
+  // CRM mandava `type: "video"` e a Meta respondia "No video stream found".
+  const r = trilhasDoMp4(mp4Com(trakDe("soun")));
+  conferir("[real] mp4 so com audio: audio=true", r.audio, true);
+  conferir("[real] mp4 so com audio: video=FALSE", r.video, false);
+}
+
+{
+  // O lado oposto, que um excesso de zelo estragaria: video de verdade continua
+  // sendo video (e quase sempre traz trilha de som junto).
+  const r = trilhasDoMp4(mp4Com(trakDe("vide"), trakDe("soun")));
+  conferir("video com som: video=true", r.video, true);
+  conferir("video com som: audio=true", r.audio, true);
+}
+
+{
+  const r = trilhasDoMp4(mp4Com(trakDe("vide")));
+  conferir("video mudo continua video", r.video, true);
+  conferir("video mudo nao tem audio", r.audio, false);
+}
+
+{
+  /*
+   * ⚠️ `null` = NAO DEU PARA AFIRMAR, e nao "nao tem video". Ler ausencia de
+   * resultado como resultado negativo e o erro que custou rodadas na novela do
+   * audio (o `null` de canais lido como "esta mono").
+   */
+  conferir("sem moov -> null (incerto), nao false", trilhasDoMp4(juntar(ftypIsom)), null);
+  conferir("buffer curto -> null", trilhasDoMp4(new ArrayBuffer(4)), null);
+}
+
+{
+  /*
+   * 🔴 A armadilha que a descida por caixas evita: a sequencia "hdlr" aparece
+   * por acaso dentro do `mdat` (megabytes de dados comprimidos). Uma busca de
+   * texto solto acharia "vide" ali e classificaria o audio como video de novo —
+   * exatamente o defeito.
+   */
+  const enganoso = caixa(
+    "mdat",
+    juntarU8(
+      new Uint8Array([0, 0, 0, 20]),
+      new Uint8Array([..."hdlr"].map((c) => c.charCodeAt(0))),
+      new Uint8Array(8),
+      new Uint8Array([..."vide"].map((c) => c.charCodeAt(0))),
+    ),
+  );
+  const r = trilhasDoMp4(juntar(ftypIsom, caixa("moov", trakDe("soun")), enganoso));
+  conferir("[armadilha] 'vide' dentro do mdat NAO vira trilha de video", r.video, false);
+  conferir("[armadilha] o audio do moov continua sendo lido", r.audio, true);
+}
+
 /* ------------------------------------------------------------------ *
  * Resultado
  * ------------------------------------------------------------------ */
@@ -602,3 +679,4 @@ if (falhas.length) {
   process.exit(1);
 }
 console.log(`  ✓ ${ok} asserções passaram\n`);
+

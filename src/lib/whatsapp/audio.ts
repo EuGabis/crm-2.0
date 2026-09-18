@@ -682,3 +682,100 @@ export function resumoDoMp4(a: AnaliseMp4): string {
     (a.problemas.length ? ` PROBLEMAS[${a.problemas.join("; ")}]` : "")
   );
 }
+
+/* -------------------------------------------------------------------------- */
+/*  Trilhas de um MP4 — a pergunta que a EXTENSÃO não responde                 */
+/* -------------------------------------------------------------------------- */
+
+/** O que existe dentro do contêiner. `null` = não deu para afirmar. */
+export interface TrilhasMp4 {
+  video: boolean;
+  audio: boolean;
+}
+
+/**
+ * Diz se um MP4 tem trilha de VÍDEO e/ou de ÁUDIO, lendo as caixas.
+ *
+ * 🔴 **Existe porque a extensão MENTE, e mentir aqui custa uma entrega.** Em
+ * 18/09/2026 um vendedor anexou um áudio pronto que ele manda todo dia, num
+ * arquivo `.mp4` legítimo — e a Meta respondeu *"No video stream found in given
+ * video file"*. O CRM classificou por extensão (`.mp4` → vídeo) e mandou como
+ * `type: "video"` um arquivo que só tem som.
+ *
+ * ⚠️ **A correção de 02/09 não cobria este caso, e é importante ver por quê.**
+ * Lá o arquivo era `.m4a` tipado como `video/mp4`: a extensão estava CERTA e o
+ * mime errado, então bastou a extensão decidir primeiro. Aqui a extensão está
+ * errada — `.mp4` é um contêiner, não um conteúdo. Nenhuma regra sobre o NOME
+ * resolve: só os bytes sabem.
+ *
+ * Como: `moov` → `trak` → `mdia` → `hdlr`, e o `handler_type` do `hdlr` diz
+ * `vide` ou `soun`. A descida é pelas caixas, nunca por busca de texto solto no
+ * arquivo — a sequência "hdlr" aparece por acaso dentro de `mdat` (que são
+ * megabytes de dados comprimidos) e um falso positivo ali classificaria áudio
+ * como vídeo de novo, que é exatamente o defeito.
+ */
+export function trilhasDoMp4(bytes: ArrayBuffer): TrilhasMp4 | null {
+  const b = new Uint8Array(bytes);
+  const dv = new DataView(bytes);
+  if (b.length < 8) return null;
+
+  const tipoEm = (p: number) =>
+    String.fromCharCode(b[p + 4]!, b[p + 5]!, b[p + 6]!, b[p + 7]!);
+
+  /** Percorre as caixas de [ini, fim) e chama `visita` em cada uma. */
+  const percorrer = (
+    ini: number,
+    fim: number,
+    visita: (tipo: string, conteudoIni: number, conteudoFim: number) => void,
+  ) => {
+    let i = ini;
+    while (i + 8 <= fim) {
+      let tamanho = dv.getUint32(i);
+      const tipo = tipoEm(i);
+      let cabecalho = 8;
+      if (tamanho === 1) {
+        if (i + 16 > fim) return;
+        tamanho = dv.getUint32(i + 8) * 0x100000000 + dv.getUint32(i + 12);
+        cabecalho = 16;
+      } else if (tamanho === 0) {
+        tamanho = fim - i;
+      }
+      if (tamanho < cabecalho || i + tamanho > fim) return;
+      visita(tipo, i + cabecalho, i + tamanho);
+      i += tamanho;
+    }
+  };
+
+  let achouMoov = false;
+  let video = false;
+  let audio = false;
+
+  percorrer(0, b.length, (tipo, ci, cf) => {
+    if (tipo !== "moov") return;
+    achouMoov = true;
+    percorrer(ci, cf, (t2, ci2, cf2) => {
+      if (t2 !== "trak") return;
+      percorrer(ci2, cf2, (t3, ci3, cf3) => {
+        if (t3 !== "mdia") return;
+        percorrer(ci3, cf3, (t4, ci4) => {
+          if (t4 !== "hdlr") return;
+          // hdlr: version+flags (4) · pre_defined (4) · handler_type (4)
+          const p = ci4 + 8;
+          if (p + 4 > b.length) return;
+          const h = String.fromCharCode(b[p]!, b[p + 1]!, b[p + 2]!, b[p + 3]!);
+          if (h === "vide") video = true;
+          if (h === "soun") audio = true;
+        });
+      });
+    });
+  });
+
+  /*
+   * ⚠️ **Sem `moov` não há resposta — e `null` NÃO é "não tem vídeo".** Ler
+   * ausência de resultado como resultado negativo é o erro que custou rodadas na
+   * novela do áudio (o `null` de canais lido como "está mono"). Quem chama
+   * decide o que fazer com a incerteza; aqui só se afirma o que os bytes dizem.
+   */
+  if (!achouMoov) return null;
+  return { video, audio };
+}

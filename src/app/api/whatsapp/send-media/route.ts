@@ -12,6 +12,7 @@ import {
 import {
   analisarOgg,
   inspecionarAudio,
+  trilhasDoMp4,
   mimeParaUpload,
   resumoDaInspecao,
   resumoDoOgg,
@@ -121,7 +122,14 @@ export async function GET() {
       /** Diagnóstico mostra qual canal/número foi usado no envio. */
       canalNoDiagnostico: true,
       /** `voice` vai EXPLÍCITO no envio de áudio (não fica no padrão do servidor). */
-      audioVoiceExplicito: true
+      audioVoiceExplicito: true,
+      /**
+       * `.mp4` SEM trilha de vídeo é reclassificado como áudio (18/09). Sem
+       * isto a Meta responde "No video stream found in given video file" — e
+       * como a recusa chega pelo webhook, de forma assíncrona, sem este
+       * marcador "a correção subiu?" volta a ser dedução.
+       */
+      mp4SemVideoViraAudio: true
     },
   });
 }
@@ -140,7 +148,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "payload inválido" }, { status: 400 });
   }
   const { conversationId, channelId, messageId, mediaPath, mime, caption, filename } = body ?? {};
-  const kind = body?.kind as "image" | "audio" | "video" | "document";
+  let kind = body?.kind as "image" | "audio" | "video" | "document";
   if (
     !conversationId ||
     !messageId ||
@@ -247,6 +255,31 @@ export async function POST(request: Request) {
    * conclusiva, declara o tipo do conteúdo REAL. A divergência deixa de ser um
    * caso a consertar e passa a ser impossível por construção.
    */
+  /*
+   * 🔴 **`.mp4` de áudio-só não pode sair como VÍDEO.**
+   *
+   * Relato de 18/09: um vendedor anexou o áudio pronto que ele manda todo dia,
+   * num `.mp4` legítimo, e a Meta respondeu *"No video stream found in given
+   * video file"*. O composer já reclassifica pelos bytes, mas a checagem é
+   * repetida AQUI de propósito: esta rota é o único ponto por onde passam TODOS
+   * os caminhos de envio (clipe, arrastar, colar, e o que alguém criar amanhã),
+   * e é a lição que este arquivo já registrou três vezes — conte os caminhos.
+   *
+   * ⚠️ Só age quando os bytes AFIRMAM que não há trilha de vídeo. `null` é
+   * "não deu para saber", e tratá-lo como "não tem vídeo" mandaria um vídeo de
+   * verdade como áudio — trocaria uma recusa da Meta por outra.
+   */
+  if (kind === "video") {
+    const trilhas = trilhasDoMp4(bytes);
+    if (trilhas && !trilhas.video && trilhas.audio) {
+      kind = "audio";
+      console.log(
+        `[send-media] reclassificado video->audio (mp4 sem trilha de video) ` +
+          `commit=${(process.env.VERCEL_GIT_COMMIT_SHA ?? "local").slice(0, 7)}`,
+      );
+    }
+  }
+
   const sendMime = mimeParaUpload(bytes, mime || blob.type || "", kind === "audio");
 
   /*
