@@ -99,7 +99,36 @@ const CHANNELS: Channel[] = ["whatsapp", "sms", "email"];
  */
 const ENVIO_DE_AUDIO_LIBERADO = true;
 
-const EMOJIS = "😀 😁 😂 🤣 😊 😍 😘 😎 🤩 🥳 👍 👏 🙏 💪 🔥 🎉 ✅ ❤️ 💜 💙 ⭐ ✨ 📌 📎 📅 ⏰ 💰 📞 💬 👋".split(" ");
+/*
+ * Emojis do composer, em GRUPOS.
+ *
+ * ⚠️ **Aviação vem PRIMEIRO de propósito** (pedido do Gabriel, 2026-09-21: "os
+ * vendedores usam o avião para responder alguns contatos"). Numa escola de
+ * aviação o ✈️ é o emoji do dia a dia, e ele simplesmente não estava na lista —
+ * a saída de quem precisava dele era copiar de fora do CRM. Sendo o primeiro
+ * grupo, ele aparece sem rolagem nenhuma.
+ *
+ * ⚠️ **Com grupo e rótulo, e não uma lista corrida.** A lista foi de 30 para
+ * ~100 emojis; corrida, ela vira uma parede em que achar o ✈️ custa mais do que
+ * procurar no teclado do sistema — o oposto do ganho. O rótulo também é o que
+ * permite crescer de novo amanhã sem repensar a tela.
+ *
+ * ⚠️ **Nada de lançamento recente do Unicode.** Emoji novo vira QUADRADO no
+ * Android antigo de boa parte dos clientes, e um quadrado na resposta é pior do
+ * que não ter o emoji — quem escolhe aqui não tem como ver o que o outro lado
+ * recebeu. Os três de profissão (🧑‍✈️ 🧑‍🏫 🧑‍🔧) são o caso limite tolerado:
+ * são sequências ZWJ, então no aparelho que não as conhece elas se partem em
+ * dois desenhos legíveis, não em quadrado.
+ */
+const GRUPOS_DE_EMOJI: { nome: string; emojis: string[] }[] = [
+  { nome: "Aviação", emojis: "✈️ 🛫 🛬 🛩️ 🚁 🧑‍✈️ 🪂 🛰️ 🎫 🧳 🧭 🌎 ☁️ 🗼 🎒 🏅" },
+  { nome: "Curso e oficina", emojis: "🎓 📚 📖 📝 ✏️ 🧑‍🏫 🏫 🧑‍🔧 🔧 🛠️ ⚙️ 🔩 📐 🧰 🦺 📋" },
+  { nome: "Reações", emojis: "😀 😁 😂 🤣 😊 😍 😘 😎 🤩 🥳 🙂 😉 🤗 🤔 😅 😴 😢 😮 🙄 😱" },
+  { nome: "Gestos", emojis: "👍 👎 👏 🙏 💪 🤝 👋 🤙 ✌️ 👌 🫡 ☝️ 🖐️ 🤞 🫶 👀" },
+  { nome: "Destaques", emojis: "✅ ❌ ⚠️ ❗ ❓ 📌 📎 ⭐ ✨ 🔥 🎉 🎁 🚀 💯 🏆 🔔" },
+  { nome: "Corações", emojis: "❤️ 🧡 💛 💚 💙 💜 🖤 🤍 💖 💝 💔 ♥️" },
+  { nome: "Atendimento", emojis: "📅 ⏰ ⌛ 💰 💳 🧾 📞 📱 💬 📧 📍 🔗 📄 🖊️ 🏢 🛒" },
+].map((g) => ({ nome: g.nome, emojis: g.emojis.split(" ") }));
 
 /*
  * ⚠️ A lista FIXA de respostas rápidas saiu daqui (migração 202609011821, que
@@ -1192,14 +1221,31 @@ export function Composer({ conversationId }: { conversationId: string }) {
             >
               <Smile className="size-4" />
             </PopoverTrigger>
-            <PopoverContent align="start" className="w-56 p-2">
-              <div className="grid grid-cols-8 gap-1">
-                {EMOJIS.map((e) => (
-                  <button key={e} onClick={() => setBody((b) => b + e)} className="rounded p-1 text-lg hover:bg-slate-100">
-                    {e}
-                  </button>
-                ))}
-              </div>
+            {/*
+              ⚠️ Altura limitada com rolagem DENTRO do popover: sem `max-h`, a
+              lista inteira empurraria o painel para fora da tela e os últimos
+              grupos ficariam inalcançáveis — o composer mora no rodapé da
+              conversa, então o popover cresce para CIMA.
+            */}
+            <PopoverContent align="start" className="max-h-80 w-64 overflow-y-auto p-2">
+              {GRUPOS_DE_EMOJI.map((g) => (
+                <div key={g.nome} className="mb-1.5 last:mb-0">
+                  <p className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                    {g.nome}
+                  </p>
+                  <div className="grid grid-cols-8 gap-1">
+                    {g.emojis.map((e) => (
+                      <button
+                        key={e}
+                        onClick={() => setBody((b) => b + e)}
+                        className="rounded p-1 text-lg hover:bg-slate-100"
+                      >
+                        {e}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </PopoverContent>
           </Popover>
 

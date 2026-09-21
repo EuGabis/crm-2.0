@@ -8816,3 +8816,36 @@ select c.id, c.first_name, count(distinct o.owner_id) as donos_de_card
  where c.owner_id is null and c.created_at > now() - interval '30 days'
  group by 1, 2 order by 2;
 ```
+
+## Emojis do composer: o avião não estava lá (2026-09-21)
+
+Pedido: *"adicionar mais emojis no CRM, principalmente avião, pois os vendedores
+usam para responder alguns contatos com o avião."*
+
+⚠️ **Numa escola de aviação, o ✈️ era o emoji que faltava.** A lista era uma
+constante de **30** no código (`EMOJIS`, `components/inbox/composer.tsx`) e não
+tinha nenhum de aviação — quem precisava dele copiava de fora do CRM. Hoje são
+**112**, em sete grupos, e **Aviação é o primeiro**: sendo o grupo do topo, ele
+aparece sem rolagem nenhuma.
+
+- ⚠️ **Grupos com rótulo, não uma lista corrida.** Com 112 itens, corrida ela
+  vira uma parede em que achar o ✈️ custa mais do que procurar no teclado do
+  sistema — o oposto do ganho. O rótulo é também o que permite crescer de novo
+  amanhã sem repensar a tela.
+- ⚠️ **`max-h-80` com rolagem DENTRO do popover.** O composer mora no rodapé da
+  conversa, então o painel cresce para CIMA: sem o teto, os últimos grupos
+  saíam da tela e ficavam inalcançáveis.
+- ⚠️ **Nada de lançamento recente do Unicode.** Emoji novo vira QUADRADO no
+  Android antigo de boa parte dos clientes, e quem escolhe aqui não tem como ver
+  o que o outro lado recebeu. As três profissões (🧑‍✈️ 🧑‍🏫 🧑‍🔧) são o caso
+  limite tolerado: por serem sequências ZWJ, o aparelho que não as conhece as
+  parte em dois desenhos legíveis, não em quadrado.
+- Os grupos são múltiplos de 4 na grade de 8 colunas — nenhuma última fila com
+  um item solto.
+- **Este é o ÚNICO seletor de emoji do CRM** (conferido: `Smile` só aparece no
+  composer). O editor de bot e o Content AI não têm um — se ganharem, a lista
+  sai daqui, não de uma segunda cópia.
+
+⏳ Fica de fora: busca por nome e "usados recentemente". Os dois pedem estado por
+usuário e um dicionário de nomes em pt-BR; com sete grupos rotulados, o ganho
+não pagaria o peso agora.
