@@ -32,7 +32,7 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
   const team = useDbTeam();
   // Só admin troca o proprietário — a regra vive no gatilho (202609181500); aqui
   // ela só evita oferecer um seletor que responderia erro.
-  const { isAdmin } = useMyMembership();
+  const { isAdmin, me } = useMyMembership();
   const [openingChat, setOpeningChat] = useState(false);
   const [salvandoDono, setSalvandoDono] = useState(false);
   const { fields } = useContactsModule();
@@ -203,9 +203,29 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
                   responde erro ao ser usado é pior que um texto fixo.
                 */}
                 {!isAdmin ? (
-                  <strong className="font-medium text-slate-700">
-                    {owner?.name ?? "sem proprietário"}
-                  </strong>
+                  /*
+                   * 🔴 O não-admin não TROCA, mas ASSUME o que não é de ninguém
+                   * — e essa distinção existe porque a primeira versão (de
+                   * 18/09 de manhã) bloqueou as duas coisas: o Paulo trouxe um
+                   * lead, criou quatro cards e o contato ficou "sem
+                   * proprietário", sem caminho nenhum para ele assinar embaixo.
+                   *
+                   * Botão e não seletor: a única escolha possível para ele é
+                   * "eu", e um seletor com um nome só finge que há opções.
+                   */
+                  contact.ownerId ? (
+                    <strong className="font-medium text-slate-700">
+                      {owner?.name ?? "Carregando..."}
+                    </strong>
+                  ) : (
+                    <button
+                      onClick={() => void trocarDono(me?.userId ?? "")}
+                      disabled={salvandoDono || !me?.userId}
+                      className="rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-60"
+                    >
+                      sem proprietário · marcar como meu
+                    </button>
+                  )
                 ) : (
                 <select
                   value={contact.ownerId ?? ""}

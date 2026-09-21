@@ -52,7 +52,7 @@ export function SendToPipelineDialog({
   const { pipelines, opportunities } = usePipelineDb();
   const conversation = useConversation(conversationId ?? null);
   const team = useDbTeam();
-  const { me } = useMyMembership();
+  const { me, isAdmin } = useMyMembership();
   const { contact, refresh: recarregarContato } = useDbContact(contactId);
   const [pipelineId, setPipelineId] = useState("");
   const [stageId, setStageId] = useState("");
@@ -89,8 +89,19 @@ export function SendToPipelineDialog({
    * um padrão que faz isso sozinho transfere carteira sem ninguém perceber.
    */
   const levarContato = levarEscolhido ?? !donoDoContato;
+  /*
+   * 🔴 **Quem não é admin só ASSUME o que não tem dono** (gatilho
+   * `protege_owner_do_contato`, 202609181500 + 202609181800). Oferecer a caixa
+   * fora disso mostraria uma opção que o banco recusa — e a pessoa só
+   * descobriria no "(não consegui definir o proprietário)" do toast.
+   *
+   * As duas condições são as MESMAS do gatilho, de propósito: contato sem dono
+   * E marcando a si mesma. A tela não é a proteção; ela existe para não
+   * prometer o que vai falhar.
+   */
+  const podeMexerNoDono = isAdmin || (!donoDoContato && owner === me?.userId);
   // Nada a fazer quando o dono escolhido JÁ é o dono do contato.
-  const mostrarCaixaDoContato = !!owner && owner !== donoDoContato;
+  const mostrarCaixaDoContato = podeMexerNoDono && !!owner && owner !== donoDoContato;
 
   const pipeline = pipelines.find((p) => p.id === pipelineId) ?? null;
   const existing = useMemo(

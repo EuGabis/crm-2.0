@@ -8759,3 +8759,60 @@ Conferido em produção, os três lados (transação revertida):
 
 Na tela, o não-admin vê o nome em texto em vez do seletor — não é a proteção, é
 não OFERECER uma ação que responderia erro.
+
+### 🔴 …mas ASSUMIR o que não tem dono é do vendedor (migração 202609181800)
+
+Relato, horas depois: *"o Paulo conversou com o lead e adicionou ele, mas ele não
+ficou como proprietário. Ele não pode alterar o proprietário, mas ele não pode
+ficar sem marcar o lead dele como proprietário."*
+
+🔴 **É regressão da 202609181500, e o defeito é meu:** aquela migração leu "não
+pode mudar o proprietário" como "não pode escrever `owner_id`", e derrubou junto
+o caminho legítimo. Medido: o contato **Alindromar** (criado 10:49, depois de o
+gatilho entrar às 10:23) tem `owner_id` NULO e **quatro cards do Paulo** — ele
+trouxe o lead, trabalhou o lead, e o CRM não deixou ele assinar embaixo.
+
+⚠️ **A distinção que faltava: ALTERAR ≠ ASSUMIR o que não tem dono.**
+
+| transição | quem pode |
+|---|---|
+| `NULL → eu` | **qualquer membro** — é o trabalho do vendedor |
+| `alguém → outro` | só admin |
+| `eu → NULL` (soltar) | **só admin** |
+
+⚠️ **Soltar o próprio continua sendo de admin, e não é rigor gratuito:** sem essa
+trava a regra de ontem seria contornável em dois passos — o Paulo solta, o
+Alberto assume, e a transferência acontece sem nenhum administrador no meio.
+
+⚠️ **As duas condições do gatilho andam JUNTAS:** `old.owner_id is null` (não
+está tirando de ninguém) **e** `new.owner_id = auth.uid()` (está marcando a si).
+Só a primeira permitiria "presentear" o lead órfão a um colega, que é escolher o
+dono de um terceiro — exatamente o que a 202609181500 foi criada para impedir.
+
+`auth.uid()` nulo (service role) continua passando: webhook, bot, rodízio e
+importação precisam gravar o dono e não têm sessão.
+
+**Na tela, os dois lugares onde a decisão já está sendo tomada:**
+
+- **cabeçalho do contato** — contato sem dono vira o botão *"sem proprietário ·
+  marcar como meu"*. ⚠️ **Botão e não seletor**: a única escolha possível para o
+  não-admin é "eu", e um seletor com um nome só finge que há opções.
+- **"Enviar para pipeline"** — a caixa "definir também como proprietário do
+  contato" só aparece quando o banco vai aceitar (`isAdmin || (sem dono && o
+  escolhido sou eu)`). ⚠️ A condição da tela é a MESMA do gatilho, de propósito:
+  a tela não é a proteção, ela existe para não prometer o que vai falhar — senão
+  a pessoa só descobriria no *"(não consegui definir o proprietário)"* do toast.
+
+⏳ **Os contatos que ficaram órfãos na janela não foram carimbados por
+migração.** Dá para adivinhar pelo dono dos cards, e adivinhar dono é a chave
+fraca que este projeto já recusou no cruzamento com a Guru — carimbar errado é
+pior que o campo vazio, porque a partir dali ninguém mais duvida dele. Com o
+botão, cada vendedor resolve os seus em um clique. Para listar:
+
+```sql
+select c.id, c.first_name, count(distinct o.owner_id) as donos_de_card
+  from public.contacts c
+  join public.opportunities o on o.contact_id = c.id and o.owner_id is not null
+ where c.owner_id is null and c.created_at > now() - interval '30 days'
+ group by 1, 2 order by 2;
+```
