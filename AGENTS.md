@@ -8849,3 +8849,83 @@ aparece sem rolagem nenhuma.
 ⏳ Fica de fora: busca por nome e "usados recentemente". Os dois pedem estado por
 usuário e um dicionário de nomes em pt-BR; com sete grupos rotulados, o ganho
 não pagaria o peso agora.
+
+## 🔴 A conversa transferida CONTINUAVA na caixa de quem a perdeu (2026-09-21)
+
+Relato: *"essa conversa foi transferida da Beatriz para o Daniel, mas ainda
+aparecia no chat dela — e ela finalizou por continuar aparecendo, mesmo sem
+estar mais com ela."*
+
+Linha do tempo, lida no próprio fio:
+
+| hora | evento |
+|---|---|
+| 10:47 | atribuída a **Beatriz** (rodízio — atendente do fluxo offline) |
+| 11:03 | devolvida por espera e **redistribuída para Daniel** |
+| 11:39 | Daniel responde (áudio) |
+| **11:59** | **Beatriz finaliza** — 56 min depois de a conversa ter deixado de ser dela |
+
+### A causa: a varredura só sabe ACRESCENTAR
+
+`resyncConversations` busca `updated_at > cursor` e junta o que voltou.
+**Conversa que sai do alcance da pessoa não volta na consulta** — e a store
+nunca removeu nada. Pior: "mudou e não é mais minha" e "não mudou" chegam ao
+navegador **exatamente iguais**, então a ausência não podia ser deduzida.
+
+⚠️ **O Realtime também não salva, e por desenho:** `postgres_changes` respeita a
+RLS, então o UPDATE que tirou a conversa dela **não gera evento PARA ela**. Sem
+um sinal POSITIVO do servidor, o navegador não tem como saber. Só o F5 corrigia.
+
+⚠️ **Não era buraco de permissão, e vale não procurar ali.** O clique de
+finalizar foi ACEITO porque `finish_conversation` autoriza
+`private.can_supervise_conv`, verdadeiro em setor `colaborativo` (0080). O
+servidor fez o certo pela regra vigente — **o que estava errado era a informação
+na tela**.
+
+### A lápide: `public.conversas_que_sairam` (migração 202609211400)
+
+🔴 **`security INVOKER` de propósito, e é o cerne do desenho.** A função é um
+`except`: o lado esquerdo vem de `private.conversas_mudadas` (definer, vê tudo
+da empresa) e o direito consulta `public.conversations` **como o chamador** —
+então quem decide "visível" é a própria policy, em tempo de execução.
+
+⚠️ A alternativa era repetir aqui a expressão da policy (`assigned_to = me or
+le_todas_conversas or (sees_all and channel_allowed and …)`), que já foi
+reescrita em SEIS migrações (0035, 0053, 0062, 0063, 0074, 202609110930). A
+sétima faria a cópia divergir — e divergir AQUI é o pior caso possível: a lápide
+**apagaria da tela uma conversa que a pessoa pode ver**. Sumir sem motivo é pior
+que o defeito que isto conserta.
+
+- ⚠️ **Só remove com resposta BOA do servidor.** Erro de rede, `PGRST202`
+  (enquanto a migração não foi aplicada) ou qualquer falha deixam a lista como
+  está. O código chega à produção antes da migração, como sempre.
+- ⚠️ **`private.conversas_mudadas` leva a checagem de empresa na primeira linha**
+  (padrão 0049) e devolve **só ids**: com o id na mão o chamador continua sem
+  conseguir ler a linha, porque nenhuma policy mudou.
+- ⚠️ **Remover limpa `loadedMsgConvs`.** Se a conversa voltar (o rodízio devolve,
+  o colega transfere de volta), sem isso o fio abriria VAZIO para sempre — é o
+  mesmo cache que já causou a conversa em branco de 2026-09-15.
+
+### E o aviso, para quem PODE encerrar o atendimento alheio
+
+Admin e setor colaborativo continuam podendo finalizar a conversa de outra
+pessoa — é o que a 0080 existe para permitir. O diálogo de finalizar/transferir
+agora traz uma faixa âmbar: *"Esta conversa está com Daniel, não com você."*
+
+⚠️ **Faixa e não `title`**: o responsável JÁ aparecia no cabeçalho da conversa no
+caso relatado, e ainda assim passou despercebido. Aviso que exige procurar não
+avisa. E ele só aparece quando a conversa é de OUTRA pessoa — avisar sempre
+treina a pessoa a ignorar o aviso.
+
+⏳ **Não foi possível medir em produção**: o conector do Supabase não está
+autorizado nesta sessão. A cadeia acima sai do código e dos eventos do print; o
+que vale conferir no banco é se a Beatriz chegou lá por `colaborativo` ou por
+`le_todas_conversas`:
+
+```sql
+select p.name, m.le_todas_conversas, m.only_assigned, m.role, d.name as setor, d.colaborativo
+  from public.location_members m
+  join public.profiles p on p.id = m.user_id
+  left join public.departments d on d.id = m.department_id
+ where p.name ilike '%beatriz%';
+```

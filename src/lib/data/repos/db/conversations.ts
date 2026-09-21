@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { create } from "zustand";
-import type { RealtimeChannel } from "@supabase/supabase-js";
+import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import type {
   Channel,
@@ -656,6 +656,51 @@ export async function resyncConversations(): Promise<void> {
    * por dia nesta operação.
    */
   for (const c of novas) void loadMessagesFor(c.id);
+
+  if (cursor) await removerAsQueSairam(supabase, cursor);
+}
+
+/**
+ * Tira da lista o que SAIU do alcance de quem está olhando.
+ *
+ * 🔴 **A varredura só sabia acrescentar** — e foi isso que produziu o relato de
+ * 2026-09-21: a conversa foi redistribuída da Beatriz para o Daniel às 11:03 e
+ * continuou na caixa dela; às 11:59 ela a finalizou, 56 minutos depois de a
+ * conversa ter deixado de ser sua.
+ *
+ * ⚠️ **A ausência não podia ser deduzida da consulta delta.** Ela busca
+ * `updated_at > cursor` e a linha que saiu do alcance não volta — "mudou e não
+ * é mais minha" e "não mudou" chegam exatamente iguais. O Realtime também não
+ * avisa: `postgres_changes` respeita a RLS, então o UPDATE que tirou a conversa
+ * dela não gera evento PARA ela. Sem um sinal POSITIVO do servidor, o navegador
+ * não tem como saber — daí a função de lápide.
+ *
+ * ⚠️ **Só remove com resposta BOA do servidor.** Erro de rede, função ausente
+ * (`PGRST202`, enquanto a migração não foi aplicada) ou qualquer outra falha
+ * deixam a lista como está: fazer sumir conversa por causa de uma consulta que
+ * falhou é um defeito pior do que o que isto conserta.
+ */
+async function removerAsQueSairam(supabase: SupabaseClient, cursor: string): Promise<void> {
+  const location = loc();
+  if (!location) return;
+  const { data, error } = await supabase.rpc("conversas_que_sairam", {
+    p_location: location,
+    p_desde: cursor,
+  });
+  if (error || !Array.isArray(data) || data.length === 0) return;
+  // A função devolve `setof uuid`: o PostgREST entrega uma lista de escalares.
+  const sumiram = new Set(data.map((x: unknown) => String(x)));
+  const cur = useConvStore.getState();
+  const restantes = cur.conversations.filter((c) => !sumiram.has(c.id));
+  if (restantes.length === cur.conversations.length) return;
+  useConvStore.setState({ conversations: restantes });
+  /*
+   * ⚠️ Libera o cache de "já carreguei as mensagens desta conversa". Se ela
+   * voltar (o rodízio devolve, o colega transfere de volta), sem isto o fio
+   * abriria vazio para sempre — é o mesmo cache que já causou a conversa em
+   * branco de 2026-09-15.
+   */
+  for (const id of sumiram) loadedMsgConvs.delete(id);
 }
 
 export function useConversations(filter: ConversationFilter = "all") {

@@ -239,6 +239,7 @@ function AssignPicker({
         conversationId={pendente ? conversation.id : null}
         kind="transferencia"
         destino={pendente?.nome}
+        donoAtual={me && owner && owner.userId !== me.userId ? owner.name : null}
         onCancel={() => setPendente(null)}
         onConfirm={async (resumo) => {
           const alvo = pendente;
@@ -1391,7 +1392,8 @@ export function Thread({
   const { contact } = useDbContact(conversation?.contactId ?? null);
   const messages = useMessages(conversationId);
   const loadingMessages = useMessagesLoading(conversationId);
-  const { isAdmin } = useMyMembership();
+  const { isAdmin, me } = useMyMembership();
+  const { members } = useTeam();
   const { channels } = useWhatsappChannels();
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1596,6 +1598,16 @@ export function Thread({
             open={confirmStatus === "finalizar"}
             conversationId={confirmStatus === "finalizar" ? conversationId : null}
             kind="finalizacao"
+            /*
+             * 🔴 Só tem nome quando a conversa é de OUTRA pessoa — é o aviso que
+             * faltou no caso de 2026-09-21. Nulo quando é minha ou quando está
+             * na fila do grupo: avisar sempre treina a pessoa a ignorar o aviso.
+             */
+            donoAtual={
+              conversation?.assignedTo && me && conversation.assignedTo !== me.userId
+                ? members.find((m) => m.userId === conversation.assignedTo)?.name ?? "outro atendente"
+                : null
+            }
             onCancel={() => setConfirmStatus(null)}
             onConfirm={(resumo) => applyStatus(resumo)}
           />

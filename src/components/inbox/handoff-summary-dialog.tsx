@@ -34,6 +34,7 @@ export function HandoffSummaryDialog({
   conversationId,
   kind,
   destino,
+  donoAtual,
   onConfirm,
   onCancel,
 }: {
@@ -42,6 +43,17 @@ export function HandoffSummaryDialog({
   kind: "finalizacao" | "transferencia";
   /** Nome de quem vai receber a conversa, quando é transferência. */
   destino?: string | null;
+  /**
+   * Nome do responsável atual, SE não for quem está clicando.
+   *
+   * 🔴 Existe por causa do caso de 2026-09-21: a conversa foi redistribuída da
+   * Beatriz para o Daniel às 11:03 e ela a finalizou às 11:59, de uma lista
+   * velha. A lápide da varredura (202609211400) tira a conversa da lista, mas
+   * quem é admin ou está em setor `colaborativo` PODE, legitimamente, encerrar
+   * o atendimento de outra pessoa — e aí o aviso é a única coisa que separa
+   * "decidi encerrar o atendimento do Daniel" de "não sabia que não era meu".
+   */
+  donoAtual?: string | null;
   /** Recebe o texto (vazio = seguir sem resumo). */
   onConfirm: (resumo: string) => void | Promise<void>;
   onCancel: () => void;
@@ -111,6 +123,20 @@ export function HandoffSummaryDialog({
             {finalizando ? "Finalizar conversa" : "Transferir conversa"}
           </DialogTitle>
         </DialogHeader>
+
+        {donoAtual && (
+          /*
+           * ⚠️ Faixa âmbar e não um `title` escondido: o responsável já aparecia
+           * no cabeçalho da conversa no caso que originou isto, e ainda assim
+           * passou despercebido. Aviso que exige procurar não avisa.
+           */
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
+            Esta conversa está com <strong>{donoAtual}</strong>, não com você.{" "}
+            {finalizando
+              ? "Finalizar encerra o atendimento dele e solta o responsável."
+              : "Transferir tira a conversa dele."}
+          </p>
+        )}
 
         <p className="text-xs leading-relaxed text-slate-500">
           {finalizando ? (
