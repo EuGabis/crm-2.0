@@ -7641,11 +7641,11 @@ nasce assim em "Nova conversa" e no rodízio.)
 "Abrir na caixa" é `<Link>` de verdade (`/conversas?c=<id>`), não botão que
 navega: é o que devolve Ctrl+clique e "abrir em nova guia".
 
-⏳ **Conversa que a RLS esconde simplesmente não é listada** — um atendente pode
-ver "Conversas (1)" num contato que falou por três números, sem nada dizendo que
-há mais. Contar o que não se pode ler exigiria função `security definer`; quem
-precisa ver tudo tem `le_todas_conversas` (202609110930), que nasceu deste mesmo
-pedido.
+✅ **RESOLVIDO em 2026-09-21** (migração 202609211200, seção abaixo). Antes,
+conversa que a RLS escondia simplesmente não era listada — um atendente via
+"Conversas (1)" num contato que falou por três números, **sem nada dizendo que
+havia mais**. Hoje o visualizador lê por `public.contato_conversas` /
+`contato_mensagens`, `security definer`, e mostra todas as da empresa.
 
 ## Leads do dia: período no CALENDÁRIO (2026-09-11, sem migração)
 
@@ -8849,3 +8849,84 @@ aparece sem rolagem nenhuma.
 ⏳ Fica de fora: busca por nome e "usados recentemente". Os dois pedem estado por
 usuário e um dicionário de nomes em pt-BR; com sete grupos rotulados, o ganho
 não pagaria o peso agora.
+
+## Ver o histórico de QUALQUER conversa do contato (migração 202609211200)
+
+Pedido do Gabriel (2026-09-21): *"deixar a opção para os usuários visualizar a
+conversa, mesmo que não esteja atribuída a ele. Mas só abre o HISTÓRICO da
+conversa, não a caixa de conversa."*
+
+⚠️ **Era pendência escrita neste arquivo** ("conversa que a RLS esconde
+simplesmente não é listada"), e a omissão era do pior tipo: a que não se anuncia.
+O contato mostrava "Conversas (1)" tendo três, sem nada dizendo que havia mais —
+quem lia concluía que o cliente nunca tinha falado pelos outros números.
+
+🔴 **LER e ATUAR são coisas diferentes, e é isso que torna a abertura
+aceitável.** `public.contato_conversas(uuid)` e `public.contato_mensagens(uuid)`
+são `security definer` e só fazem `select`. Responder, assumir, transferir,
+editar e apagar continuam presos às policies de UPDATE/INSERT de
+`conversations`/`messages`, **que não foram tocadas** — e o visualizador não tem
+composer. É a separação que o próprio pedido faz.
+
+⚠️ **Isto ALARGA a leitura de propósito e passa por cima do recorte por número da
+0035** (`private.channel_allowed`): o atendente da Secretaria passa a ler a
+conversa que o mesmo contato teve pelo número do Comercial. É o pedido literal, e
+o caminho é estreito — sempre a partir de UM contato, nunca uma lista da empresa.
+A caixa de entrada continua exatamente como está.
+
+⚠️ **`le_todas_conversas` (202609110930) NÃO ficou redundante**: ela abre a
+CAIXA (ler o fio dentro do inbox, com tudo o que a tela oferece); esta abre só o
+visualizador de um contato.
+
+- ⚠️ **`returns setof public.<tabela>`, e não `returns table (col …)`.**
+  Enumerar colunas obriga a manter DUAS definições em sincronia, e toda migração
+  que acrescenta coluna em `messages` (transcrição, reações, edição) deixaria o
+  visualizador sem ela — ou faria a função estourar com `42804`, que **não diz
+  qual coluna divergiu**. Com `setof`, o contrato acompanha a tabela sozinho.
+- ⚠️ **A empresa sai do CONTATO, nunca de um parâmetro** — parâmetro é escolhido
+  por quem pergunta, e a função estaria conferindo a afirmação do interessado. A
+  checagem é a primeira coisa que roda (padrão 0049).
+- ⚠️ **`contato_mensagens` recebe o CONTATO, não uma lista de conversas.** Com a
+  lista, daria para passar o id de uma conversa de outro contato da mesma
+  empresa; o filtro tem de nascer do mesmo lugar que a autorização.
+- ⚠️ **O cliente volta ao caminho antigo com `PGRST202`/`42883`.** O código chega
+  à produção ANTES da migração, e sem essa volta o visualizador mostraria erro na
+  janela entre o merge e o SQL Editor — justamente a tela que o PR veio melhorar.
+- As mensagens passam por `paginarRpc`: **RPC também é cortada no "Max rows"**
+  (1000), sem erro e sem aviso, e fio cortado no meio não se anuncia. Ordem
+  desempatada por `id`.
+
+⏳ O botão **"Abrir na caixa"** continua aparecendo em conversa que a pessoa não
+pode abrir — e ali a tela de Conversas já diz "a conversa é de outro atendente".
+Esconder exigiria repetir na tela as quatro condições da RLS (`channel_allowed`,
+`sees_all`, `colaborativo`, `le_todas_conversas`), que é a duplicação que este
+projeto evita: a cópia diverge e passa a esconder o que era visível.
+
+## O proprietário pode SE DESVINCULAR (migração 202609211210)
+
+Pedido, no mesmo dia: *"a opção do proprietário se desvincular do contato, pois
+ele pode querer tirar aquele contato da fila dele e não querer ser mais o
+proprietário."*
+
+🔴 **Reverte a trava que eu havia posto na 202609181800, e de olhos abertos.**
+O argumento de lá continua verdadeiro: *"sem essa trava a regra seria contornável
+em dois passos — o Paulo solta, o Alberto assume, e a transferência acontece sem
+nenhum administrador no meio."* O buraco volta a existir. O que mudou é o peso do
+outro lado: largar um contato que não é meu trabalho é do dia a dia, e a
+alternativa era abrir chamado com o administrador para cada lead — o caso comum
+pagando pelo raro. E o desvio por dois passos exige os DOIS querendo, o que não é
+mais barato do que pedir ao admin.
+
+As quatro transições, agora:
+
+| transição | quem pode |
+|---|---|
+| `NULL → eu` (assumir) | qualquer membro |
+| **`eu → NULL` (largar)** | **qualquer membro** |
+| `alguém → outro` | só admin |
+| `outro → NULL` | **só admin** — senão "desvincular" seria um jeito indireto de tirar a carteira de quem está trabalhando |
+
+Na tela, o não-admin vê o próprio nome com um **"desvincular"** ao lado; o nome
+de um colega continua sendo texto. O contato fica **sem dono**, não passa para
+ninguém — e o `title` do botão diz isso, senão "desvincular" se lê como
+"transferir".

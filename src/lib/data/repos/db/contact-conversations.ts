@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { paginarRpc } from "@/lib/supabase/paginar-rpc";
 import { mapMessage } from "./conversations";
 import { useDbStore } from "./contacts";
 import type { Channel, Message } from "@/lib/data/types";
@@ -82,10 +83,71 @@ export interface ConversaDoContato {
  * no MESMO `created_at`, e ordem instável entre páginas repete umas e PULA
  * outras — a linha pulada é uma mensagem que some do fio.
  */
+/**
+ * A função ainda não existe no banco.
+ *
+ * ⚠️ Neste projeto **o código chega à produção ANTES da migração** (deploy
+ * automático no merge, migração aplicada à mão), e uma RPC inexistente responde
+ * `PGRST202` — "existe no cache de esquema?" — ou `42883`. Sem esta volta ao
+ * caminho antigo, o visualizador ficaria mostrando erro na janela entre o merge
+ * e o SQL Editor, justamente na tela que este PR veio melhorar.
+ */
+function semAFuncao(erro: { code?: string; message?: string } | null) {
+  const code = erro?.code ?? "";
+  return code === "PGRST202" || code === "42883" || code === "PGRST203";
+}
+
+/**
+ * As conversas do contato — TODAS as da empresa, não só as que a RLS entrega.
+ *
+ * 🔴 É o pedido de 2026-09-21 ("visualizar mesmo que não esteja atribuída a
+ * ele"), e resolve a pendência que estava escrita aqui: sem a função, um
+ * atendente via "Conversas (1)" num contato que falou por três números, **sem
+ * nada dizendo que havia mais** — o pior tipo de omissão, a que não se anuncia.
+ *
+ * ⚠️ A função é `security definer` e só LÊ. Responder, assumir e transferir
+ * continuam presos às policies de sempre — é a separação que o pedido faz
+ * ("só o histórico, não a caixa").
+ */
+async function buscarConversas(
+  supabase: any,
+  contactId: string,
+  loc: string
+): Promise<{ data: any[]; error: { code?: string; message?: string } | null }> {
+  const viaRpc = await supabase.rpc("contato_conversas", { p_contact: contactId });
+  if (!viaRpc.error) return { data: viaRpc.data ?? [], error: null };
+  if (!semAFuncao(viaRpc.error)) return { data: [], error: viaRpc.error };
+
+  const { data, error } = await supabase
+    .from("conversations")
+    .select("id, channel, channel_id, assigned_to, created_at, closed_at, archived_at")
+    .eq("location_id", loc)
+    .eq("contact_id", contactId)
+    .order("created_at", { ascending: true });
+  return { data: data ?? [], error: error ?? null };
+}
+
 async function buscarMensagens(
   supabase: any,
+  contactId: string,
   convIds: string[]
 ): Promise<{ mensagens: Message[]; erro?: string }> {
+  const viaRpc = await paginarRpc(
+    supabase,
+    "contato_mensagens",
+    { p_contact: contactId },
+    [{ coluna: "created_at" }, { coluna: "id" }]
+  );
+  if (!viaRpc.error) return { mensagens: viaRpc.data.map(mapMessage) };
+  if (!semAFuncao(viaRpc.error)) {
+    // Erro sempre carrega code e message: "não carregou" sem motivo é o que já
+    // custou rodadas de investigação neste projeto.
+    return {
+      mensagens: [],
+      erro: `${viaRpc.error.code ?? "erro"} · ${viaRpc.error.message}`,
+    };
+  }
+
   const PAGINA = 1000;
   const linhas: any[] = [];
   for (let de = 0; ; de += PAGINA) {
@@ -96,8 +158,6 @@ async function buscarMensagens(
       .order("created_at", { ascending: true })
       .order("id", { ascending: true })
       .range(de, de + PAGINA - 1);
-    // Erro sempre carrega code e message: "não carregou" sem motivo é o que já
-    // custou rodadas de investigação neste projeto.
     if (error) return { mensagens: [], erro: `${error.code ?? "erro"} · ${error.message}` };
     linhas.push(...(data ?? []));
     if ((data ?? []).length < PAGINA) break;
@@ -132,19 +192,14 @@ export function useContactConversations(contactId: string | null | undefined) {
       return;
     }
     const supabase = createClient();
-    const { data, error } = await supabase
-      .from("conversations")
-      .select("id, channel, channel_id, assigned_to, created_at, closed_at, archived_at")
-      .eq("location_id", loc)
-      .eq("contact_id", contactId)
-      .order("created_at", { ascending: true });
+    const { data, error } = await buscarConversas(supabase, contactId, loc);
     if (error) {
       setErro(`${error.code ?? "erro"} · ${error.message}`);
       setConversas([]);
       setLoading(false);
       return;
     }
-    const linhas = data ?? [];
+    const linhas = data;
     if (linhas.length === 0) {
       setConversas([]);
       setLoading(false);
@@ -152,6 +207,7 @@ export function useContactConversations(contactId: string | null | undefined) {
     }
     const { mensagens, erro: erroMsgs } = await buscarMensagens(
       supabase,
+      contactId,
       linhas.map((c: any) => c.id)
     );
     if (erroMsgs) {
