@@ -213,11 +213,7 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
                    * Botão e não seletor: a única escolha possível para ele é
                    * "eu", e um seletor com um nome só finge que há opções.
                    */
-                  contact.ownerId ? (
-                    <strong className="font-medium text-slate-700">
-                      {owner?.name ?? "Carregando..."}
-                    </strong>
-                  ) : (
+                  !contact.ownerId ? (
                     <button
                       onClick={() => void trocarDono(me?.userId ?? "")}
                       disabled={salvandoDono || !me?.userId}
@@ -225,6 +221,33 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
                     >
                       sem proprietário · marcar como meu
                     </button>
+                  ) : contact.ownerId === me?.userId ? (
+                    /*
+                     * 🔴 **Largar o PRÓPRIO contato** (pedido de 21/09: "ele
+                     * pode querer tirar aquele contato da fila dele"). Sem
+                     * isto, o único caminho era abrir chamado com o
+                     * administrador para cada lead que não é dele.
+                     *
+                     * ⚠️ O contato fica SEM dono — não vai para um colega. Quem
+                     * escolhe o próximo dono continua sendo o administrador,
+                     * senão "desvincular" seria um jeito indireto de passar a
+                     * carteira.
+                     */
+                    <span className="flex items-center gap-1">
+                      <strong className="font-medium text-slate-700">{owner?.name ?? "eu"}</strong>
+                      <button
+                        onClick={() => void trocarDono("")}
+                        disabled={salvandoDono}
+                        title="Deixa o contato sem proprietário. Não passa para outra pessoa — só o administrador escolhe o próximo dono."
+                        className="rounded border border-slate-200 px-1.5 py-0.5 text-[11px] font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-60"
+                      >
+                        desvincular
+                      </button>
+                    </span>
+                  ) : (
+                    <strong className="font-medium text-slate-700">
+                      {owner?.name ?? "Carregando..."}
+                    </strong>
                   )
                 ) : (
                 <select
