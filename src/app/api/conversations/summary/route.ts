@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { chat, defaultModel } from "@/lib/ai/openai";
+import { registrarFalhaIA } from "@/lib/ai/falhas";
 
 export const dynamic = "force-dynamic";
 
@@ -103,15 +104,17 @@ export async function POST(req: Request) {
     );
     texto = res.text.trim();
     usage = res.usage;
-  } catch (e: any) {
-    return Response.json(
-      {
-        error: e?.message?.includes("OPENAI_API_KEY")
-          ? "IA não configurada no servidor"
-          : "Falha ao gerar o resumo",
-      },
-      { status: 503 }
-    );
+  } catch (e) {
+    // Ver a nota em `lib/ai/falhas.ts`: o motivo real vai para a tela E fica
+    // registrado, senão "desde quando parou?" não tem resposta.
+    const motivo = await registrarFalhaIA(supabase, {
+      locationId: conversa.location_id,
+      feature: FEATURE,
+      prompt: `Resumo · conversa ${conversa.id}`,
+      userId: user.id,
+      erro: e,
+    });
+    return Response.json({ error: motivo }, { status: 503 });
   }
 
   // Best-effort: o log não pode impedir o rascunho de chegar.

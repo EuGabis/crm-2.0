@@ -1,4 +1,5 @@
 import { chat } from "@/lib/ai/openai";
+import { registrarFalhaIA } from "@/lib/ai/falhas";
 import { sendText } from "@/lib/whatsapp/client";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -84,8 +85,21 @@ export async function maybeAutoReply(
     let result;
     try {
       result = await chat(messages, { model: agent.model });
-    } catch {
-      return; // OpenAI falhou — best-effort
+    } catch (e) {
+      /*
+       * ⚠️ Continua BEST-EFFORT — a falha nunca pode quebrar o 200 do webhook —,
+       * mas deixa de ser SILENCIOSA. Com o `catch {}` vazio, uma queda da OpenAI
+       * fazia o bot simplesmente parar de responder os clientes sem registrar
+       * nada em lugar nenhum: era metade do "falha em tudo relacionado a ela"
+       * que ninguém conseguia investigar.
+       */
+      await registrarFalhaIA(db, {
+        locationId: p.locationId,
+        feature: "whatsapp-auto",
+        prompt: `Auto-resposta · conversa ${p.conversationId}`,
+        erro: e,
+      });
+      return;
     }
     const reply = (result.text ?? "").trim();
     if (!reply) return;

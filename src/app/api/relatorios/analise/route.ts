@@ -1,8 +1,14 @@
 import { createClient } from "@/lib/supabase/server";
 import { chat, defaultModel } from "@/lib/ai/openai";
+import { registrarFalhaIA } from "@/lib/ai/falhas";
 import { buildReportSnapshot } from "@/lib/reports/snapshot";
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/*
+ * ⚠️ O `eslint-disable` de `no-explicit-any` saiu daqui junto com o
+ * `catch (e: any)`: a única razão dele era aquele cast. Disable que deixou de
+ * ser necessário é armadilha — calaria a regra no dia em que alguém
+ * acrescentasse um `any` de verdade neste arquivo.
+ */
 
 export const dynamic = "force-dynamic";
 
@@ -75,11 +81,17 @@ export async function POST(request: Request) {
     answer = res.text.trim();
     usage = res.usage;
     modelo = defaultModel();
-  } catch (e: any) {
-    return Response.json(
-      { error: e?.message?.includes("OPENAI_API_KEY") ? "IA não configurada no servidor" : "Falha ao consultar a IA" },
-      { status: 503 },
-    );
+  } catch (e) {
+    // Ver a nota em `lib/ai/falhas.ts`: o motivo real vai para a tela E fica
+    // registrado, senão "desde quando parou?" não tem resposta.
+    const motivo = await registrarFalhaIA(supabase, {
+      locationId: membership.location_id,
+      feature: ANALISE_FEATURE,
+      prompt: question,
+      userId: user.id,
+      erro: e,
+    });
+    return Response.json({ error: motivo }, { status: 503 });
   }
 
   // Histórico: cada análise fica registrada para o admin reler depois. Grava a
