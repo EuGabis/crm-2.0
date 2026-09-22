@@ -8930,3 +8930,96 @@ Na tela, o não-admin vê o próprio nome com um **"desvincular"** ao lado; o no
 de um colega continua sendo texto. O contato fica **sem dono**, não passa para
 ninguém — e o `title` do botão diz isso, senão "desvincular" se lê como
 "transferir".
+
+## Relatório por CURSO marcado (2026-09-22, sem migração)
+
+Pedido: *"Leads tem os cursos marcados — adicione a opção de ver um relatório por
+cursos e a opção de filtro de datas e responsável. Precisamos de um relatório
+detalhado dos leads de cada curso marcado."*
+
+🔴 **Não precisou de migração, nem de rota, nem de função SQL — e essa é a
+decisão central.** `/api/relatorios/leads-diarios` já devolve **uma linha por
+lead** com `curso` (202609092130) e `atendente`/`contato`/`telefone`
+(202609161400). Agrupar por curso é recortar o que já está na mão; uma função
+nova traria de volta exatamente o defeito que aquele desenho evita — **dois
+lugares somando "entrou"**, para discordarem na primeira mudança. A mesma
+resposta serve o gráfico diário, o quadro por atendente e este relatório.
+
+### O que ele mede — e o que NÃO mede
+
+⚠️ **Mede o que ENTROU pelo bot no período, não o acervo do funil.** O curso mora
+em `opportunities.course` e a função casa a oportunidade mais recente do contato;
+um card com curso marcado cujo lead não passou pela triagem (criado à mão, ou
+"Enviar para pipeline" de um contato antigo) **não aparece**. É a mesma régua do
+card "Cursos marcados" logo acima, e é de propósito: dois números de "leads do
+curso X" na mesma tela, com definições diferentes, é o caminho mais curto para
+ninguém confiar no relatório.
+
+⏳ Um relatório sobre o ACERVO (todo card com curso, independente de origem) é
+outra pergunta e pediria outra fonte — vale só se alguém pedir, e aí com nome
+diferente para não se confundir com este.
+
+### Decisões
+
+- ⚠️ **O filtro de DATAS é o do topo da aba**, não um segundo seletor dentro do
+  card: dois períodos na mesma tela fariam o gráfico diário falar de uma semana
+  e a tabela de cursos de outra, sem nada avisando.
+- ⚠️ **O de RESPONSÁVEL é local**, e é o único dos dois que não caberia no topo:
+  aplicá-lo ao quadro "Por atendente" — que existe para comparar atendentes — o
+  reduziria a uma linha.
+- ⚠️ **O seletor lista quem TEM lead no período**, não a equipe inteira: um menu
+  com trinta nomes em que vinte e sete devolvem lista vazia ensina que o filtro
+  não funciona. E **"Sem responsável" tem valor próprio** (`SEM_RESPONSAVEL`):
+  com string vazia para os dois, escolher "sem responsável" seria indistinguível
+  de não filtrar — e é justamente o lead que ninguém assumiu que se quer isolar.
+- ⚠️ **"Sem curso marcado" é uma LINHA da tabela**, não um rodapé. Medido no
+  print do pedido: 184 de 6.052 leads têm curso. Mostrar só os 184 faria "88 em
+  Mecânico de Aeronaves" parecer a operação inteira, quando a leitura verdadeira
+  é "quase ninguém marca". Mesma decisão de "Sem responsável" no quadro.
+- ⚠️ **Essa linha fica FORA da escala das barras.** Sendo quase sempre a maior,
+  ela achataria todos os cursos reais a um pixel se mandasse na régua.
+- ⚠️ **O diálogo de leads é o MESMO** (`LeadsDoAtendenteDialog`), com um `rotulo`
+  opcional. Duplicar o componente para trocar uma frase é como nascem duas telas
+  que divergem na primeira correção — a lista, os selos de temperatura e os links
+  para contato/conversa são idênticos.
+
+### `npm run test:cursos` — 24 asserções
+
+🔴 A que importa: **para cada linha, o número contado é o tamanho da lista que o
+clique abre** (`agruparPorCurso` × `leadsDoCurso`). Divergir aqui não dá erro —
+só faz a linha dizer "88" e abrir uma lista de 86. É a mesma lição de `noRecorte`
+(16/09), e por isso a regra mora em `lib/` e não dentro do componente.
+
+⚠️ Um caso nasceu do dado real: **"Mecânico de Aeronaves Básico + Célula"** e
+**"... + Célula + Aviônica + GMP"** são cursos diferentes cujo nome começa igual.
+O casamento é por igualdade exata; com `startsWith`/`includes` o primeiro
+engoliria o segundo e a linha somaria dois cursos num número só.
+
+⚠️ Outro: sem NENHUM curso marcado a tabela tem **uma** linha (a de sem
+marcação), não zero. Tabela vazia diria "nenhum lead", quando a verdade é
+"nenhum lead MARCADO" — e a conduta que sai das duas leituras é oposta.
+
+### A planilha ganhou duas abas (`test:leads-xlsx`, 35 → 53 asserções)
+
+**Cursos** (resumo, com barra de dados) e **Leads por curso** (uma linha por
+lead) — é esta que atende o "detalhado": vira tabela dinâmica e cruza com a
+planilha da equipe. Os totais a planilha recalcula das linhas; o contrário, não.
+
+- ⚠️ **A exportação NÃO leva o filtro de responsável.** O botão de baixar fica no
+  topo da aba, longe do seletor que vive dentro do card — um arquivo
+  silenciosamente recortado por um filtro que quem clicou talvez nem tenha visto
+  é pior que um arquivo completo. A coluna "Responsável" está lá para a planilha
+  filtrar sozinha.
+- 🔴 **Telefone é TEXTO.** Como número, o Excel come o zero à esquerda e manda os
+  longos para notação científica — e aí a coluna deixa de servir para ligar, que
+  é o uso dela. Está escrito como asserção, com um `0800…`.
+- ⚠️ **`abasDeCurso` mora em `lib/reports/cursos.ts`**, junto de quem agrupa, e as
+  interfaces das linhas também: declaradas no `leads-xlsx.ts`, seriam uma segunda
+  definição para divergir na primeira coluna nova. De quebra, roda em teste sem
+  carregar o `exceljs`.
+- ⚠️ **Sem linhas por lead, nenhuma aba nova é criada** — e não duas abas vazias
+  só com cabeçalho, que é o "quase certo" que faria alguém concluir que ninguém
+  marcou curso.
+- Lead sem desfecho escreve **"sem nota"** e pontos VAZIO: célula vazia se lê
+  como falha de exportação, e zero afirmaria que o bot pontuou zero (que é outro
+  estado — o pior lead da base).

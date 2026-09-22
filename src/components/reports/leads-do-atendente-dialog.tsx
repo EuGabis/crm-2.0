@@ -85,6 +85,7 @@ export function LeadsDoAtendenteDialog({
   open,
   onOpenChange,
   titulo,
+  rotulo,
   recorte,
   leads,
 }: {
@@ -92,6 +93,16 @@ export function LeadsDoAtendenteDialog({
   onOpenChange: (v: boolean) => void;
   /** Nome do atendente (ou "Sem responsável"), já resolvido pelo quadro. */
   titulo: string;
+  /**
+   * O que a lista É, quando não é um recorte do quadro por atendente.
+   *
+   * ⚠️ Existe para o relatório por curso reusar este diálogo sem que o título
+   * saia errado: `TITULO[recorte]` diria "Leads recebidos · Piloto Privado",
+   * que descreve a coluna do OUTRO quadro. A lista, os selos de temperatura e
+   * os links são idênticos — duplicar o componente para trocar uma frase é como
+   * nascem duas telas que divergem na primeira correção.
+   */
+  rotulo?: string;
   recorte: Recorte;
   leads: LeadDoQuadro[];
 }) {
@@ -105,7 +116,7 @@ export function LeadsDoAtendenteDialog({
       <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-3xl">
         <DialogHeader className="shrink-0">
           <DialogTitle className="text-base">
-            {TITULO[recorte]} · {titulo}
+            {rotulo ?? TITULO[recorte]} · {titulo}
           </DialogTitle>
         </DialogHeader>
 

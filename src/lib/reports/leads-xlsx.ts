@@ -16,6 +16,12 @@
  */
 
 import { rotuloDoPeriodo } from "@/lib/periodo";
+/*
+ * ⚠️ As formas das abas de curso moram em `cursos.ts`, junto de quem as MONTA
+ * (`abasDeCurso`). Declaradas aqui, existiriam duas definições da mesma linha
+ * para divergirem na primeira coluna nova — e o `tsc` só acusaria uma delas.
+ */
+import type { LeadDeCursoXlsx, LinhaCursoXlsx } from "@/lib/reports/cursos";
 
 export interface LinhaDia {
   dia: string;
@@ -59,6 +65,16 @@ export interface DadosLeads {
   mostraPontos: boolean;
   series: SerieDesfecho[];
   naoConcluiuCor: string;
+  /**
+   * O resumo por curso marcado. Ausente = as abas de curso não são geradas.
+   *
+   * ⚠️ Os nomes já vêm RESOLVIDOS pela tela ("Sem curso marcado", nome do
+   * atendente). A planilha não consulta equipe nem traduz sentinela: uma segunda
+   * tradução de `__sem_curso__` divergiria da tela na primeira mudança.
+   */
+  cursos?: LinhaCursoXlsx[];
+  /** Uma linha por lead, para a aba detalhada. */
+  leadsPorCurso?: LeadDeCursoXlsx[];
 }
 
 /**
@@ -80,6 +96,15 @@ function diaBR(iso: string): string {
 
 /** Indigo do gráfico por hora — o mesmo primário da tela. */
 const INDIGO_XLSX = "#6366f1";
+
+/**
+ * Verde das barras de curso — o MESMO da barra da tela.
+ *
+ * ⚠️ É o esmeralda já validado no `dataviz` (croma e contraste conferidos nos
+ * dois temas); trocar por um verde "parecido" faria a planilha e a tela
+ * discordarem sobre qual cor é volume de curso.
+ */
+const VERDE_XLSX = "#059669";
 
 /** "#059669" → "FF059669" (ARGB do ExcelJS). */
 function argb(hex: string): string {
@@ -336,6 +361,112 @@ export async function montarWorkbookLeads(d: DadosLeads) {
         } as never,
       ],
     });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Abas 4 e 5 — Cursos (resumo) e Leads por curso (detalhe)
+   * ------------------------------------------------------------------ */
+  /*
+   * ⚠️ **Só existem quando a tela mandou os dados.** Enquanto a rota não
+   * devolver as linhas por lead (migração 202609161400), a planilha sai com as
+   * três abas de antes em vez de duas abas vazias com cabeçalho — que é o tipo
+   * de "quase certo" que faz alguém concluir que não houve curso marcado.
+   */
+  if (d.cursos && d.cursos.length > 0) {
+    const ws4 = wb.addWorksheet("Cursos");
+    const colCurso = [
+      "Curso",
+      "Leads",
+      ...(d.mostraPontos ? ["Quentes", "Frios"] : []),
+      "Finalizadas",
+      ...(d.mostraPontos ? ["Ganhos"] : []),
+      "Quem está com eles",
+    ];
+    ws4.addRow(colCurso);
+    ws4.getRow(1).font = { bold: true, size: 10 };
+    ws4.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINZA } };
+    // O nome do curso é longo ("Mecânico de Aeronaves Básico + Célula +
+    // Aviônica + GMP"): a primeira coluna nasce larga, senão abre truncada.
+    colCurso.forEach((c, i) => (ws4.getColumn(i + 1).width = i === 0 ? 46 : Math.max(11, c.length + 3)));
+    ws4.views = [{ state: "frozen", ySplit: 1 }];
+
+    d.cursos.forEach((c) => {
+      ws4.addRow([
+        c.curso,
+        c.leads,
+        ...(d.mostraPontos ? [c.quentes, c.frios] : []),
+        c.finalizadas,
+        ...(d.mostraPontos ? [c.ganhas] : []),
+        c.atendentes,
+      ]);
+    });
+
+    const fim4 = ws4.rowCount;
+    ws4.autoFilter = { from: "A1", to: `${colLetra(colCurso.length)}${fim4}` };
+    if (fim4 > 1) {
+      ws4.addConditionalFormatting({
+        ref: `B2:B${fim4}`,
+        rules: [
+          {
+            type: "dataBar",
+            // ⚠️ `cfvo` obrigatório: sem ele o writeBuffer estoura e TODO
+            // download quebra (ver a nota na aba "Por dia").
+            cfvo: [{ type: "min" }, { type: "max" }],
+            color: { argb: argb(VERDE_XLSX) },
+          } as never,
+        ],
+      });
+    }
+  }
+
+  if (d.leadsPorCurso && d.leadsPorCurso.length > 0) {
+    /*
+     * 🔴 **É esta aba que atende "relatório DETALHADO dos leads de cada curso".**
+     * Uma linha por lead, com o curso numa coluna — é o formato que vira tabela
+     * dinâmica e cruza com a planilha da equipe. Os totais a planilha recalcula
+     * a partir das linhas; o contrário, não. Mesma decisão da aba "Atendimentos"
+     * no relatório de SLA.
+     */
+    const ws5 = wb.addWorksheet("Leads por curso");
+    const colLead = [
+      "Curso",
+      "Contato",
+      "Telefone",
+      "Dia",
+      "Responsável",
+      "Desfecho",
+      ...(d.mostraPontos ? ["Pontos"] : []),
+      "Situação",
+    ];
+    ws5.addRow(colLead);
+    ws5.getRow(1).font = { bold: true, size: 10 };
+    ws5.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINZA } };
+    colLead.forEach(
+      (c, i) => (ws5.getColumn(i + 1).width = i === 0 ? 46 : Math.max(13, c.length + 4))
+    );
+    ws5.views = [{ state: "frozen", ySplit: 1 }];
+
+    d.leadsPorCurso.forEach((l) => {
+      ws5.addRow([
+        l.curso,
+        l.contato,
+        /*
+         * ⚠️ Telefone é TEXTO. Como número, o Excel come o zero à esquerda e
+         * transforma um número longo em notação científica — e aí a coluna
+         * deixa de servir para ligar para o lead, que é o uso dela.
+         */
+        l.telefone,
+        diaBR(l.dia),
+        l.responsavel,
+        l.temperatura,
+        // ⚠️ Lead sem nota fica VAZIO, não 0: zero afirmaria que o bot pontuou
+        // zero, que é outro estado (e o pior lead da base).
+        ...(d.mostraPontos ? [l.pontos] : []),
+        l.situacao,
+      ]);
+    });
+    ws5.getColumn(3).alignment = { horizontal: "left" };
+    ws5.autoFilter = { from: "A1", to: `${colLetra(colLead.length)}${ws5.rowCount}` };
   }
 
   return wb;

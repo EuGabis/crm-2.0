@@ -15,6 +15,7 @@
  * Roda direto no Node 24 (`npm run test:leads-xlsx`), sem runner de teste.
  */
 import { montarWorkbookLeads } from "../src/lib/reports/leads-xlsx.ts";
+import { abasDeCurso } from "../src/lib/reports/cursos.ts";
 
 let ok = 0;
 let falhas = 0;
@@ -250,6 +251,91 @@ console.log("── Bordas ──");
   // Hora sem nada medido: célula VAZIA e não 0% — 0% afirmaria que aquela hora
   // não recebe lead, quando nada foi medido.
   eq("% da hora fica vazia sem dado", wb.getWorksheet("Por hora").getRow(2).getCell(3).value, null);
+}
+
+console.log("── Abas de curso ──");
+{
+  /*
+   * ⚠️ Os nomes são os do print do pedido, inclusive os dois que começam igual:
+   * é onde um casamento por prefixo somaria dois cursos diferentes numa linha.
+   */
+  const MMA = "Mecânico de Aeronaves Básico + Célula";
+  const MMA_LONGO = "Mecânico de Aeronaves Básico + Célula + Aviônica + GMP";
+  const lead = (curso, atendente, extra = {}) => ({
+    curso,
+    atendente,
+    contato: extra.contato ?? "Fulano",
+    telefone: extra.telefone ?? "5511999990000",
+    dia: extra.dia ?? "2026-09-03",
+    resultado: extra.resultado ?? null,
+    pontos: extra.pontos ?? null,
+    finalizada: extra.finalizada ?? false,
+    ganha: extra.ganha ?? false,
+  });
+  const nomeDe = (id) => ({ u1: "Alberto", u2: "Paulo" })[id] ?? "sem responsável";
+  const leads = [
+    lead(MMA, "u1", { resultado: "quente", pontos: 12, contato: 'Ana "Aninha" Souza' }),
+    lead(MMA, "u1", { resultado: "frio", pontos: 4 }),
+    lead(MMA, "u2", { resultado: "quente", pontos: 11, ganha: true, finalizada: true }),
+    lead(MMA_LONGO, "u2", {}),
+    // ⚠️ Telefone com zero à esquerda: é o caso que o Excel estraga se a célula
+    // virar número.
+    lead(null, null, { telefone: "0800123456" }),
+  ];
+
+  const { lido: wb } = await relê({ ...COMERCIAL, ...abasDeCurso(leads, nomeDe) });
+
+  eq("as duas abas de curso entram no fim", wb.worksheets.map((w) => w.name), [
+    "Resumo", "Por dia", "Por hora", "Cursos", "Leads por curso",
+  ]);
+
+  const ws = wb.getWorksheet("Cursos");
+  eq("cabeçalho de Cursos", ws.getRow(1).values.slice(1), [
+    "Curso", "Leads", "Quentes", "Frios", "Finalizadas", "Ganhos", "Quem está com eles",
+  ]);
+  // Maior primeiro, e "sem marcação" SEMPRE no fim — ela costuma ser a maior de
+  // todas, e no topo empurraria os cursos reais para fora da primeira tela.
+  eq("ordem das linhas", [2, 3, 4].map((n) => ws.getRow(n).getCell(1).value), [
+    MMA, MMA_LONGO, "Sem curso marcado",
+  ]);
+  eq("MMA: 3 leads, 2 quentes, 1 frio, 1 ganho", [2, 3, 4, 5, 6].map((c) => ws.getRow(2).getCell(c).value), [
+    3, 2, 1, 1, 1,
+  ]);
+  eq("quem está com eles, do maior para o menor", ws.getRow(2).getCell(7).value, "Alberto: 2 · Paulo: 1");
+
+  const det = wb.getWorksheet("Leads por curso");
+  eq("uma linha por lead", det.rowCount - 1, leads.length);
+  eq("aspas no nome do contato sobrevivem", det.getRow(2).getCell(2).value, 'Ana "Aninha" Souza');
+  eq("dia em BR", det.getRow(2).getCell(4).value, "03/09/2026");
+  /*
+   * 🔴 O telefone tem de ser TEXTO: como número, o Excel come o zero à esquerda
+   * e manda os longos para notação científica — e aí a coluna deixa de servir
+   * para ligar, que é o uso dela.
+   */
+  eq("telefone é texto", typeof det.getRow(6).getCell(3).value, "string");
+  eq("zero à esquerda preservado", det.getRow(6).getCell(3).value, "0800123456");
+  // ⚠️ "sem nota" e não vazio: célula vazia se lê como falha de exportação, e
+  // aqui é um ESTADO (abandonou a triagem antes de ser pontuado).
+  eq("lead sem desfecho diz 'sem nota'", det.getRow(5).getCell(6).value, "sem nota");
+  eq("pontos vazios e não zero", det.getRow(5).getCell(7).value, null);
+  eq("situação já resolvida em texto", det.getRow(4).getCell(8).value, "ganho");
+  eq("situação de quem segue em aberto", det.getRow(3).getCell(8).value, "em aberto");
+
+  // Fluxo SEM pontuação: as colunas de temperatura somem das duas abas.
+  const { lido: sec } = await relê({ ...SECRETARIA, ...abasDeCurso(leads, nomeDe) });
+  eq("secretaria não ganha colunas de quente/frio", sec.getWorksheet("Cursos").getRow(1).values.slice(1), [
+    "Curso", "Leads", "Finalizadas", "Quem está com eles",
+  ]);
+
+  /*
+   * ⚠️ Sem linhas por lead (migração não aplicada), a planilha sai com as TRÊS
+   * abas de antes — e não com duas abas vazias só de cabeçalho, que é o tipo de
+   * "quase certo" que faz alguém concluir que ninguém marcou curso nenhum.
+   */
+  const { lido: semCursos } = await relê({ ...COMERCIAL, ...abasDeCurso(undefined, nomeDe) });
+  eq("sem dados de curso, nenhuma aba nova", semCursos.worksheets.map((w) => w.name), [
+    "Resumo", "Por dia", "Por hora",
+  ]);
 }
 
 console.log(`\n${ok} asserção(ões) ok · ${falhas} falha(s)`);
