@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, Suspense, useEffect, useMemo, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -25,13 +25,15 @@ import { LogDoBot } from "@/components/reports/log-do-bot";
 import { Button } from "@/components/ui/button";
 import { formatBRL } from "@/lib/data/repos/opportunities";
 import { usePipelineDb } from "@/lib/data/repos/db/pipeline";
-import { useMyMembership } from "@/lib/data/repos/db/team";
+import { useMyMembership, useTeam } from "@/lib/data/repos/db/team";
 import { type LeadDoQuadro } from "@/components/reports/leads-do-atendente-dialog";
 import {
   CarteiraPorAtendente,
   type Carteira,
   type CursoContado,
 } from "@/components/reports/leads-por-atendente";
+import { RelatorioPorCurso } from "@/components/reports/relatorio-por-curso";
+import { abasDeCurso } from "@/lib/reports/cursos";
 import { useAiAnalyses } from "@/lib/data/repos/db/ai";
 import {
   hojeSP,
@@ -765,6 +767,17 @@ function LeadsDoDiaPainel({ periodo: pedido, fluxo }: { periodo: Periodo; fluxo:
   } | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [baixando, setBaixando] = useState(false);
+  /*
+   * ⚠️ A equipe é resolvida AQUI e entregue pronta à planilha: `leads-xlsx.ts`
+   * não consulta banco nem traduz sentinela. Uma segunda tradução de id para
+   * nome divergiria da tela na primeira mudança — e num arquivo que circula
+   * fora do CRM ninguém teria como perceber.
+   */
+  const { members } = useTeam();
+  const nomeDoMembro = useCallback(
+    (id: string | null) => members.find((m) => m.userId === id)?.name ?? "sem responsável",
+    [members]
+  );
 
   useEffect(() => {
     let ativo = true;
@@ -861,6 +874,7 @@ function LeadsDoDiaPainel({ periodo: pedido, fluxo }: { periodo: Periodo; fluxo:
         mostraPontos: fluxo.mostraPontos,
         series: fluxo.series.map((s) => ({ chave: s.chave, rotulo: s.rotulo, cor: s.cor })),
         naoConcluiuCor: NEUTRO_XLSX,
+        ...abasDeCurso(dados.leads, nomeDoMembro),
       });
     } catch {
       toast.error("Não foi possível gerar a planilha");
@@ -1076,6 +1090,21 @@ function LeadsDoDiaPainel({ periodo: pedido, fluxo }: { periodo: Periodo; fluxo:
           leads={dados.leads}
         />
       </div>
+
+      {/*
+        O relatório por curso (pedido de 22/09). Fica ABAIXO do quadro por
+        atendente e em largura inteira: a tabela tem sete colunas e um nome de
+        curso real ("Mecânico de Aeronaves Básico + Célula + Aviônica + GMP")
+        não cabe na coluna estreita do card-resumo.
+
+        ⚠️ Só aparece com `dados.leads` — sem as linhas não há o que detalhar, e
+        uma tabela de cursos sem o clique prometeria o que não entrega.
+      */}
+      {dados.leads && dados.leads.length > 0 && (
+        <div className="mt-4">
+          <RelatorioPorCurso leads={dados.leads} mostraGanhos={fluxo.mostraGanhos} />
+        </div>
+      )}
 
       {fluxo.historicoParcial && t.entraram > 0 && (
         <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
