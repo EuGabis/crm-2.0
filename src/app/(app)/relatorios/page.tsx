@@ -1102,7 +1102,19 @@ function LeadsDoDiaPainel({ periodo: pedido, fluxo }: { periodo: Periodo; fluxo:
       */}
       {dados.leads && dados.leads.length > 0 && (
         <div className="mt-4">
-          <RelatorioPorCurso leads={dados.leads} mostraGanhos={fluxo.mostraGanhos} />
+          <RelatorioPorCurso
+            leads={dados.leads}
+            /*
+             * ⚠️ O período da ABA entra como PADRÃO do card, não como amarra: o
+             * seletor dele é individual (pedido de 22/09) e só busca sozinho
+             * quando a data local sai desta. Trocar a data do topo remonta o
+             * painel pela `key`, então o filtro local volta ao padrão em vez de
+             * ficar preso numa data antiga.
+             */
+            periodo={periodo}
+            fluxoKey={fluxo.key}
+            mostraGanhos={fluxo.mostraGanhos}
+          />
         </div>
       )}
 

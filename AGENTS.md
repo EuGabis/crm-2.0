@@ -9023,3 +9023,42 @@ planilha da equipe. Os totais a planilha recalcula das linhas; o contrário, nã
 - Lead sem desfecho escreve **"sem nota"** e pontos VAZIO: célula vazia se lê
   como falha de exportação, e zero afirmaria que o bot pontuou zero (que é outro
   estado — o pior lead da base).
+
+### Segunda rodada: clique em todas as colunas, período próprio e TODOS os responsáveis
+
+Três ajustes pedidos no mesmo dia, olhando a primeira versão em produção.
+
+**1. Clicar em Quentes, Frios, Finalizadas e Ganhos.** O diálogo já aceitava
+`recorte`; só o total era clicável. Agora cada número abre a lista daquele
+recorte — e o rótulo vem do próprio `TITULO[recorte]` ("Leads qualificados ·
+Piloto Privado"), que é exatamente o que a coluna clicada diz. ⚠️ Zero continua
+não sendo clicável: abrir lista vazia não responde nada e ensina que o clique às
+vezes não faz nada, o que tira a confiança nos que funcionam.
+
+**2. 🔴 O período virou PRÓPRIO do card — e isso reverte a decisão da primeira
+versão.** Eu tinha argumentado que dois seletores de data na mesma tela criam
+duas verdades. A objeção era real, então virou DESENHO em vez de impedimento: o
+card **escreve o período que está mostrando** ao lado dos totais. Sem essa frase,
+o número daqui seria lido com a data do gráfico lá de cima.
+
+- ⚠️ **Só busca quando a data local SAI da data da aba.** Iguais, ele usa as
+  linhas que a página já tem — abrir a aba não pode custar duas vezes a mesma
+  consulta.
+- ⚠️ **Trocar a data do TOPO remonta o painel** (a `key` da página), então o
+  filtro local volta ao padrão sozinho. Sem isso, mudar a data lá em cima
+  deixaria este card preso numa data antiga, mostrando outro período sem ninguém
+  notar.
+- ⚠️ Enquanto a busca não volta vale a lista ANTERIOR (esmaecida), não uma tela
+  vazia: "nenhum lead" se lê como "não houve lead", não como "estou buscando".
+- ⚠️ **"Está carregando" é DERIVADO**, não estado: o que se guarda são as linhas
+  **com o período a que pertencem**. Um `setCarregando(true)` no corpo do efeito
+  é `setState` síncrono dentro de efeito — cascata de renderização, e o lint
+  acusa. Aqui nenhum `setState` roda antes do primeiro `await`, e por isso
+  **não há `eslint-disable`**: um disable que deixou de ser necessário calaria a
+  regra no dia em que alguém acrescentasse um setState de verdade ali.
+
+**3. "Quem está com eles" mostra TODOS.** A queixa foi direta: *"não aparece
+todos os comerciais"*. A primeira versão mostrava dois e um "+N" com `title` — e
+numa coluna que existe para responder "quem está com os leads deste curso",
+esconder metade da resposta atrás de um contador É o defeito. Tooltip não serve:
+exige descobrir que há algo para passar o mouse em cima.
