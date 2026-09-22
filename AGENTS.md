@@ -9023,3 +9023,92 @@ planilha da equipe. Os totais a planilha recalcula das linhas; o contrário, nã
 - Lead sem desfecho escreve **"sem nota"** e pontos VAZIO: célula vazia se lê
   como falha de exportação, e zero afirmaria que o bot pontuou zero (que é outro
   estado — o pior lead da base).
+
+## 🔴 "A Lita está falhando em tudo" — e o CRM não sabia dizer por quê (2026-09-22)
+
+Relato: *"estamos com problemas para consultar a Lita, está dando falha em tudo
+relacionado a ela"*.
+
+⚠️ **Primeira coisa medida, antes de qualquer hipótese: não houve deploy no
+caminho da IA.** `git log` das pastas `src/lib/ai`, `src/app/api/ai`, `assist`,
+`summary` e `analise` — **nada em 10 dias**; a última mudança é de 26/08. Isso
+descarta regressão de código e joga a suspeita para o lado da CONTA (crédito,
+chave, modelo) — que é justamente onde o CRM não tinha instrumento nenhum.
+
+### O buraco: as três rotas da Lita JOGAVAM FORA o motivo
+
+```ts
+catch (e: any) {
+  return Response.json({ error: e?.message?.includes("OPENAI_API_KEY")
+    ? "IA não configurada no servidor" : "Falha ao consultar a Lita" }, { status: 503 });
+}
+```
+
+🔴 Conta sem crédito, chave revogada, limite por minuto e modelo inexistente
+chegavam ao atendente com o **mesmo texto** — e as quatro condutas são
+diferentes (recarregar na OpenAI · trocar a env na Vercel · esperar · corrigir
+`OPENAI_MODEL`). É a terceira vez que este projeto paga por isso: o áudio
+recusado pela Meta ("o motivo nunca era gravado", quinze rodadas) e o `42804` do
+relatório de agentes ("erro de RPC sempre carrega code e message").
+
+**Regra, agora pela terceira vez: quando há mais de um motivo de falha e eles
+pedem condutas diferentes, o retorno tem de dizer QUAL.**
+
+⚠️ E `/api/ai/chat` e `/api/ai/generate` **já devolviam** `e.message` — ou seja, o
+AI Studio dizia a causa e a Lita não. A inconsistência é a pista de que o
+descarte foi descuido, não decisão.
+
+### O que mudou
+
+- **`ErroOpenAI`** carrega `status`, `code` e `type` junto da mensagem. Sem o
+  par `status`+`code`, quem captura só pode dizer "falhou".
+- **`motivoDaFalhaIA()`** traduz para português COM a conduta. ⚠️ Traduzir não é
+  enfeite: o texto cru ("You exceeded your current quota") lido dentro do CRM faz
+  o atendente concluir coisa errada e insistir no botão — foi exatamente o que o
+  `#131042` do WhatsApp causou, com o "your payment method" fazendo pensar no
+  cartão do ALUNO. O detalhe técnico vai junto, entre parênteses.
+- **`registrarFalhaIA()`** grava a falha em `ai_logs` com `feature` + `:erro`.
+  🔴 A tabela só era escrita no SUCESSO, então uma interrupção de horas não
+  deixava rastro e "desde quando parou?" — a primeira pergunta de toda
+  investigação aqui — não tinha resposta. ⚠️ O sufixo `:erro` mantém as listas
+  existentes intactas: elas filtram por igualdade (`feature = 'reports-analysis'`).
+- **O auto-responder do WhatsApp deixou de falhar EM SILÊNCIO.** Ele tinha
+  `catch { return; }` vazio: com a OpenAI fora, o bot parava de responder os
+  clientes sem registrar nada. Continua best-effort (não pode quebrar o 200 do
+  webhook), mas agora registra.
+
+### `GET /api/ai/diagnostico` — pergunta à própria OpenAI
+
+Admin-only. Mesmo movimento de `/api/whatsapp/diagnostico`, pelo mesmo motivo:
+**o que dá para medir não se deduz.**
+
+⚠️ **Faz uma chamada REAL de chat, não um `GET /v1/models`.** Listar modelos
+responde normalmente com chave válida numa conta **sem crédito** — o erro de cota
+só aparece quando se pede geração. Testar o caminho barato daria "está tudo bem"
+justamente no caso mais provável.
+
+⚠️ A chave NUNCA é devolvida — só prefixo e tamanho, o bastante para ver se a
+variável foi trocada por engano.
+
+### ⚠️ A resposta talvez JÁ esteja no banco
+
+A transcrição de áudio (0085) **sempre** gravou o motivo em
+`messages.transcription_error`. Se os áudios pararam de transcrever junto com a
+Lita, a causa está escrita lá desde a primeira falha — sem precisar de deploy:
+
+```sql
+select transcription_status, left(transcription_error, 140) as motivo,
+       count(*), max(created_at) as ultima
+  from public.messages
+ where type = 'audio' and transcription_status in ('falhou', 'pendente')
+   and created_at > now() - interval '7 days'
+ group by 1, 2 order by 4 desc;
+```
+
+E, depois deste PR, o mesmo para as outras funções:
+
+```sql
+select feature, left(response, 140) as motivo, count(*), max(created_at)
+  from public.ai_logs where feature like '%:erro'
+ group by 1, 2 order by 4 desc;
+```

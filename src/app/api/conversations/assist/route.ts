@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { chat, defaultModel } from "@/lib/ai/openai";
+import { registrarFalhaIA } from "@/lib/ai/falhas";
 
 export const dynamic = "force-dynamic";
 
@@ -130,15 +131,21 @@ export async function POST(req: Request) {
     );
     bruto = res.text;
     usage = res.usage;
-  } catch (e: any) {
-    return Response.json(
-      {
-        error: e?.message?.includes("OPENAI_API_KEY")
-          ? "IA não configurada no servidor"
-          : "Falha ao consultar a Lita",
-      },
-      { status: 503 }
-    );
+  } catch (e) {
+    /*
+     * 🔴 O motivo REAL vai para a tela. Antes daqui saía "Falha ao consultar a
+     * Lita" para tudo — conta sem crédito, chave recusada, limite por minuto e
+     * modelo inexistente chegavam iguais ao atendente, e as quatro condutas são
+     * diferentes. Foi o que deixou o relato de 22/09 sem resposta possível.
+     */
+    const motivo = await registrarFalhaIA(supabase, {
+      locationId: conversa.location_id,
+      feature: FEATURE,
+      prompt: `Lita ajuda · conversa ${conversationId}`,
+      userId: user.id,
+      erro: e,
+    });
+    return Response.json({ error: motivo }, { status: 503 });
   }
 
   // Mesmo com o modo JSON ligado, o parse é defensivo: uma resposta fora do
