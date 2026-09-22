@@ -21,7 +21,8 @@
     "test:rodizio": "node --import ./scripts/lib/alias-register.mjs scripts/test-rodizio.mjs",
     "test:webhook": "node --import ./scripts/lib/alias-register.mjs scripts/test-webhook-reenvio.mjs",
     "test:quadro": "node scripts/test-quadro-leads.mjs",
-    "test:cursos": "node --import ./scripts/lib/alias-register.mjs scripts/test-cursos.mjs"
+    "test:cursos": "node --import ./scripts/lib/alias-register.mjs scripts/test-cursos.mjs",
+    "test:ia": "node scripts/test-ia-falhas.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

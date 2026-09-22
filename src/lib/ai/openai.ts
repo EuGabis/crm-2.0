@@ -33,15 +33,25 @@ function apiKey(): string {
  * de falha e eles pedem condutas diferentes, o retorno tem de dizer QUAL.**
  */
 export class ErroOpenAI extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-    /** `insufficient_quota`, `invalid_api_key`, `model_not_found`… */
-    readonly code?: string,
-    readonly tipo?: string
-  ) {
+  /*
+   * ⚠️ Campos declarados e atribuídos À MÃO, e não como parameter properties
+   * (`constructor(readonly status: number)`). O Node roda TypeScript em modo
+   * "strip-only", que **não** suporta parameter property — e é assim que os
+   * testes deste repositório rodam, sem runner e sem bundler. Com o atalho, o
+   * `npm run test:ia` morre em `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`, ou seja
+   * justamente a peça que carrega o diagnóstico ficaria sem teste.
+   */
+  readonly status: number;
+  /** `insufficient_quota`, `credit_balance_exhausted`, `invalid_api_key`… */
+  readonly code?: string;
+  readonly tipo?: string;
+
+  constructor(message: string, status: number, code?: string, tipo?: string) {
     super(message);
     this.name = "ErroOpenAI";
+    this.status = status;
+    this.code = code;
+    this.tipo = tipo;
   }
 }
 
@@ -62,17 +72,33 @@ export class ErroOpenAI extends Error {
 export function motivoDaFalhaIA(e: unknown): string {
   if (e instanceof ErroOpenAI) {
     const tecnico = [e.status, e.code].filter(Boolean).join(" · ");
-    if (e.code === "insufficient_quota" || e.status === 402) {
-      return `A conta da OpenAI está sem crédito — nenhuma função de IA funciona até recarregar no painel da OpenAI (${tecnico}).`;
+    /*
+     * 🔴 **O CÓDIGO decide antes do status, e essa ordem é o cerne.** A primeira
+     * versão perguntava `status === 429` antes de olhar o código — e
+     * `credit_balance_exhausted` vem com **429**. Resultado medido em produção
+     * (22/09): a tela dizia *"tente de novo em alguns instantes"* para uma conta
+     * SEM SALDO, que é o conselho exatamente oposto ao certo. O atendente
+     * reclica para sempre e ninguém vai ao painel de faturamento.
+     *
+     * A lição é a mesma do `#131042` do WhatsApp: **mensagem de erro que aponta
+     * a conduta errada é pior que mensagem genérica** — a genérica ao menos faz
+     * a pessoa perguntar.
+     */
+    if (semCredito(e)) {
+      return (
+        "A conta da OpenAI está SEM CRÉDITO — nenhuma função de IA (Lita, resumo, " +
+        "transcrição de áudio, análise) volta a funcionar até recarregar em " +
+        `platform.openai.com → Billing. Não adianta tentar de novo (${tecnico}).`
+      );
     }
-    if (e.status === 401 || e.code === "invalid_api_key") {
+    if (e.status === 401 || e.status === 403 || e.code === "invalid_api_key") {
       return `A chave da OpenAI foi recusada — ela precisa ser renovada em OPENAI_API_KEY na Vercel (${tecnico}).`;
     }
     if (e.code === "model_not_found" || e.status === 404) {
       return `O modelo configurado em OPENAI_MODEL não existe nesta conta da OpenAI (${tecnico}).`;
     }
     if (e.status === 429) {
-      return `Limite de chamadas da OpenAI atingido — tente de novo em alguns instantes (${tecnico}).`;
+      return `Limite de chamadas por minuto da OpenAI atingido — tente de novo em alguns instantes (${tecnico}).`;
     }
     if (e.status >= 500) {
       return `A OpenAI está fora do ar neste momento (${tecnico}).`;
@@ -84,6 +110,46 @@ export function motivoDaFalhaIA(e: unknown): string {
     return "A IA não está configurada no servidor — falta OPENAI_API_KEY na Vercel.";
   }
   return msg || "Falha desconhecida ao consultar a IA";
+}
+
+/**
+ * A conta ficou sem saldo.
+ *
+ * ⚠️ São TRÊS códigos para a mesma coisa, e a OpenAI usa um ou outro conforme o
+ * tipo de plano: `insufficient_quota` (limite de uso), `credit_balance_exhausted`
+ * (créditos pré-pagos zerados — o que aconteceu aqui) e
+ * `billing_hard_limit_reached` (teto de gasto configurado). Casar só com o
+ * primeiro, como a versão anterior fazia, deixa os outros dois caírem no ramo
+ * genérico de 429.
+ *
+ * O casamento é por SUBSTRING de propósito: um código novo da OpenAI que
+ * mencione crédito ou cobrança deve ser tratado como sem saldo, não ignorado em
+ * silêncio.
+ */
+function semCredito(e: ErroOpenAI): boolean {
+  const c = (e.code ?? "").toLowerCase();
+  if (e.status === 402) return true;
+  return c.includes("credit") || c.includes("quota") || c.includes("billing");
+}
+
+/**
+ * A falha é da CONTA (saldo, chave, limite, OpenAI fora do ar) e não da
+ * requisição.
+ *
+ * 🔴 Existe para a transcrição decidir entre `pendente` e `falhou`. São coisas
+ * opostas: arquivo ruim NÃO melhora tentando de novo, e conta sem saldo VOLTA a
+ * funcionar sozinha quando alguém recarregar. Tratar as duas como "falhou"
+ * marcava como definitivamente perdidos os áudios que só precisavam esperar —
+ * e a fila do tique só olha `pendente`, então eles nunca mais seriam tentados.
+ *
+ * ⚠️ 400 fica de FORA: é o arquivo (formato recusado, tamanho, áudio corrompido)
+ * e retentar seria laço infinito — a mesma razão de `ignorado` existir.
+ */
+export function falhaDeConta(e: unknown): boolean {
+  if (!(e instanceof ErroOpenAI)) {
+    return e instanceof Error && e.message.includes("OPENAI_API_KEY");
+  }
+  return e.status === 401 || e.status === 403 || e.status === 429 || e.status >= 500 || semCredito(e);
 }
 
 export async function chat(

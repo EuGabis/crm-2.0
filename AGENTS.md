@@ -9112,3 +9112,79 @@ select feature, left(response, 140) as motivo, count(*), max(created_at)
   from public.ai_logs where feature like '%:erro'
  group by 1, 2 order by 4 desc;
 ```
+
+### ✅ A causa, confirmada pela própria tela: `credit_balance_exhausted`
+
+O CRM respondeu a pergunta em menos de um dia. O print do atendente trouxe:
+
+> Limite de chamadas da OpenAI atingido — tente de novo em alguns instantes
+> (**429 · credit_balance_exhausted**)
+
+**A conta da OpenAI está sem saldo.** Não é chave, não é modelo, não é código —
+e bate com o relato ("resumo do contato, transcrição dos áudios e análise de
+IA"), porque saldo zerado derruba TODAS as funções ao mesmo tempo. Resolve-se em
+`platform.openai.com → Billing`, não no repositório.
+
+### 🔴 …e a mensagem que eu escrevi dava o conselho ERRADO
+
+`credit_balance_exhausted` vem com **HTTP 429**, e a primeira versão de
+`motivoDaFalhaIA` perguntava `status === 429` **antes** de olhar o código. A tela
+mandou *"tente de novo em alguns instantes"* para uma conta sem dinheiro — o
+atendente reclica para sempre e ninguém vai ao painel de faturamento.
+
+⚠️ **Mensagem de erro que aponta a conduta errada é PIOR que mensagem genérica**:
+a genérica ao menos faz a pessoa perguntar. É a mesma lição do `#131042` do
+WhatsApp, cujo "your payment method" fazia o atendente pensar no cartão do ALUNO.
+
+**O CÓDIGO decide antes do status**, e são TRÊS nomes para a mesma coisa conforme
+o plano: `insufficient_quota`, `credit_balance_exhausted` e
+`billing_hard_limit_reached`. O casamento é por substring (`credit`, `quota`,
+`billing`) de propósito — um nome novo da OpenAI deve cair em "sem saldo", não
+ser ignorado em silêncio.
+
+### 🔴 O pior efeito colateral: os áudios estavam sendo PERDIDOS
+
+`processarFilaDeTranscricao` só olha `transcription_status = 'pendente'`. Todo
+áudio que tentou transcrever durante a falta de crédito virou **`falhou`** — que
+é definitivo. **Nem recarregando o saldo eles voltariam**, e transcrição é o que
+faz o áudio entrar na busca do inbox.
+
+`falhaDeConta()` separa os dois casos, e a distinção é a mesma que `ignorado` já
+fazia do outro lado:
+
+| falha | estado | por quê |
+|---|---|---|
+| arquivo ruim, formato recusado (400) | `falhou` | não melhora tentando de novo — retentar é laço infinito |
+| **saldo, chave, limite, OpenAI fora do ar** | **`pendente`** | **volta a funcionar sozinha; só precisa esperar** |
+
+- ⚠️ **Falha de conta ENCERRA a rodada do tique.** Os outros quatro áudios do
+  lote vão receber a mesma recusa; insistir queima chamadas e enche o log com a
+  mesma linha. Vira um retry por minuto em vez de cinco.
+- ⚠️ `OPENAI_API_KEY` ausente também passou a marcar `pendente`: é configuração,
+  e o áudio voltaria a ser transcrito assim que a variável fosse definida.
+- A migração **202609221600** reenfileira o que já ficou para trás, com critério
+  ESTREITO (só as marcas de problema de conta, nunca "sem arquivo" / "acima de
+  25 MB" / "nenhuma fala"), e **diz quantas linhas mexeu** — duas migrações deste
+  projeto já responderam "sucesso" tendo mexido em zero.
+
+### `npm run test:ia` — 23 asserções
+
+A regressão está escrita literalmente: `429 · credit_balance_exhausted` **diz
+SEM CRÉDITO e NÃO manda tentar de novo**. Metade dos casos vigia o lado oposto —
+`rate_limit_exceeded` (que passa sozinho) não pode virar "recarregue o cartão", e
+um 400 de arquivo ruim não pode ser reenfileirado.
+
+⚠️ **`ErroOpenAI` não usa parameter property** (`constructor(readonly status)`):
+o Node roda TypeScript em modo *strip-only*, que não suporta essa sintaxe, e é
+assim que os testes deste repositório rodam — sem runner e sem bundler. Com o
+atalho, o teste morre em `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` e justamente a peça
+que carrega o diagnóstico ficaria sem cobertura.
+
+⏳ **Não coberto:** falha ao BAIXAR o áudio do Storage ainda marca `falhou` — um
+soluço transitório do Storage também perde a transcrição para sempre. É a mesma
+classe de defeito, e ficou de fora para este PR não misturar duas investigações.
+
+⏳ **Também não feito: aviso ativo para o admin.** Esta interrupção foi descoberta
+por um atendente vendo um balão vermelho — a mesma pendência que o `#131042` já
+tinha deixado registrada. Com as linhas `:erro` em `ai_logs`, o sino (que já
+deriva do banco, sem tabela própria) ganharia essa fonte com pouco trabalho.

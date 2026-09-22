@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { ErroOpenAI, falhaDeConta, motivoDaFalhaIA } from "@/lib/ai/openai";
 
 /**
  * Transcrição dos áudios das conversas.
@@ -32,7 +33,11 @@ export function transcribeModel(): string {
 const LIMITE_BYTES = 25 * 1024 * 1024;
 
 export interface ResultadoTranscricao {
-  status: "ok" | "falhou" | "ignorado";
+  /**
+   * ⚠️ `pendente` NÃO é um resultado do arquivo: é "a conta da OpenAI está fora
+   * do ar agora, tente na próxima rodada". Ver `falhaDeConta`.
+   */
+  status: "ok" | "falhou" | "ignorado" | "pendente";
   texto?: string;
   erro?: string;
 }
@@ -72,7 +77,10 @@ export async function transcreverMensagem(messageId: string): Promise<ResultadoT
     });
 
   const chave = process.env.OPENAI_API_KEY;
-  if (!chave) return marcar(messageId, { status: "falhou", erro: "OPENAI_API_KEY ausente" });
+  // ⚠️ `pendente` e não `falhou`: falta de env é configuração, e o áudio volta a
+  // ser transcrito assim que alguém definir a variável. Marcado como falho, ele
+  // sairia da fila para sempre por um problema que dura cinco minutos.
+  if (!chave) return marcar(messageId, { status: "pendente", erro: "OPENAI_API_KEY ausente" });
 
   try {
     const form = new FormData();
@@ -96,9 +104,28 @@ export async function transcreverMensagem(messageId: string): Promise<ResultadoT
     });
     const json: any = await res.json().catch(() => ({}));
     if (!res.ok) {
+      const falha = new ErroOpenAI(
+        json?.error?.message || `OpenAI ${res.status}`,
+        res.status,
+        json?.error?.code,
+        json?.error?.type
+      );
+      /*
+       * 🔴 **Falha da CONTA volta para a fila, não para "falhou".**
+       *
+       * Relato de 22/09: a conta ficou sem crédito (`credit_balance_exhausted`)
+       * e TODA transcrição passou a dar erro. Marcadas como `falhou`, elas
+       * ficavam perdidas para sempre — a fila do tique só olha `pendente`, então
+       * nem quando alguém recarregasse o saldo elas seriam tentadas de novo.
+       * Recuperar exigiria uma migração de reenfileiramento à mão, como a 0086.
+       *
+       * ⚠️ A distinção é a mesma que `ignorado` já fazia, do outro lado: arquivo
+       * ruim NÃO melhora tentando de novo (e retentar vira laço infinito), conta
+       * sem saldo VOLTA a funcionar sozinha. Só o que é da conta reenfileira.
+       */
       return marcar(messageId, {
-        status: "falhou",
-        erro: json?.error?.message || `OpenAI ${res.status}`,
+        status: falhaDeConta(falha) ? "pendente" : "falhou",
+        erro: motivoDaFalhaIA(falha),
       });
     }
 
@@ -170,7 +197,7 @@ function emParagrafos(json: any): string {
 
 async function marcar(
   messageId: string,
-  r: { status: "ok" | "falhou" | "ignorado"; texto?: string; erro?: string }
+  r: { status: "ok" | "falhou" | "ignorado" | "pendente"; texto?: string; erro?: string }
 ): Promise<ResultadoTranscricao> {
   const supabase = createAdminClient();
   await supabase
@@ -251,6 +278,14 @@ export async function processarFilaDeTranscricao(
     processados++;
     if (r.status === "ok") ok++;
     else if (r.status === "falhou") erros++;
+    /*
+     * ⚠️ **Falha de conta encerra a rodada.** Se a OpenAI recusou por saldo,
+     * chave ou limite, os outros quatro áudios do lote vão receber a mesma
+     * recusa — insistir só queima chamadas e enche o log com a mesma linha. Eles
+     * continuam `pendente` e entram no tique seguinte, que é exatamente o que se
+     * quer: um retry por minuto enquanto a conta estiver fora, não cinco.
+     */
+    else if (r.status === "pendente") break;
   }
   return { processados, ok, erros, restaram: Math.max(0, (count ?? 0) - processados) };
 }
