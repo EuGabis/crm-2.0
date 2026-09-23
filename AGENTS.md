@@ -9149,3 +9149,22 @@ vendedor.
 
 ⚠️ Índice com `location_id` na frente não serve a uma consulta que não filtra
 por `location_id` — a RLS filtra DEPOIS, não vira condição de índice.
+
+## "Minhas finalizadas" vazia e o chat que subia ao enviar (2026-09-23)
+
+**Finalizadas + "Atribuídas a mim" nunca trazia nada.** `finish_conversation`
+(0092) grava `assigned_to = null` de propósito (a reaberta volta à triagem):
+1.309 das 1.311 finalizadas estão sem dono. A lista filtrava por `assignedTo`.
+- `responsavelDe()` (`conversation-list.tsx`): na finalizada, vale quem
+  FINALIZOU (`closedBy`). Serve ao escopo "mim" e ao filtro de responsável.
+- Para quem tem `only_assigned`, a RLS da 0074 escondia a finalizada inteira.
+  **202609231300** soma a policy de LEITURA "quem finalizou le" em
+  `conversations` e `messages` — só SELECT, nada de UPDATE/INSERT muda.
+  Estreita: `closed_by` zera ao reabrir.
+
+**O chat subia ao enviar.** Três defeitos em `thread.tsx`, todos da mesma
+causa: o corpo só é desenhado quando conversa E contato existem, e o contato
+chega depois. Os efeitos de rolagem rodavam antes disso, com `scrollRef`/
+`contentRef` nulos — o salto ao fim não acontecia e o `ResizeObserver` (que
+reancora quando imagem/link carrega) **nunca era ligado**. Agora dependem de
+`pronto`, e mensagem que EU envio sempre desce, esteja onde estiver.

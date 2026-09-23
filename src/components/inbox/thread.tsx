@@ -1391,7 +1391,7 @@ export function Thread({
   const { contact } = useDbContact(conversation?.contactId ?? null);
   const messages = useMessages(conversationId);
   const loadingMessages = useMessagesLoading(conversationId);
-  const { isAdmin } = useMyMembership();
+  const { isAdmin, me: eu } = useMyMembership();
   const { channels } = useWhatsappChannels();
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1436,34 +1436,65 @@ export function Thread({
 
   // Abrir/trocar de conversa: cai DIRETO no fim, sem animação. (Antes era
   // scrollIntoView "smooth", que dava a impressão de a conversa "subir".)
+  //
+  // ⚠️ Depende também de `pronto`: o corpo só é desenhado quando conversa E
+  // contato existem (o contato chega depois, por consulta). Rodando só na troca
+  // de id, o salto acontecia com o painel ainda SEM desenhar — `scrollRef` nulo
+  // — e a conversa abria no topo.
+  const pronto = !!conversation && !!contact;
   useEffect(() => {
+    if (!pronto) return;
     pinnedRef.current = true;
     requestAnimationFrame(() => {
       jumpToBottom();
       requestAnimationFrame(jumpToBottom);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId]);
+  }, [conversationId, pronto]);
 
   // Mensagem nova: só puxa pro fim se o usuário já estava no fim (não atrapalha
   // quem está lendo o histórico).
+  //
+  // ⚠️ Mensagem que EU acabei de enviar sempre desce, esteja onde estiver: quem
+  // envia quer ver o que enviou. Sem isso, com um balão alto (link, legenda) o
+  // "estava no fim?" podia dar falso e a tela ficava parada acima da mensagem
+  // — que é o "ao enviar, o chat sobe" relatado.
+  const ultima = messages[messages.length - 1];
+  const ultimaMinhaId =
+    ultima &&
+    ultima.direction === "out" &&
+    ultima.type !== "event" &&
+    // Otimista ainda sem autor gravado também conta: é quem acabou de enviar.
+    (!ultima.createdBy || ultima.createdBy === eu?.userId) &&
+    !ultima.automated
+      ? ultima.id
+      : null;
   useEffect(() => {
-    if (pinnedRef.current) jumpToBottom();
+    if (ultimaMinhaId) pinnedRef.current = true;
+    if (pinnedRef.current) {
+      jumpToBottom();
+      requestAnimationFrame(jumpToBottom);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages.length]);
+  }, [messages.length, ultimaMinhaId]);
 
   // Conteúdo que cresce DEPOIS (imagem/vídeo/documento carregando) reancora no
   // fim — antes a imagem carregava, empurrava tudo e a view ficava pra cima.
+  //
+  // ⚠️ `pronto` nas dependências: com `[]` o efeito rodava na 1ª renderização,
+  // quando o corpo ainda não existia (contato carregando) — `contentRef` era
+  // nulo, o observador nunca era ligado, e toda imagem que carregava depois
+  // empurrava o fio para cima.
   useEffect(() => {
     const content = contentRef.current;
-    if (!content || typeof ResizeObserver === "undefined") return;
+    if (!pronto || !content || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => {
       if (pinnedRef.current) jumpToBottom();
     });
     ro.observe(content);
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [pronto, conversationId]);
 
   if (!conversation || !contact) return null;
 
