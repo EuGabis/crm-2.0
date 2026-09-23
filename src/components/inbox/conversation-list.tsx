@@ -168,6 +168,21 @@ function EtiquetasDaLinha({
   );
 }
 
+/**
+ * Com quem a conversa "está", para os filtros de responsável e "atribuídas a
+ * mim". ⚠️ Finalizar SOLTA o responsável (`finish_conversation` grava
+ * `assigned_to = null` para a conversa reaberta cair na triagem) — medido:
+ * 1.309 de 1.311 finalizadas sem dono. Filtrando só por `assignedTo`, "minhas
+ * finalizadas" nunca achava nada. Na finalizada, vale quem FINALIZOU.
+ */
+function responsavelDe(c: {
+  assignedTo?: string | null;
+  closedAt?: string | null;
+  closedBy?: string | null;
+}): string | null {
+  return c.assignedTo ?? (c.closedAt ? c.closedBy ?? null : null);
+}
+
 export function ConversationList({
   selectedId,
   onSelect,
@@ -309,6 +324,8 @@ export function ConversationList({
       T extends {
         channelId?: string | null;
         assignedTo?: string | null;
+        closedAt?: string | null;
+        closedBy?: string | null;
         contactTags?: string[] | null;
         id?: string;
       },
@@ -317,8 +334,8 @@ export function ConversationList({
     ): T[] => {
       let r = channelFilter ? lista.filter((c) => c.channelId === channelFilter) : lista;
       // "__none__" = sem responsável, que é diferente de "sem filtro".
-      if (userFilter === "__none__") r = r.filter((c) => !c.assignedTo);
-      else if (userFilter) r = r.filter((c) => c.assignedTo === userFilter);
+      if (userFilter === "__none__") r = r.filter((c) => !responsavelDe(c));
+      else if (userFilter) r = r.filter((c) => responsavelDe(c) === userFilter);
       // Etiqueta: QUALQUER uma das marcadas (união, não interseção).
       if (tagFilter.length) {
         /*
@@ -382,7 +399,7 @@ export function ConversationList({
     });
     const list =
       scope === "mine"
-        ? byStatus.filter((c) => c.assignedTo === me?.userId)
+        ? byStatus.filter((c) => responsavelDe(c) === me?.userId)
         : scope === "offline"
           ? // Aba Offline = leads recebidos offline AINDA em aberto (não aplica a
             // aba Não lidos/Recentes, mas exclui finalizada/arquivada — lead fechado
