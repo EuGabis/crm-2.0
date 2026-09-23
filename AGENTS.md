@@ -9112,3 +9112,25 @@ select feature, left(response, 140) as motivo, count(*), max(created_at)
   from public.ai_logs where feature like '%:erro'
  group by 1, 2 order by 4 desc;
 ```
+
+## 🔴 A caixa de entrada estourava o tempo limite (2026-09-23, 202609231000)
+
+Relato: *"a tela de conversas demora muito e, filtrando por responsável, não
+aparece nada"*. O filtro estava certo: a LISTA vinha vazia.
+
+Medido: **8.049 conversas**, e `fetchAllConversations` paginava por OFFSET. Cada
+uma das 9 páginas refazia Seq Scan + RLS por linha (`sees_all`,
+`channel_allowed`, `conv_with_bot`…) + sort da tabela inteira — 2,7 s na página
+8 como admin. Os logs tinham dezenas de `canceling statement due to statement
+timeout` (8 s do `authenticated`) na manhã, e **uma página que falha zera a lista
+inteira** (decisão certa: meia lista parece completa).
+
+- Índice `conversations_ordem_caixa_idx (last_message_at desc nulls last, id desc)`
+  + paginação por CURSOR (`last_message_at <= X`): cada página vira Index Scan
+  que para no limit — 2,7 s → ~0,3 s.
+- ⚠️ `<=` e não `<`: empate de carimbo pularia linhas; as repetidas são
+  descartadas pelo id. Conversas sem mensagem (NULL) vêm numa consulta à parte.
+- Uma nova tentativa por página: soluço de carga não pode esvaziar a caixa.
+
+⚠️ Paginação por OFFSET sob RLS pesada custa O(n) POR PÁGINA. Em tabela que
+cresce, use cursor + índice na ordem.

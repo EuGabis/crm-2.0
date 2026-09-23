@@ -62,26 +62,68 @@ export type { ConversationFilter } from "@/lib/data/types";
  * mantém essas no fim, onde a caixa já as coloca.
  */
 async function fetchAllConversations(supabase: any) {
+  /*
+   * 🔴 Paginação por CURSOR, não por offset (2026-09-23). Com 8 mil conversas,
+   * `.range()` fazia cada página refazer Seq Scan + RLS por linha + sort da
+   * tabela inteira (2,7 s na 8ª página) e páginas estouravam o
+   * statement_timeout de 8 s — erro que zera a lista inteira ("Nenhuma
+   * conversa"). Com o cursor `last_message_at <= X` e o índice
+   * `conversations_ordem_caixa_idx`, cada página é Index Scan que para no limit.
+   *
+   * ⚠️ `<=` e não `<`: empate de carimbo (conversas criadas em lote) com `<`
+   * pularia linhas. As repetidas que o `<=` traz são descartadas pelo id.
+   * ⚠️ As conversas SEM mensagem (NULL) vêm numa consulta própria no fim — o
+   * cursor por data não as alcança.
+   */
   const PAGE = 1000;
+  const vistos = new Set<string>();
   const all: any[] = [];
-  for (let from = 0; ; ) {
-    const { data, error } = await supabase
+  const pagina = async (q: () => any) => {
+    // Uma nova tentativa: soluço de carga não pode esvaziar a caixa.
+    let r = await q();
+    if (r.error) r = await q();
+    return r;
+  };
+  let cursor: string | null = null;
+  for (let voltas = 0; voltas < 200; voltas++) {
+    const c = cursor;
+    const { data, error } = await pagina(() => {
+      let q = supabase
+        .from("conversations")
+        .select(CONV_SELECT)
+        .not("last_message_at", "is", null)
+        .order("last_message_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(PAGE);
+      if (c) q = q.lte("last_message_at", c);
+      return q;
+    });
+    if (error) return { data: null, error };
+    const rows = data ?? [];
+    let novos = 0;
+    for (const r of rows) {
+      if (vistos.has(r.id)) continue;
+      vistos.add(r.id);
+      all.push(r);
+      novos++;
+    }
+    if (rows.length < PAGE) break;
+    const ultimo = rows[rows.length - 1].last_message_at;
+    // Página sem nenhuma linha nova = o cursor não anda (mil conversas com o
+    // MESMO carimbo). Improvável, mas sem esta saída seria laço infinito.
+    if (novos === 0) break;
+    cursor = ultimo;
+  }
+  const nulos = await pagina(() =>
+    supabase
       .from("conversations")
       .select(CONV_SELECT)
-      .order("last_message_at", { ascending: false, nullsFirst: false })
+      .is("last_message_at", null)
       .order("id", { ascending: false })
-      .range(from, from + PAGE - 1);
-    // Erro no MEIO da paginação devolve erro, não meia lista: meia lista é pior,
-    // porque parece completa — e é justamente o que este pager vem consertar.
-    if (error) return { data: null, error };
-    const got = data?.length ?? 0;
-    all.push(...(data ?? []));
-    // Avança pelo que REALMENTE veio e para na página vazia: se o "Max rows" do
-    // projeto for menor que PAGE, comparar com PAGE pararia na 1ª página e o
-    // defeito voltaria calado.
-    if (got === 0) break;
-    from += got;
-  }
+      .range(0, 4999)
+  );
+  if (nulos.error) return { data: null, error: nulos.error };
+  for (const r of nulos.data ?? []) if (!vistos.has(r.id)) all.push(r);
   return { data: all, error: null };
 }
 
