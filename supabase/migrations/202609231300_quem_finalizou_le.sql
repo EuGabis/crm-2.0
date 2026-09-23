@@ -25,14 +25,14 @@ create policy "quem finalizou le" on public.conversations
     and location_id in (select private.user_locations())
   );
 
+-- 🔴 NÃO criar a irmã em `messages`. Ela existiu por ~20 min em 2026-09-23 e
+-- DERRUBOU o CRM (43% de 5xx no Data API, ~220 statement timeouts/minuto): o
+-- `conversation_id in (select ... from conversations ...)` roda a RLS pesada de
+-- `conversations` (sees_all, channel_allowed, conv_with_bot por linha) sobre as
+-- 8 mil conversas A CADA leitura de mensagens. Removida à mão no SQL Editor.
+-- Se o conteúdo da finalizada tiver de ser lido por quem finalizou, o caminho é
+-- uma função `security definer` barata (como `private.conv_assigned_to_me`),
+-- não um subselect sob RLS dentro da policy.
 drop policy if exists "quem finalizou le" on public.messages;
-create policy "quem finalizou le" on public.messages
-  for select to authenticated
-  using (
-    location_id in (select private.user_locations())
-    and conversation_id in (
-      select c.id from public.conversations c where c.closed_by = auth.uid()
-    )
-  );
 
 commit;

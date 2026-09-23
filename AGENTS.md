@@ -9168,3 +9168,30 @@ chega depois. Os efeitos de rolagem rodavam antes disso, com `scrollRef`/
 `contentRef` nulos — o salto ao fim não acontecia e o `ResizeObserver` (que
 reancora quando imagem/link carrega) **nunca era ligado**. Agora dependem de
 `pronto`, e mensagem que EU envio sempre desce, esteja onde estiver.
+
+### 🔴 Incidente: a policy "quem finalizou le" em `messages` derrubou o CRM
+
+Aplicada às 12:55 UTC de 2026-09-23, removida às ~13:17. Nesse intervalo:
+~220 `57014` por minuto e 43% de 5xx no Data API — ninguém carregava conversa, e
+a janela de 24h aparecia "fechada" porque a tela não lia as mensagens.
+
+- ⚠️ A policy era `conversation_id in (select id from conversations where
+  closed_by = auth.uid())`. O subselect em `conversations` passa pela RLS DELA,
+  que avalia `sees_all`/`channel_allowed`/`conv_with_bot` linha a linha nas 8
+  mil conversas — e isso rodava em TODA leitura de `messages`. Medi a consulta
+  do `load()` (2,2 s, "ok") e não medi `loadMessagesFor`, que roda uma vez por
+  conversa aberta e foi o que empilhou 33 consultas ativas.
+- ⚠️ **Policy em `messages` que referencia `conversations` tem de ir por função
+  `security definer`** (como `private.conv_assigned_to_me`), nunca por
+  subselect sob RLS.
+- ⚠️ Remover foi difícil: `drop policy` pede AccessExclusive nas DUAS tabelas, e
+  com o banco saturado toda tentativa dava `40P01 deadlock` (leitores seguram
+  uma e esperam a outra, em ordens diferentes). O que funcionou foi um `do`
+  que tenta de novo com `lock_timeout` curto e captura
+  `lock_not_available`/`deadlock_detected`.
+- **Regra: mudar policy de `messages`/`conversations` em horário de pico é
+  aplicar em produção sem rede.** Medir antes TODAS as consultas que a tabela
+  recebe, não só uma.
+- A policy de `conversations` ficou (é só coluna, barata): vendedor vê a
+  finalizada dele NA LISTA; o conteúdo segue pelo "Visualizar conversa" do
+  contato até existir a função definer.
