@@ -9134,3 +9134,18 @@ inteira** (decisão certa: meia lista parece completa).
 
 ⚠️ Paginação por OFFSET sob RLS pesada custa O(n) POR PÁGINA. Em tabela que
 cresce, use cursor + índice na ordem.
+
+### …e a segunda metade: `messages` não tinha índice por data (202609231100)
+
+Depois da 202609231000 a caixa continuou lenta e os 57014 continuaram. O outro
+consumidor era o `load()` das **3.000 mensagens recentes**: `order by created_at
+desc limit 3000` sem filtro de empresa no cliente, e o único índice com
+`created_at` começava por `location_id`. Plano: Seq Scan nas **143 mil**
+mensagens com a RLS (`conv_assigned_to_me`, `le_todas_conversas`…) avaliada
+linha a linha, e depois sort — mais de 25 s, estourando SEMPRE. O
+`syncInboxDelta` (`created_at > cursor`, a cada 15 s por aba) pagava o mesmo.
+`messages_created_at_idx (created_at desc, id desc)`: 1,1 s admin, 2,9 s
+vendedor.
+
+⚠️ Índice com `location_id` na frente não serve a uma consulta que não filtra
+por `location_id` — a RLS filtra DEPOIS, não vira condição de índice.
