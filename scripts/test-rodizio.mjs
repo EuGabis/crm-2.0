@@ -1497,5 +1497,30 @@ console.log("\nA corrida entre a devolucao e a varredura (18/09)\n");
   eq("[corrida] sem exigirSemDono, atribui mesmo com dono", typeof user, "string");
 }
 
+
+{
+  /*
+   * 🔴 [real] O caminho do BOT chama `distributeOne` SEM `channelIds`. Antes da
+   * correcao de 24/09 a carga do dia saia toda zero, a cota nao via a
+   * diferenca e a escolha caia no cursor. Medido em 7 dias pelo bot: Alberto
+   * 794 · Paulo 446 · Rogerio 264. Aqui: ana ja recebeu 3 hoje, bia nenhum, e o
+   * cursor aponta para ana — o lead tem de ir para bia.
+   */
+  const hoje = new Date().toISOString();
+  const recebida = (id) => ({
+    id, location_id: "loc1", channel_id: "ch1", assigned_to: "ana",
+    atribuida_em: hoje, plantao_id: null,
+  });
+  const st = cenario({ conversations: [recebida("h1"), recebida("h2"), recebida("h3")] });
+  st.departments[0].dividir_igualmente = true;
+  st.departments[0].rr_cursor = 0;
+  const db = fakeDb(st);
+  const user = await distributeOne(db, {
+    locationId: "loc1", deptId: "dep1", conversationId: "novo", contactId: "ct-novo",
+    reason: "rodízio do bot",
+  });
+  eq("[real] bot sem channelIds usa a carga do dia -> vai para quem recebeu menos", user, "bia");
+}
+
 console.log(`\n${ok} assercoes ok, ${falhas} falha(s)\n`);
 process.exit(falhas ? 1 : 0);

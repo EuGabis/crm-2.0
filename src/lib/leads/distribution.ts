@@ -867,9 +867,29 @@ export async function distributeOne(
    */
   let user: string | null;
   if (porCota) {
+    /*
+     * 🔴 **Os números do setor são resolvidos AQUI quando o chamador não os
+     * passa** (2026-09-24). O caminho do BOT (`engine.ts`) chamava sem
+     * `channelIds`, e `recebidosNoDiaPorAtendente` devolve TUDO ZERO sem eles —
+     * a cota via três vendedores zerados em todo lead e a escolha caía no
+     * desempate do cursor, que é compartilhado com varredura e devolução e pula
+     * quem está ausente/excluído (o seguinte leva a vez dele). Medido em 7 dias:
+     * pelo bot, Alberto 794 · Paulo 446 · Rogério 264. A varredura e o botão,
+     * que passavam os números, saíram equilibrados.
+     *
+     * ⚠️ Resolver dentro da função e não em cada chamador: foi um chamador que
+     * esqueceu, e o próximo que alguém escrever esqueceria de novo.
+     */
+    let channelIds = args.channelIds ?? [];
+    if (!args.cargas && !channelIds.length) {
+      const { data: dcs } = await db
+        .from("department_channels")
+        .select("channel_id")
+        .eq("department_id", args.deptId);
+      channelIds = (dcs ?? []).map((d: any) => d.channel_id);
+    }
     const cargas =
-      args.cargas ??
-      (await recebidosNoDiaPorAtendente(db, args.locationId, args.channelIds ?? [], pool));
+      args.cargas ?? (await recebidosNoDiaPorAtendente(db, args.locationId, channelIds, pool));
     /*
      * ⚠️ O denominador é o POOL (o time), NÃO os elegíveis — passar `elegiveis`
      * aqui foi a causa do despejo de 17/09. Ver `poolParaCota`.

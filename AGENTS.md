@@ -9195,3 +9195,32 @@ a janela de 24h aparecia "fechada" porque a tela não lia as mensagens.
 - A policy de `conversations` ficou (é só coluna, barata): vendedor vê a
   finalizada dele NA LISTA; o conteúdo segue pelo "Visualizar conversa" do
   contato até existir a função definer.
+
+## 🔴 O rodízio do BOT ignorava a carga do dia (2026-09-24)
+
+Relato: *"o Rogério não está recebendo muitos leads"*. Medido pelos eventos de
+atribuição dos últimos 7 dias:
+
+| origem | Alberto | Paulo | Rogério |
+|---|---|---|---|
+| **bot / rodízio** | **794** | **446** | **264** |
+| varredura da fila | 187 | 133 | 183 |
+
+Os três no departamento Vendas, online, `rodizio_offline` e `dividir_igualmente`
+ligados. **A varredura saía equilibrada e o bot não** — e a diferença entre os
+dois caminhos era uma só: o bot (`engine.ts`) chamava `distributeOne` **sem
+`channelIds`**, e `recebidosNoDiaPorAtendente` devolve **tudo zero** sem os
+números do setor. A cota via três vendedores zerados em todo lead, e a escolha
+caía no desempate do cursor — compartilhado com varredura e devolução, e que
+passa a vez de quem está ausente/excluído ao seguinte da lista.
+
+- ⚠️ Corrigido DENTRO de `distributeOne` (resolve os números por
+  `department_channels` quando o chamador não passa), não no `engine.ts`: foi um
+  chamador que esqueceu, e o próximo esqueceria de novo. É a lição "conte os
+  caminhos" pela quarta vez.
+- ⚠️ Não compensa o passado: a cota olha os leads do DIA, então o equilíbrio
+  volta a partir do deploy, sem despejar atraso em ninguém.
+- `npm run test:rodizio` — 160 asserções; o caso novo falha sem a correção.
+- ⚠️ A consulta de "recebidos" por pessoa precisa ler os EVENTOS
+  (`Atribuída a …`), não `conversations.assigned_to`: esta conta só o que ainda
+  está com a pessoa, e esconde o que foi transferido ou devolvido.
