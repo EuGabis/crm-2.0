@@ -2,6 +2,7 @@ import { processDueRuns } from "@/lib/automations/engine";
 import { dispatchScheduledMessages } from "@/lib/messages/scheduled";
 import { processarFilaDeTranscricao } from "@/lib/ai/transcribe";
 import { devolverInativasDeTodas, distribuirFilaDeTodas } from "@/lib/leads/distribution";
+import { fupPerdidoQuente } from "@/lib/leads/fup-perdido-quente";
 
 /** Nunca cachear: a rota é o batimento do motor. */
 export const dynamic = "force-dynamic";
@@ -42,7 +43,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "não autorizado" }, { status: 401 });
   }
 
-  const [automations, scheduled, transcricoes, devolucoes, fila] = await Promise.allSettled([
+  const [automations, scheduled, transcricoes, devolucoes, fila, fup] = await Promise.allSettled([
     processDueRuns(),
     dispatchScheduledMessages(),
     processarFilaDeTranscricao(),
@@ -59,6 +60,8 @@ export async function POST(request: Request) {
      * `devolverInativas` já tenta redistribuir na hora.
      */
     distribuirFilaDeTodas(),
+    // Lead QUENTE 48h sem responder → Perdido Quente + FUP único (2026-09-24).
+    fupPerdidoQuente(),
   ]);
 
   if (automations.status === "rejected") {
@@ -72,6 +75,9 @@ export async function POST(request: Request) {
   }
   if (devolucoes.status === "rejected") {
     console.error("[rodizio] falha na devolução:", devolucoes.reason);
+  }
+  if (fup.status === "rejected") {
+    console.error("[fup] falha no FUP de perdido quente:", fup.reason);
   }
   if (fila.status === "rejected") {
     console.error("[rodizio] falha na varredura da fila:", fila.reason);
@@ -115,5 +121,6 @@ export async function POST(request: Request) {
       fila.status === "fulfilled"
         ? fila.value
         : { distribuidas: 0, naFila: 0, tickError: true },
+    fup: fup.status === "fulfilled" ? fup.value : { enviados: 0, falhas: 0, movidos: 0, tickError: true },
   });
 }

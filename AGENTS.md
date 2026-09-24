@@ -9224,3 +9224,37 @@ passa a vez de quem está ausente/excluído ao seguinte da lista.
 - ⚠️ A consulta de "recebidos" por pessoa precisa ler os EVENTOS
   (`Atribuída a …`), não `conversations.assigned_to`: esta conta só o que ainda
   está com a pessoa, e esconde o que foi transferido ou devolvido.
+
+## FUP único do lead QUENTE parado há 48h (2026-09-24, sem migração)
+
+Regra do Gabriel: lead com nota **quente** na triagem do bot, conversa aberta,
+o **vendedor** mandou a última mensagem e o cliente ficou **48h corridas** sem
+responder → o card vai para **Comercial → Perdido Quente** e sai UMA vez o
+template **`fup_unico_autom_tico`** (convite para o grupo).
+`src/lib/leads/fup-perdido-quente.ts`, rodando no tique de minuto (como as
+agendadas e o rodízio — sem cron novo).
+
+- ⚠️ **Template, não texto livre**: passadas 24h sem mensagem do cliente, a Meta
+  só aceita template aprovado. Idioma e nº de variáveis vêm da própria Meta
+  (`listTemplates`), e toda `{{n}}` do corpo recebe o primeiro nome
+  ("tudo bem" quando o contato não tem nome — Meta recusa parâmetro vazio).
+- ⚠️ **"Único" é o próprio fio**: a mensagem fica com `template_name`, e conversa
+  que já tem uma — enviada OU falhada — não entra de novo. Sem coluna nova.
+  Falha grava o motivo no balão; limite diário e falha ao LISTAR templates NÃO
+  gravam (são transitórios e o próximo tique deve tentar).
+- ⚠️ **"Quente" é a MESMA regra do selo da caixa**: `temperaturaDe` saiu de
+  `bot-desfechos.ts` (que é `"use client"`) para `lib/leads/temperatura.ts`,
+  reexportada de lá. Duas cópias fariam o FUP disparar para lead que a caixa
+  pinta de frio.
+- ⚠️ **"Vendedor falou por último"** = última saída HUMANA depois da última
+  entrada. Bot (`automated`), nota interna e evento do fio não contam.
+- O card move ANTES do envio (a regra vale mesmo se a Meta recusar). Usa o card
+  do contato no Comercial; senão o mais recente dele em qualquer funil (o do bot)
+  passa ao Comercial. **Sem card, não cria.** Funil/fase por NOME exato; não
+  achou → aviso no log, nada de palpite (lição do "Controle de Leads").
+- Teto de 20 envios por tique e 20 s de orçamento.
+- `npm run test:fup` — 12 asserções (regra de tempo e variáveis do template).
+
+⚠️ **O primeiro deploy pega o ACUMULADO**: quem está nessa condição há dias
+(desfechos dos últimos 30 dias) recebe o FUP nas primeiras rodadas, 20 por
+minuto.
