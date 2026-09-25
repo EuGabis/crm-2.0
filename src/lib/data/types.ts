@@ -251,10 +251,25 @@ export interface Appointment {
 export interface FormField {
   key: string;
   label: string;
-  type: "text" | "email" | "tel" | "textarea";
+  type:
+    | "text"
+    | "textarea"
+    | "email"
+    | "tel"
+    | "number"
+    | "date"
+    | "time"
+    | "datetime"
+    | "select"
+    | "multi";
   required: boolean;
-  /** name | email | phone | company | custom:<nome do campo> */
+  /**
+   * Onde a resposta é gravada: name | email | phone | company | custom (campo do
+   * contato com o nome do rótulo) | custom:<nome do campo> (formato antigo).
+   */
   mapsTo: string;
+  /** Opções de `select` e `multi`. */
+  options?: string[];
 }
 
 export interface LeadForm {

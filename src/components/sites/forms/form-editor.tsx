@@ -25,12 +25,13 @@ import { Trash2, Plus } from "lucide-react";
 import { formActions } from "@/lib/data/repos/db/forms";
 import type { FormField, LeadForm } from "@/lib/data/types";
 
-const MAP_OPTIONS: { value: string; label: string }[] = [
-  { value: "name", label: "Nome" },
-  { value: "email", label: "E-mail" },
-  { value: "phone", label: "Telefone/WhatsApp" },
-  { value: "company", label: "Empresa" },
-];
+import { COM_OPCOES, DESTINOS, TIPOS, opcoesDoTexto } from "@/lib/forms/campos";
+
+/** Rótulo do destino; o formato antigo `custom:<nome>` também é "campo do contato". */
+function rotuloDestino(mapsTo: string): string {
+  if (mapsTo.startsWith("custom:")) return `Campo: ${mapsTo.slice(7)}`;
+  return DESTINOS.find((o) => o.value === mapsTo)?.label ?? mapsTo;
+}
 
 export function FormEditor({
   form,
@@ -56,7 +57,12 @@ export function FormEditor({
   const addField = () =>
     setFields((fs) => [
       ...fs,
-      { key: `campo${fs.length + 1}`, label: "Novo campo", type: "text", required: false, mapsTo: "company" },
+      /*
+       * ⚠️ Nasce como CAMPO DO CONTATO, não "Empresa". O padrão antigo fazia
+       * cada pergunta nova sobrescrever `contacts.company`, e só a última
+       * resposta sobrevivia.
+       */
+      { key: `campo${Date.now().toString(36)}`, label: "Novo campo", type: "text", required: false, mapsTo: "custom" },
     ]);
 
   const save = async () => {
@@ -66,6 +72,13 @@ export function FormEditor({
     }
     if (!tag.trim()) {
       toast.error("A tag não pode ficar vazia");
+      return;
+    }
+    const semOpcoes = fields.find(
+      (f) => COM_OPCOES.includes(f.type) && !(f.options ?? []).length,
+    );
+    if (semOpcoes) {
+      toast.error(`"${semOpcoes.label}" precisa de pelo menos uma opção`);
       return;
     }
     setSaving(true);
@@ -87,43 +100,81 @@ export function FormEditor({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Editar formulário</DialogTitle>
         </DialogHeader>
-        <div className="grid gap-4 md:grid-cols-[1fr_260px]">
+        <div className="grid gap-4 md:grid-cols-[1fr_240px]">
           {/* Campos */}
           <div className="space-y-2">
             <Label className="text-xs font-semibold">Campos</Label>
             {fields.map((f, i) => (
-              <div key={i} className="flex items-center gap-1.5 rounded-md border p-2">
-                <Input
-                  value={f.label}
-                  onChange={(e) => setField(i, { label: e.target.value })}
-                  className="h-8 text-xs"
-                  placeholder="Rótulo"
-                />
-                <Select value={f.mapsTo} onValueChange={(v) => v && setField(i, { mapsTo: v })}>
-                  <SelectTrigger className="h-8 w-[130px] text-xs" size="sm">
-                    <SelectValue>{MAP_OPTIONS.find((o) => o.value === f.mapsTo)?.label ?? f.mapsTo}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MAP_OPTIONS.map((o) => (
-                      <SelectItem key={o.value} value={o.value} className="text-xs">
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <button
-                  onClick={() => setField(i, { required: !f.required })}
-                  className={`rounded px-1.5 py-1 text-[10px] font-semibold ${f.required ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-500"}`}
-                >
-                  Obrigatório
-                </button>
-                <button onClick={() => removeField(i)} className="text-slate-400 hover:text-rose-600">
-                  <Trash2 className="size-3.5" />
-                </button>
+              <div key={`${f.key}-${i}`} className="space-y-1.5 rounded-md border p-2">
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    value={f.label}
+                    onChange={(e) => setField(i, { label: e.target.value })}
+                    className="h-8 text-xs"
+                    placeholder="Pergunta"
+                  />
+                  <button
+                    onClick={() => setField(i, { required: !f.required })}
+                    className={`shrink-0 rounded px-1.5 py-1 text-[10px] font-semibold ${f.required ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-500"}`}
+                  >
+                    Obrigatório
+                  </button>
+                  <button
+                    onClick={() => removeField(i)}
+                    className="shrink-0 text-slate-400 hover:text-rose-600"
+                    title="Remover campo"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-12 shrink-0 text-[10px] text-slate-400">Tipo</span>
+                  <Select
+                    value={f.type}
+                    onValueChange={(v) => v && setField(i, { type: v as FormField["type"] })}
+                  >
+                    <SelectTrigger className="h-7 flex-1 text-xs" size="sm">
+                      <SelectValue>{TIPOS.find((t) => t.value === f.type)?.label ?? f.type}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TIPOS.map((t) => (
+                        <SelectItem key={t.value} value={t.value} className="text-xs">
+                          {t.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span className="shrink-0 text-[10px] text-slate-400">Salvar em</span>
+                  <Select value={f.mapsTo} onValueChange={(v) => v && setField(i, { mapsTo: v })}>
+                    <SelectTrigger className="h-7 flex-1 text-xs" size="sm">
+                      <SelectValue>{rotuloDestino(f.mapsTo)}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DESTINOS.map((o) => (
+                        <SelectItem key={o.value} value={o.value} className="text-xs">
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {COM_OPCOES.includes(f.type) && (
+                  <Textarea
+                    defaultValue={(f.options ?? []).join("\n")}
+                    onBlur={(e) => setField(i, { options: opcoesDoTexto(e.target.value) })}
+                    className="min-h-16 text-xs"
+                    placeholder={"Uma opção por linha\nEx.: Manhã\nTarde\nNoite"}
+                  />
+                )}
+                {f.mapsTo === "company" && fields.filter((x) => x.mapsTo === "company").length > 1 && (
+                  <p className="text-[10px] text-amber-700">
+                    Mais de um campo grava em Empresa — só a última resposta fica no contato.
+                  </p>
+                )}
               </div>
             ))}
             <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={addField}>
