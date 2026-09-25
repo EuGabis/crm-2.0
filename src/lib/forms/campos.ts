@@ -22,12 +22,18 @@ export const TIPOS: { value: FormField["type"]; label: string }[] = [
   { value: "date", label: "Data" },
   { value: "time", label: "Hora" },
   { value: "datetime", label: "Data e hora" },
-  { value: "select", label: "Lista (uma opção)" },
-  { value: "multi", label: "Múltipla escolha" },
+  /*
+   * Três formas de escolher entre opções, porque "múltipla escolha" quer dizer
+   * coisas diferentes para pessoas diferentes: marcar VÁRIAS (caixas), marcar UMA
+   * vendo todas (botões), ou escolher UMA num menu (lista suspensa).
+   */
+  { value: "multi", label: "Múltipla escolha (marca várias)" },
+  { value: "radio", label: "Escolha única (botões)" },
+  { value: "select", label: "Lista suspensa (uma opção)" },
 ];
 
 /** Tipos que precisam da lista de opções. */
-export const COM_OPCOES: FormField["type"][] = ["select", "multi"];
+export const COM_OPCOES: FormField["type"][] = ["select", "radio", "multi"];
 
 export const DESTINOS: { value: string; label: string }[] = [
   { value: "custom", label: "Campo do contato" },

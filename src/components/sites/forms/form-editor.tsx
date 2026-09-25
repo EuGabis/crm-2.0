@@ -110,22 +110,30 @@ export function FormEditor({
             <Label className="text-xs font-semibold">Campos</Label>
             {fields.map((f, i) => (
               <div key={`${f.key}-${i}`} className="space-y-1.5 rounded-md border p-2">
-                <div className="flex items-center gap-1.5">
-                  <Input
+                <div className="flex items-start gap-1.5">
+                  {/*
+                   * Caixa que CRESCE com o texto (`field-sizing-content`): a
+                   * pergunta costuma ser uma frase inteira, e num campo de uma
+                   * linha só dava para ler o final dela. Enter não quebra linha
+                   * — a pergunta é uma frase só no formulário do site.
+                   */}
+                  <Textarea
                     value={f.label}
-                    onChange={(e) => setField(i, { label: e.target.value })}
-                    className="h-8 text-xs"
+                    onChange={(e) => setField(i, { label: e.target.value.replace(/\r?\n/g, " ") })}
+                    onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
+                    rows={1}
+                    className="min-h-8 resize-none py-1.5 text-xs md:text-xs"
                     placeholder="Pergunta"
                   />
                   <button
                     onClick={() => setField(i, { required: !f.required })}
-                    className={`shrink-0 rounded px-1.5 py-1 text-[10px] font-semibold ${f.required ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-500"}`}
+                    className={`mt-1 shrink-0 rounded px-1.5 py-1 text-[10px] font-semibold ${f.required ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-500"}`}
                   >
                     Obrigatório
                   </button>
                   <button
                     onClick={() => removeField(i)}
-                    className="shrink-0 text-slate-400 hover:text-rose-600"
+                    className="mt-1.5 shrink-0 text-slate-400 hover:text-rose-600"
                     title="Remover campo"
                   >
                     <Trash2 className="size-3.5" />

@@ -58,11 +58,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
     label.setAttribute("for", "litf_" + f.key);
     wrap.appendChild(label); wrap.appendChild(document.createElement("br"));
     var opts = f.options || [];
-    if (f.type === "multi") {
+    if (f.type === "multi" || f.type === "radio") {
       opts.forEach(function(o, k){
         var l = document.createElement("label");
         var c = document.createElement("input");
-        c.type = "checkbox"; c.name = f.key; c.value = o; if (k === 0) c.id = "litf_" + f.key;
+        c.type = f.type === "multi" ? "checkbox" : "radio"; c.name = f.key; c.value = o; if (k === 0) c.id = "litf_" + f.key;
+        // Grupo de botões aceita "required" nativo; caixas de seleção não (ver valor()).
+        if (f.type === "radio" && f.required) c.required = true;
         l.appendChild(c); l.appendChild(document.createTextNode(" " + o));
         wrap.appendChild(l); wrap.appendChild(document.createElement("br"));
       });
@@ -85,6 +87,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
       var marcados = [];
       form.querySelectorAll('input[type="checkbox"]').forEach(function(c){ if (c.name === f.key && c.checked) marcados.push(c.value); });
       return marcados;
+    }
+    if (f.type === "radio") {
+      var marcado = form.querySelector('input[type="radio"][name="' + f.key + '"]:checked');
+      return marcado ? marcado.value : "";
     }
     var el = form.elements[f.key]; return (el && el.value) || "";
   }

@@ -261,6 +261,7 @@ export interface FormField {
     | "time"
     | "datetime"
     | "select"
+    | "radio"
     | "multi";
   required: boolean;
   /**
@@ -268,7 +269,7 @@ export interface FormField {
    * contato com o nome do rótulo) | custom:<nome do campo> (formato antigo).
    */
   mapsTo: string;
-  /** Opções de `select` e `multi`. */
+  /** Opções de `select`, `radio` e `multi`. */
   options?: string[];
 }
 
