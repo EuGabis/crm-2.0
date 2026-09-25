@@ -9258,3 +9258,19 @@ agendadas e o rodízio — sem cron novo).
 ⚠️ **O primeiro deploy pega o ACUMULADO**: quem está nessa condição há dias
 (desfechos dos últimos 30 dias) recebe o FUP nas primeiras rodadas, 20 por
 minuto.
+
+## O lembrete na tela avisava o time inteiro (2026-09-25)
+
+Relato: o Alberto criou uma tarefa para ele e **todo o CRM** recebeu o aviso,
+com o botão "Concluir". O SINO já filtrava ("meu, ou de ninguém", 2026-08-17);
+o **popup de lembrete** (`components/calendar/reminders.tsx`) não filtrava nada.
+E as duas RLS o expunham de jeitos diferentes: tarefa é lida por EMPRESA (todos
+viam), compromisso é por dono mas admin vê todos (0043).
+
+- A regra virou `ehParaMim()` em `lib/notifications/para-mim.ts`, usada pelo sino
+  E pelo popup. Duas cópias da regra divergiram uma vez; a terceira não.
+- ⚠️ "De ninguém" continua avisando todo mundo de propósito: compromisso da
+  empresa e tarefa sem responsável não podem virar aviso que ninguém recebe.
+- ⚠️ Filtrar o aviso NÃO é controle de acesso: concluir a tarefa de outra pessoa
+  pela tela de Contatos continua possível para quem a RLS deixa ver. Se isso
+  também tiver de fechar, é policy de UPDATE em `tasks`, não esta tela.
