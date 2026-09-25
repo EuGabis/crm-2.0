@@ -1,5 +1,6 @@
 "use client";
 
+import { ehParaMim } from "@/lib/notifications/para-mim";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { format, formatDistanceToNow } from "date-fns";
@@ -270,7 +271,7 @@ export function NotificationsPanel() {
      * empresa e tarefa sem responsável não podem virar aviso que ninguém
      * recebe.
      */
-    const isMine = (owner: string | null | undefined) => !owner || owner === me;
+    const isMine = (owner: string | null | undefined) => ehParaMim(owner, me);
 
     // 1) Conversas não lidas (abertas) atribuídas a mim ou a ninguém. A RLS já
     // limita ao que a pessoa VÊ, inclusive a segmentação por número da 0035.

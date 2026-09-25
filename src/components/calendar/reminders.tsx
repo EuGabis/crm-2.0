@@ -8,7 +8,8 @@ import { CalendarClock, CheckSquare, Clock, Target, User, X } from "lucide-react
 import { Button } from "@/components/ui/button";
 import { contactName } from "@/lib/data/repos/contacts";
 import { useApptStore, useDbAppointments } from "@/lib/data/repos/db/appointments";
-import { useDbContact } from "@/lib/data/repos/db/contacts";
+import { ehParaMim } from "@/lib/notifications/para-mim";
+import { useDbContact, useDbStore } from "@/lib/data/repos/db/contacts";
 import {
   taskActions,
   useContactsModule,
@@ -102,7 +103,15 @@ export function Reminders() {
     const check = () => {
       const now = Date.now();
       const shown = loadShown();
+      /*
+       * ⚠️ Só o que é MEU (ou de ninguém) — a mesma regra do sino. Sem isto o
+       * admin, que VÊ a agenda de todos pela RLS da 0043, era interrompido pelo
+       * compromisso de cada colega; e tarefa (cuja RLS é por empresa) abria em
+       * TODAS as telas, com botão de concluir a tarefa de outra pessoa.
+       */
+      const eu = useDbStore.getState().userId;
       const next = appointments.find((a) => {
+        if (!ehParaMim(a.ownerId, eu)) return false;
         if (a.reminderMinutes === null || a.reminderMinutes === undefined) return false;
         if (shown.has(a.id)) return false;
         const snoozedUntil = snoozed[a.id];
@@ -121,6 +130,7 @@ export function Reminders() {
       // Tarefa (0050): mesma janela, com o PRAZO no lugar do início. Só
       // pendente — avisar de tarefa já concluída é ruído puro.
       const task = tasks.find((t) => {
+        if (!ehParaMim(t.assigneeId, eu)) return false;
         if (t.status !== "pending" || !t.dueAt) return false;
         if (t.reminderMinutes === null || t.reminderMinutes === undefined) return false;
         if (shown.has(`task-${t.id}`)) return false;
