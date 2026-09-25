@@ -60,12 +60,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
    * conveniência — o script pode ser colado num site que o desliga, e a rota é
    * pública.
    */
-  const faltou = fields.find((f) => f.required && !valorGravado(f.type, body?.[f.key]));
+  const faltou = fields.find((f) => f.required && !valorGravado(f.type, body?.[f.key], f));
   if (faltou) return json({ error: `Preencha: ${faltou.label}` }, 400);
 
   for (const f of fields) {
     // Data/hora saem daqui em dd/mm/aaaa; múltipla escolha vira "a, b, c".
-    const raw = valorGravado(f.type, body?.[f.key]);
+    const raw = valorGravado(f.type, body?.[f.key], f);
     if (!raw) continue;
     if (f.mapsTo === "name") {
       const parts = raw.split(/\s+/);

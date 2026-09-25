@@ -271,6 +271,10 @@ export interface FormField {
   mapsTo: string;
   /** Opções de `select`, `radio` e `multi`. */
   options?: string[];
+  /** Formato em que a data é gravada (`date`/`datetime`). Padrão d/m/Y. */
+  formatoData?: "d/m/Y" | "Y-m-d" | "m/d/Y" | "d.m.Y" | "extenso";
+  /** Formato em que a hora é gravada (`time`/`datetime`). Padrão 24h. */
+  formatoHora?: "24h" | "12h";
 }
 
 export interface LeadForm {

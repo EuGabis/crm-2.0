@@ -25,7 +25,14 @@ import { Trash2, Plus } from "lucide-react";
 import { formActions } from "@/lib/data/repos/db/forms";
 import type { FormField, LeadForm } from "@/lib/data/types";
 
-import { COM_OPCOES, DESTINOS, TIPOS, opcoesDoTexto } from "@/lib/forms/campos";
+import {
+  COM_OPCOES,
+  DESTINOS,
+  FORMATOS_DATA,
+  FORMATOS_HORA,
+  TIPOS,
+  opcoesDoTexto,
+} from "@/lib/forms/campos";
 
 /** Rótulo do destino; o formato antigo `custom:<nome>` também é "campo do contato". */
 function rotuloDestino(mapsTo: string): string {
@@ -170,6 +177,53 @@ export function FormEditor({
                     </SelectContent>
                   </Select>
                 </div>
+                {(f.type === "date" || f.type === "time" || f.type === "datetime") && (
+                  /*
+                   * Formato em que a resposta fica gravada no contato, com os
+                   * modelos da tela do WordPress. O rótulo é o próprio exemplo.
+                   */
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-12 shrink-0 text-[10px] text-slate-400">Formato</span>
+                    {f.type !== "time" && (
+                      <Select
+                        value={f.formatoData ?? "d/m/Y"}
+                        onValueChange={(v) => v && setField(i, { formatoData: v as FormField["formatoData"] })}
+                      >
+                        <SelectTrigger className="h-7 flex-1 text-xs" size="sm">
+                          <SelectValue>
+                            {FORMATOS_DATA.find((o) => o.value === (f.formatoData ?? "d/m/Y"))?.label}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {FORMATOS_DATA.map((o) => (
+                            <SelectItem key={o.value} value={o.value} className="text-xs">
+                              {o.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    {f.type !== "date" && (
+                      <Select
+                        value={f.formatoHora ?? "24h"}
+                        onValueChange={(v) => v && setField(i, { formatoHora: v as FormField["formatoHora"] })}
+                      >
+                        <SelectTrigger className="h-7 flex-1 text-xs" size="sm">
+                          <SelectValue>
+                            {FORMATOS_HORA.find((o) => o.value === (f.formatoHora ?? "24h"))?.label}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {FORMATOS_HORA.map((o) => (
+                            <SelectItem key={o.value} value={o.value} className="text-xs">
+                              {o.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                )}
                 {COM_OPCOES.includes(f.type) && (
                   <Textarea
                     defaultValue={(f.options ?? []).join("\n")}

@@ -60,29 +60,76 @@ export function campoPersonalizado(f: Pick<FormField, "mapsTo" | "label" | "key"
 const DOIS = (n: string) => n.padStart(2, "0");
 
 /**
+ * Formatos de data e hora, com os mesmos modelos da tela de configuração do
+ * WordPress (pedido de 2026-09-25). O exemplo é o próprio rótulo: quem escolhe
+ * vê o resultado, não o código `d/m/Y`.
+ */
+export const FORMATOS_DATA: { value: NonNullable<FormField["formatoData"]>; label: string }[] = [
+  { value: "d/m/Y", label: "25/09/2026" },
+  { value: "extenso", label: "25 de setembro de 2026" },
+  { value: "Y-m-d", label: "2026-09-25" },
+  { value: "m/d/Y", label: "09/25/2026" },
+  { value: "d.m.Y", label: "25.09.2026" },
+];
+export const FORMATOS_HORA: { value: NonNullable<FormField["formatoHora"]>; label: string }[] = [
+  { value: "24h", label: "14:30" },
+  { value: "12h", label: "2:30 pm" },
+];
+
+const MESES = [
+  "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+  "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+];
+
+function formatarData(a: string, m: string, d: string, formato: FormField["formatoData"]): string {
+  switch (formato) {
+    case "Y-m-d": return `${a}-${m}-${d}`;
+    case "m/d/Y": return `${m}/${d}/${a}`;
+    case "d.m.Y": return `${d}.${m}.${a}`;
+    case "extenso": return `${Number(d)} de ${MESES[Number(m) - 1] ?? m} de ${a}`;
+    default: return `${d}/${m}/${a}`;
+  }
+}
+
+function formatarHora(h: string, min: string, formato: FormField["formatoHora"]): string {
+  if (formato === "12h") {
+    const n = Number(h);
+    return `${n % 12 === 0 ? 12 : n % 12}:${min} ${n < 12 ? "am" : "pm"}`;
+  }
+  return `${DOIS(h)}:${min}`;
+}
+
+/**
  * O valor como fica gravado no contato.
  *
  * ⚠️ Data e hora saem do navegador em ISO ("2026-09-25", "2026-09-25T14:30"),
- * que é como o `<input>` entrega. Gravado assim, o atendente lê "2026-09-25" no
- * cadastro; convertido aqui, lê "25/09/2026". A conversão é por TEXTO, sem
- * `new Date`: `new Date("2026-09-25")` é meia-noite UTC, que no Brasil é o dia
- * ANTERIOR — a mesma armadilha de `lib/periodo.ts`.
+ * que é como o `<input>` entrega, e são convertidas para o FORMATO escolhido no
+ * campo (padrão 25/09/2026 e 14:30). A conversão é por TEXTO, sem `new Date`:
+ * `new Date("2026-09-25")` é meia-noite UTC, que no Brasil é o dia ANTERIOR — a
+ * mesma armadilha de `lib/periodo.ts`. E por isso não há fuso a escolher: o
+ * valor é o que o lead marcou no relógio dele, sem conta de fuso no meio.
  */
-export function valorGravado(tipo: FormField["type"], raw: unknown): string {
+export function valorGravado(
+  tipo: FormField["type"],
+  raw: unknown,
+  formato: Pick<FormField, "formatoData" | "formatoHora"> = {},
+): string {
   if (Array.isArray(raw)) return raw.map((v) => String(v).trim()).filter(Boolean).join(", ");
   const s = (raw ?? "").toString().trim();
   if (!s) return "";
   if (tipo === "date") {
     const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    return m ? `${m[3]}/${m[2]}/${m[1]}` : s;
+    return m ? formatarData(m[1], m[2], m[3], formato.formatoData) : s;
   }
   if (tipo === "datetime") {
     const m = s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})/);
-    return m ? `${m[3]}/${m[2]}/${m[1]} ${DOIS(m[4])}:${m[5]}` : s;
+    return m
+      ? `${formatarData(m[1], m[2], m[3], formato.formatoData)} ${formatarHora(m[4], m[5], formato.formatoHora)}`
+      : s;
   }
   if (tipo === "time") {
     const m = s.match(/^(\d{1,2}):(\d{2})/);
-    return m ? `${DOIS(m[1])}:${m[2]}` : s;
+    return m ? formatarHora(m[1], m[2], formato.formatoHora) : s;
   }
   return s;
 }
