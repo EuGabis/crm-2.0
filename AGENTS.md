@@ -9302,3 +9302,13 @@ ficava fixo em "text".
   `required` de grupo no HTML — o script embutido confere "ao menos uma".
 - A lista vive em `lib/forms/campos.ts`, usada pelo editor, pelo script embutido
   e pela rota. `npm run test:form` — 12 asserções.
+
+### Pergunta longa legível e "escolha única" (2026-09-25)
+
+- A pergunta virou caixa que CRESCE com o texto (`field-sizing-content`, sem
+  quebra de linha — no site é uma frase só). Numa linha única, só o final da
+  frase ficava à vista.
+- ⚠️ "Múltipla escolha" quer dizer coisas diferentes para pessoas diferentes, e
+  por isso são TRÊS tipos com o comportamento no nome: **marca várias**
+  (caixas), **escolha única (botões)** (`radio`, novo) e **lista suspensa**.
+  O `radio` aceita `required` nativo; as caixas não, e o script confere à mão.
