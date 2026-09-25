@@ -9274,3 +9274,31 @@ viam), compromisso é por dono mas admin vê todos (0043).
 - ⚠️ Filtrar o aviso NÃO é controle de acesso: concluir a tarefa de outra pessoa
   pela tela de Contatos continua possível para quem a RLS deixa ver. Se isso
   também tiver de fechar, é policy de UPDATE em `tasks`, não esta tela.
+
+## Formulários: TIPO de entrada separado de ONDE SALVAR (2026-09-25, sem migração)
+
+Pedido: *"o tipo de entrada está limitado — na Builderall tinha texto simples,
+texto completo, data, hora…"*.
+
+🔴 **O seletor que parecia "tipo" era o DESTINO do dado** (nome / e-mail /
+telefone / empresa), e **todo campo novo nascia gravado em "Empresa"**. Um
+formulário com "Curso de interesse" e "Qual horário fica melhor" fazia as duas
+respostas sobrescreverem `contacts.company` — só a última sobrevivia. O tipo
+ficava fixo em "text".
+
+- Agora são DOIS seletores: **Tipo** (texto curto, texto longo, e-mail, telefone,
+  número, data, hora, data e hora, lista, múltipla escolha) e **Salvar em**.
+- Campo novo nasce em **"Campo do contato"** (`mapsTo: "custom"`), que grava em
+  `contacts.custom_fields` com o RÓTULO da pergunta como nome — é assim que
+  aparece no cadastro do contato. `custom:<nome>` antigo continua valendo.
+- ⚠️ **Formulários já existentes NÃO foram corrigidos sozinhos**: os campos que
+  estavam em "Empresa" seguem lá até alguém trocar para "Campo do contato". O
+  editor avisa em âmbar quando mais de um campo grava em Empresa.
+- Data/hora são gravadas em **dd/mm/aaaa** por conversão de TEXTO, nunca
+  `new Date` (meia-noite UTC = dia anterior no Brasil). Múltipla escolha grava
+  "a, b, c".
+- ⚠️ **Obrigatório conferido também na rota de envio**: ela é pública e o
+  `required` do navegador é só conveniência. E caixas de seleção não têm
+  `required` de grupo no HTML — o script embutido confere "ao menos uma".
+- A lista vive em `lib/forms/campos.ts`, usada pelo editor, pelo script embutido
+  e pela rota. `npm run test:form` — 12 asserções.

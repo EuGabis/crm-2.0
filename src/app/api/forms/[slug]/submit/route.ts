@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { campoPersonalizado, valorGravado } from "@/lib/forms/campos";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export const dynamic = "force-dynamic";
@@ -54,8 +55,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   let phone = "";
   let company: string | null = null;
   const custom: Record<string, string> = {};
+  /*
+   * ⚠️ Obrigatório conferido também AQUI: o `required` do navegador é só
+   * conveniência — o script pode ser colado num site que o desliga, e a rota é
+   * pública.
+   */
+  const faltou = fields.find((f) => f.required && !valorGravado(f.type, body?.[f.key]));
+  if (faltou) return json({ error: `Preencha: ${faltou.label}` }, 400);
+
   for (const f of fields) {
-    const raw = (body?.[f.key] ?? "").toString().trim();
+    // Data/hora saem daqui em dd/mm/aaaa; múltipla escolha vira "a, b, c".
+    const raw = valorGravado(f.type, body?.[f.key]);
     if (!raw) continue;
     if (f.mapsTo === "name") {
       const parts = raw.split(/\s+/);
@@ -64,8 +74,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     } else if (f.mapsTo === "email") email = raw;
     else if (f.mapsTo === "phone") phone = raw;
     else if (f.mapsTo === "company") company = raw;
-    else if (typeof f.mapsTo === "string" && f.mapsTo.startsWith("custom:")) {
-      custom[f.mapsTo.slice(7)] = raw;
+    else {
+      // "custom" usa o RÓTULO da pergunta; "custom:<nome>" é o formato antigo.
+      const nome = campoPersonalizado(f);
+      if (nome) custom[nome] = raw;
     }
   }
 
