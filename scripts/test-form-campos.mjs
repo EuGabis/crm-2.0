@@ -22,5 +22,15 @@ eq("rótulo vazio cai na chave", campoPersonalizado({ mapsTo: "custom", label: "
 
 eq("opções: uma por linha, sem vazias nem repetidas", opcoesDoTexto("Manhã\n\n tarde \nManhã\nTarde\nNoite"), ["Manhã", "tarde", "Noite"]);
 
+eq("formato extenso", valorGravado("date", "2026-09-05", { formatoData: "extenso" }), "5 de setembro de 2026");
+eq("formato ISO", valorGravado("date", "2026-09-25", { formatoData: "Y-m-d" }), "2026-09-25");
+eq("formato americano", valorGravado("date", "2026-09-25", { formatoData: "m/d/Y" }), "09/25/2026");
+eq("formato com ponto", valorGravado("date", "2026-09-25", { formatoData: "d.m.Y" }), "25.09.2026");
+eq("hora 12h à tarde", valorGravado("time", "14:30", { formatoHora: "12h" }), "2:30 pm");
+eq("hora 12h meia-noite", valorGravado("time", "00:05", { formatoHora: "12h" }), "12:05 am");
+eq("hora 12h meio-dia", valorGravado("time", "12:00", { formatoHora: "12h" }), "12:00 pm");
+eq("data e hora combinando os dois formatos", valorGravado("datetime", "2026-09-25T09:15", { formatoData: "extenso", formatoHora: "12h" }), "25 de setembro de 2026 9:15 am");
+eq("sem formato = padrão brasileiro (formulários antigos não mudam)", valorGravado("datetime", "2026-09-25T09:15"), "25/09/2026 09:15");
+
 console.log(`\n${ok} assercoes ok, ${falhas} falha(s)\n`);
 process.exit(falhas ? 1 : 0);

@@ -9312,3 +9312,17 @@ ficava fixo em "text".
   por isso são TRÊS tipos com o comportamento no nome: **marca várias**
   (caixas), **escolha única (botões)** (`radio`, novo) e **lista suspensa**.
   O `radio` aceita `required` nativo; as caixas não, e o script confere à mão.
+
+### Formato da data e da hora por campo (2026-09-25)
+
+Campos de data, hora e data e hora ganharam **Formato**, com os modelos da tela
+de configuração do WordPress: 25/09/2026 · 25 de setembro de 2026 · 2026-09-25 ·
+09/25/2026 · 25.09.2026, e hora 14:30 ou 2:30 pm. É o formato em que a
+resposta fica GRAVADA no contato (`formatoData`/`formatoHora` no campo).
+
+- ⚠️ Campo sem formato escolhido continua em 25/09/2026 e 14:30 — formulários já
+  publicados não mudam.
+- ⚠️ **Não há fuso a escolher, de propósito:** a conversão é por texto, e o valor é
+  o que o lead marcou no relógio dele. Converter fuso exigiria saber onde o lead
+  está, e errar nisso mudaria o horário que ele pediu para ser atendido.
+- `npm run test:form` — 21 asserções (12h à meia-noite e ao meio-dia incluídos).
