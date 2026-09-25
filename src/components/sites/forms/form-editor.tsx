@@ -34,6 +34,14 @@ import {
   opcoesDoTexto,
 } from "@/lib/forms/campos";
 
+/*
+ * ⚠️ A lista abre com a LARGURA DO TEXTO, não a do botão, e ABAIXO dele. Com a
+ * largura do botão, "Múltipla escolha (marca várias)" saía cortado; e alinhada
+ * ao item marcado (`alignItemWithTrigger`, o padrão do Base UI), a lista de 11
+ * tipos subia por cima do campo e empurrava as últimas opções para fora da tela.
+ */
+const LISTA = "w-auto min-w-(--anchor-width) max-w-72";
+
 /** Rótulo do destino; o formato antigo `custom:<nome>` também é "campo do contato". */
 function rotuloDestino(mapsTo: string): string {
   if (mapsTo.startsWith("custom:")) return `Campo: ${mapsTo.slice(7)}`;
@@ -155,7 +163,7 @@ export function FormEditor({
                     <SelectTrigger className="h-7 flex-1 text-xs" size="sm">
                       <SelectValue>{TIPOS.find((t) => t.value === f.type)?.label ?? f.type}</SelectValue>
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className={LISTA} alignItemWithTrigger={false}>
                       {TIPOS.map((t) => (
                         <SelectItem key={t.value} value={t.value} className="text-xs">
                           {t.label}
@@ -168,7 +176,7 @@ export function FormEditor({
                     <SelectTrigger className="h-7 flex-1 text-xs" size="sm">
                       <SelectValue>{rotuloDestino(f.mapsTo)}</SelectValue>
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className={LISTA} alignItemWithTrigger={false}>
                       {DESTINOS.map((o) => (
                         <SelectItem key={o.value} value={o.value} className="text-xs">
                           {o.label}
@@ -194,7 +202,7 @@ export function FormEditor({
                             {FORMATOS_DATA.find((o) => o.value === (f.formatoData ?? "d/m/Y"))?.label}
                           </SelectValue>
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className={LISTA} alignItemWithTrigger={false}>
                           {FORMATOS_DATA.map((o) => (
                             <SelectItem key={o.value} value={o.value} className="text-xs">
                               {o.label}
@@ -213,7 +221,7 @@ export function FormEditor({
                             {FORMATOS_HORA.find((o) => o.value === (f.formatoHora ?? "24h"))?.label}
                           </SelectValue>
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className={LISTA} alignItemWithTrigger={false}>
                           {FORMATOS_HORA.map((o) => (
                             <SelectItem key={o.value} value={o.value} className="text-xs">
                               {o.label}
