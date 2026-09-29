@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { renderTemplate } from "@/lib/automations/actions";
 import { renderCampaignEmail } from "@/lib/email/marketing-template";
 import { unsubscribeUrl } from "@/lib/marketing/unsubscribe";
+import { falhaDeCota, falhaPassageira, motivoFalhaEmail } from "@/lib/marketing/falhas";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -106,24 +107,44 @@ export async function processDueCampaigns(): Promise<{
       };
     });
 
-    let ids: string[] = [];
-    let failed = false;
+    /*
+     * ⚠️ **Validação PERMISSIVA.** No modo padrão ("strict") o Resend recusa o
+     * LOTE INTEIRO quando UM endereço é inválido — 100 destinatários marcados
+     * "Falhou" por causa de um e-mail digitado errado. Permissivo, ele envia os
+     * válidos e devolve `errors[]` com o índice e o motivo de cada recusado.
+     */
+    let res: any;
     try {
-      const res = await resend.batch.send(payloads as any);
-      if (res.error) failed = true;
-      else ids = (res.data?.data ?? []).map((d: any) => d.id);
-    } catch {
-      failed = true;
+      res = await resend.batch.send(payloads as any, { batchValidation: "permissive" } as any);
+    } catch (e: any) {
+      res = { error: { name: null, statusCode: null, message: e?.message ?? String(e) } };
     }
 
-    if (failed) {
-      const iso = new Date().toISOString();
-      for (const r of recips as any[]) {
+    const iso = new Date().toISOString();
+
+    if (res?.error) {
+      const { name, statusCode, message } = res.error;
+      /*
+       * Erro do REQUEST inteiro. Passageiro (limite por segundo, 5xx, rede) ou
+       * cota: o lote VOLTA para a fila (solta o claim) em vez de virar "Falhou"
+       * para sempre — reenviar depois resolve, e marcar falha tiraria esses
+       * contatos da campanha sem que nada estivesse errado com eles.
+       */
+      if (falhaPassageira(name, statusCode) || falhaDeCota(name)) {
+        console.warn(`[marketing] campanha ${camp.id}: lote adiado — ${name ?? "rede"} · ${message}`);
         await db
           .from("email_campaign_recipients")
-          .update({ status: "failed", error: "Falha no envio em lote" })
-          .eq("id", r.id);
+          .update({ claimed_at: null })
+          .in("id", (recips as any[]).map((r) => r.id));
+        continue;
       }
+      // Permanente (remetente, chave, parâmetro): vale para todos do lote.
+      const motivo = motivoFalhaEmail(name, message);
+      console.error(`[marketing] campanha ${camp.id}: lote recusado — ${motivo}`);
+      await db
+        .from("email_campaign_recipients")
+        .update({ status: "failed", error: motivo })
+        .in("id", (recips as any[]).map((r) => r.id));
       await db
         .from("email_campaigns")
         .update({ failed: (camp.failed ?? 0) + recips.length, updated_at: iso })
@@ -132,21 +153,39 @@ export async function processDueCampaigns(): Promise<{
       continue;
     }
 
-    const iso = new Date().toISOString();
+    // Permissivo: `errors` traz os índices recusados; `data` traz os ids dos
+    // aceitos, na ordem em que foram enviados.
+    const recusados = new Map<number, string>();
+    for (const e of (res?.data?.errors ?? []) as any[]) {
+      recusados.set(Number(e.index), motivoFalhaEmail("validation_error", e.message));
+    }
+    const ids: string[] = ((res?.data?.data ?? []) as any[]).map((d) => d.id);
+
     let k = 0;
+    let f = 0;
     for (let i = 0; i < recips.length; i++) {
       const r = (recips as any[])[i];
+      const motivo = recusados.get(i);
+      if (motivo) {
+        await db
+          .from("email_campaign_recipients")
+          .update({ status: "failed", error: motivo })
+          .eq("id", r.id);
+        f++;
+        continue;
+      }
       await db
         .from("email_campaign_recipients")
-        .update({ status: "sent", resend_id: ids[i] ?? null, sent_at: iso })
+        .update({ status: "sent", resend_id: ids[k] ?? null, sent_at: iso, error: null })
         .eq("id", r.id);
       k++;
     }
     await db
       .from("email_campaigns")
-      .update({ sent: (camp.sent ?? 0) + k, updated_at: iso })
+      .update({ sent: (camp.sent ?? 0) + k, failed: (camp.failed ?? 0) + f, updated_at: iso })
       .eq("id", camp.id);
     sentTotal += k;
+    errorTotal += f;
   }
 
   return { processed, sent: sentTotal, errors: errorTotal };

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, Ban, Pause, Play } from "lucide-react";
 import { toast } from "sonner";
+import { motivoParaTela } from "@/lib/marketing/falhas";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { KpiCard } from "@/components/shared/kpi-card";
@@ -138,6 +139,7 @@ export function CampaignDetail({
             <tr className="border-b text-[11px] text-slate-400">
               <th className="px-4 py-2.5 font-medium">E-mail</th>
               <th className="px-4 py-2.5 font-medium">Status</th>
+              <th className="px-4 py-2.5 font-medium">Motivo</th>
               <th className="px-4 py-2.5 font-medium">Enviado</th>
               <th className="px-4 py-2.5 font-medium">Aberto</th>
               <th className="px-4 py-2.5 font-medium">Clicou</th>
@@ -159,6 +161,9 @@ export function CampaignDetail({
                     {RECIPIENT_LABEL[r.status]}
                   </Badge>
                 </td>
+                <td className="max-w-md px-4 py-2.5 text-[11px] break-words text-slate-500">
+                  {r.status === "failed" || r.status === "bounced" ? (motivoParaTela(r.error) ?? "—") : "—"}
+                </td>
                 <td className="px-4 py-2.5 text-slate-500">{fmt(r.sentAt)}</td>
                 <td className="px-4 py-2.5 text-slate-500">{fmt(r.openedAt)}</td>
                 <td className="px-4 py-2.5 text-slate-500">{fmt(r.clickedAt)}</td>
@@ -166,7 +171,7 @@ export function CampaignDetail({
             ))}
             {!loading && recipients.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
                   Nenhum destinatário ainda. Publique a campanha para materializar a fila.
                 </td>
               </tr>
