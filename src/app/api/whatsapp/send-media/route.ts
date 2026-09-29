@@ -20,6 +20,7 @@ import {
   resumoDoMp4,
   retratoDoAudio,
   corrigirPreSkip,
+  fecharFluxoOgg,
 } from "@/lib/whatsapp/audio";
 import { toWhatsAppNumber } from "@/lib/whatsapp/phone";
 
@@ -129,7 +130,8 @@ export async function GET() {
        * como a recusa chega pelo webhook, de forma assíncrona, sem este
        * marcador "a correção subiu?" volta a ser dedução.
        */
-      mp4SemVideoViraAudio: true
+      mp4SemVideoViraAudio: true,
+      oggSemEosFechado: true
     },
   });
 }
@@ -233,9 +235,18 @@ export async function POST(request: Request) {
   if (dlErr || !blob) {
     return recusar("Mídia não encontrada: " + (dlErr?.message ?? "arquivo ausente"), 400);
   }
-  const bytes = await blob.arrayBuffer();
+  const baixados = await blob.arrayBuffer();
+  /*
+   * ⚠️ Ogg que saiu do gravador sem a marca EOS (acontece quando a conversão
+   * para MP3 falha no navegador e o original é enviado) é FECHADO aqui, antes
+   * da inspeção — senão `inspecionarAudio` o recusava por um bit, com o áudio
+   * inteiro presente. `fecharFluxoOgg` só age com CRC conferindo e sem sobra;
+   * arquivo truncado segue recusado. Em qualquer outro formato não faz nada.
+   */
+  const fecho = kind === "audio" ? fecharFluxoOgg(baixados) : null;
+  const bytes = fecho?.bytes ?? baixados;
   let sendBytes = bytes;
-  let notaPreSkip = "";
+  let notaPreSkip = fecho?.nota ? `${fecho.nota} ` : "";
   /** Comparação do que a Meta guardou com o que enviamos — ver abaixo. */
   let notaRoundTrip = "";
   /*
@@ -341,7 +352,7 @@ export async function POST(request: Request) {
      */
     const ps = corrigirPreSkip(bytes);
     sendBytes = ps.bytes;
-    notaPreSkip = ps.nota;
+    notaPreSkip += ps.nota;
   }
 
   let waResp: any;
