@@ -29,7 +29,8 @@ import { renderCampaignEmail } from "@/lib/email/marketing-template";
 import { matchesConditions } from "@/components/contacts/module-tabs";
 import { RichTextEditor } from "./rich-text-editor";
 import { CAMPAIGN_TEMPLATES } from "./campaign-templates";
-import type { Audience } from "@/lib/marketing/types";
+import { valoresDoPublico, type Audience } from "@/lib/marketing/types";
+import { MultiEscolha } from "./multi-escolha";
 import type { Contact } from "@/lib/data/types";
 import { cn } from "@/lib/utils";
 
@@ -42,7 +43,8 @@ function eligible(c: Contact): boolean {
 }
 
 /*
- * Listas do "Público": nomes de lista inteligente e de tag passam de 30
+ * Seletor do tipo de público. Tags e listas inteligentes usam `MultiEscolha`
+ * (várias de uma vez). Nomes de lista inteligente e de tag passam de 30
  * caracteres ("Contatos reativação futura", "contatos venda guru webinar"), e o
  * Select nascia na largura do botão com o texto sem quebra — o nome saía
  * cortado e duas listas de começo igual ficavam indistinguíveis. Agora o botão
@@ -50,7 +52,6 @@ function eligible(c: Contact): boolean {
  * rolagem própria, e o nome longo quebra em vez de sumir.
  */
 const LISTA = "w-(--anchor-width) max-h-72";
-const ITEM = "text-xs **:whitespace-normal **:break-words";
 
 export function CampaignComposer({
   campaignId,
@@ -62,7 +63,7 @@ export function CampaignComposer({
   onSaved: (id: string) => void;
 }) {
   const existing = useDbCampaign(campaignId ?? "");
-  const { contacts } = useDbContacts();
+  const { contacts, loading: carregandoContatos } = useDbContacts();
   const { smartLists, fields } = useContactsModule();
   const { boards } = useBrandBoards();
 
@@ -89,18 +90,27 @@ export function CampaignComposer({
     return [...set].sort();
   }, [contacts]);
 
-  // Contatos elegíveis do público escolhido (estimativa; o banco reforça na materialização).
+  const escolhidos = useMemo(() => valoresDoPublico(audience), [audience]);
+  const setEscolhidos = (v: string[]) =>
+    setAudience((a) => ({ type: a.type, value: v[0] ?? null, values: v }));
+
+  // Contatos elegíveis do público escolhido (estimativa; o banco reforça na
+  // materialização). Com várias tags/listas o público é a UNIÃO — quem está em
+  // duas listas recebe um e-mail só (o banco também deduplica por contato).
   const audienceContacts = useMemo(() => {
     const base = contacts.filter(eligible);
     if (audience.type === "all") return base;
-    if (audience.type === "tag") return base.filter((c) => audience.value && c.tags.includes(audience.value));
+    if (audience.type === "tag") {
+      const alvo = new Set(escolhidos);
+      return base.filter((c) => c.tags.some((t) => alvo.has(t)));
+    }
     if (audience.type === "smart_list") {
-      const sl = smartLists.find((s) => s.id === audience.value);
-      if (!sl) return [];
-      return base.filter((c) => matchesConditions(c, sl.conditions));
+      const listas = smartLists.filter((s) => escolhidos.includes(s.id));
+      if (listas.length === 0) return [];
+      return base.filter((c) => listas.some((sl) => matchesConditions(c, sl.conditions)));
     }
     return base;
-  }, [contacts, audience, smartLists]);
+  }, [contacts, audience.type, escolhidos, smartLists]);
 
   const preview = useMemo(() => {
     const sample = audienceContacts[0] ?? contacts[0];
@@ -163,8 +173,19 @@ export function CampaignComposer({
   async function publish(mode: "now" | "scheduled", scheduledAt?: string) {
     const saved = await ensureSaved();
     if (!saved) return toast.error("Salve o rascunho primeiro");
-    const contactIds =
-      audience.type === "smart_list" ? audienceContacts.map((c) => c.id) : undefined;
+    /*
+     * ⚠️ Tag e lista mandam os ids resolvidos aqui: o banco (0010) só sabe
+     * materializar UMA tag (`audience.value`), então com várias as demais
+     * ficariam de fora. Com a carga de contatos ainda em andamento, a lista
+     * estaria incompleta — e campanha enviada não tem desfazer.
+     */
+    if (audience.type !== "all" && carregandoContatos) {
+      return toast.error("Aguarde carregar os contatos antes de enviar");
+    }
+    if (audience.type !== "all" && escolhidos.length === 0) {
+      return toast.error(audience.type === "tag" ? "Escolha ao menos uma tag" : "Escolha ao menos uma lista");
+    }
+    const contactIds = audience.type === "all" ? undefined : audienceContacts.map((c) => c.id);
     const res = await fetch(`/api/marketing/campaigns/${saved}/send`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -320,35 +341,33 @@ export function CampaignComposer({
             </Select>
 
             {audience.type === "tag" && (
-              <Select value={audience.value ?? ""} onValueChange={(v) => setAudience({ type: "tag", value: v })}>
-                <SelectTrigger className="mt-2 h-8 w-full text-xs">
-                  <SelectValue>{audience.value || "Escolha a tag"}</SelectValue>
-                </SelectTrigger>
-                <SelectContent className={LISTA} alignItemWithTrigger={false}>
-                  {tags.map((t) => (
-                    <SelectItem key={t} value={t} className={ITEM}>{t}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <MultiEscolha
+                opcoes={tags.map((t) => ({ value: t, label: t }))}
+                value={escolhidos}
+                onChange={setEscolhidos}
+                placeholder="Escolha as tags"
+                vazio="Nenhuma tag encontrada"
+              />
             )}
 
             {audience.type === "smart_list" && (
-              <Select value={audience.value ?? ""} onValueChange={(v) => setAudience({ type: "smart_list", value: v })}>
-                <SelectTrigger className="mt-2 h-8 w-full text-xs">
-                  <SelectValue>
-                    {smartLists.find((s) => s.id === audience.value)?.name || "Escolha a lista"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent className={LISTA} alignItemWithTrigger={false}>
-                  {smartLists.map((s) => (
-                    <SelectItem key={s.id} value={s.id} className={ITEM}>{s.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <MultiEscolha
+                opcoes={smartLists.map((sl) => ({ value: sl.id, label: sl.name }))}
+                value={escolhidos}
+                onChange={setEscolhidos}
+                placeholder="Escolha as listas"
+                vazio="Nenhuma lista encontrada"
+              />
             )}
 
             <p className="mt-3 text-xs text-slate-500">
-              <span className="text-2xl font-bold text-indigo-600">{audienceContacts.length}</span> destinatário(s) elegível(is)
+              {carregandoContatos && audience.type !== "all" ? (
+                <span className="text-slate-400">Carregando contatos…</span>
+              ) : (
+                <>
+                  <span className="text-2xl font-bold text-indigo-600">{audienceContacts.length}</span> destinatário(s) elegível(is)
+                </>
+              )}
             </p>
             <p className="text-[11px] text-slate-400">Sem e-mail, DND ou descadastrados são ignorados no envio.</p>
           </div>

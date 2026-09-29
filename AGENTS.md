@@ -9339,3 +9339,14 @@ arquivada não conta (finalizar solta o responsável, 0092). O que já foi
 assumido não é corrigido pela migração: o admin troca no seletor do contato.
 ⏳ O botão "marcar como meu" continua aparecendo; a recusa vem do banco com
 aviso na tela.
+
+## Campanha de e-mail: várias tags / listas no público (2026-09-29, sem migração)
+
+`Audience.values?: string[]` — o público é a UNIÃO das tags/listas marcadas
+(`MultiEscolha`, popover com caixas e busca). `value` segue gravado com a
+PRIMEIRA: campanha antiga só tem `value`, e `private.materialize_recipients`
+(0010) só sabe materializar UMA tag. Por isso, tag e lista passam a enviar os
+`contactIds` resolvidos no navegador (`add_campaign_recipients` deduplica por
+contato). ⚠️ O envio é bloqueado enquanto a store de contatos carrega: a lista
+sairia incompleta, e campanha enviada não tem desfazer — o "0 destinatários"
+durante a carga agora diz "Carregando contatos…".
