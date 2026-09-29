@@ -9326,3 +9326,16 @@ resposta fica GRAVADA no contato (`formatoData`/`formatoHora` no campo).
   o que o lead marcou no relógio dele. Converter fuso exigiria saber onde o lead
   está, e errar nisso mudaria o horário que ele pediu para ser atendido.
 - `npm run test:form` — 21 asserções (12h à meia-noite e ao meio-dia incluídos).
+
+## Assumir contato sem dono: não quando a conversa está com OUTRO (202609291400)
+
+Relato (2026-09-29): o lead Thomas Freitas caiu no rodízio para o Alberto; o
+Paulo abriu o contato, clicou em "marcar como meu" e virou proprietário de um
+lead que o colega estava atendendo. O `NULL → eu` (202609181800) existe para o
+vendedor assinar o lead que ELE trouxe — contato sem dono com conversa ABERTA
+atribuída a outra pessoa não é "de ninguém". O gatilho agora recusa esse caso
+para não-admin; admin e service role seguem livres. Conversa finalizada ou
+arquivada não conta (finalizar solta o responsável, 0092). O que já foi
+assumido não é corrigido pela migração: o admin troca no seletor do contato.
+⏳ O botão "marcar como meu" continua aparecendo; a recusa vem do banco com
+aviso na tela.
