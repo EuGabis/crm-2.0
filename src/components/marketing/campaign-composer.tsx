@@ -41,6 +41,17 @@ function eligible(c: Contact): boolean {
   return Boolean(c.email && c.email.trim()) && !c.dnd;
 }
 
+/*
+ * Listas do "Público": nomes de lista inteligente e de tag passam de 30
+ * caracteres ("Contatos reativação futura", "contatos venda guru webinar"), e o
+ * Select nascia na largura do botão com o texto sem quebra — o nome saía
+ * cortado e duas listas de começo igual ficavam indistinguíveis. Agora o botão
+ * ocupa o painel, a lista abre ABAIXO dele (não sobre o item marcado) com
+ * rolagem própria, e o nome longo quebra em vez de sumir.
+ */
+const LISTA = "w-(--anchor-width) max-h-72";
+const ITEM = "text-xs **:whitespace-normal **:break-words";
+
 export function CampaignComposer({
   campaignId,
   onClose,
@@ -296,12 +307,12 @@ export function CampaignComposer({
               value={audience.type}
               onValueChange={(v) => v && setAudience({ type: v as Audience["type"], value: null })}
             >
-              <SelectTrigger className="h-8 text-xs">
+              <SelectTrigger className="h-8 w-full text-xs">
                 <SelectValue>
                   {audience.type === "all" ? "Todos os contatos" : audience.type === "tag" ? "Por tag" : "Lista inteligente"}
                 </SelectValue>
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className={LISTA} alignItemWithTrigger={false}>
                 <SelectItem value="all" className="text-xs">Todos os contatos</SelectItem>
                 <SelectItem value="tag" className="text-xs">Por tag</SelectItem>
                 <SelectItem value="smart_list" className="text-xs">Lista inteligente</SelectItem>
@@ -310,12 +321,12 @@ export function CampaignComposer({
 
             {audience.type === "tag" && (
               <Select value={audience.value ?? ""} onValueChange={(v) => setAudience({ type: "tag", value: v })}>
-                <SelectTrigger className="mt-2 h-8 text-xs">
+                <SelectTrigger className="mt-2 h-8 w-full text-xs">
                   <SelectValue>{audience.value || "Escolha a tag"}</SelectValue>
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className={LISTA} alignItemWithTrigger={false}>
                   {tags.map((t) => (
-                    <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>
+                    <SelectItem key={t} value={t} className={ITEM}>{t}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -323,14 +334,14 @@ export function CampaignComposer({
 
             {audience.type === "smart_list" && (
               <Select value={audience.value ?? ""} onValueChange={(v) => setAudience({ type: "smart_list", value: v })}>
-                <SelectTrigger className="mt-2 h-8 text-xs">
+                <SelectTrigger className="mt-2 h-8 w-full text-xs">
                   <SelectValue>
                     {smartLists.find((s) => s.id === audience.value)?.name || "Escolha a lista"}
                   </SelectValue>
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className={LISTA} alignItemWithTrigger={false}>
                   {smartLists.map((s) => (
-                    <SelectItem key={s.id} value={s.id} className="text-xs">{s.name}</SelectItem>
+                    <SelectItem key={s.id} value={s.id} className={ITEM}>{s.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
