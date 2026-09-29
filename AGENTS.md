@@ -9369,3 +9369,21 @@ Marcador: `oggSemEosFechado` em `GET /api/whatsapp/send-media`.
 
 ⏳ A causa da falha da conversão para MP3 não foi medida (o `console.warn`
 "[audio] falha ao converter para MP3" fica no navegador de quem gravou).
+
+## Motivo da falha nos destinatários da campanha (2026-09-29, sem migração)
+
+A coluna `email_campaign_recipients.error` existia desde a 0010 e a tela já a
+lia — mas o motor gravava sempre **"Falha no envio em lote"** e jogava fora o
+erro do Resend. Pior: no modo padrão (`strict`) do Batch, **um endereço inválido
+derrubava o lote inteiro de 100**.
+
+- `batchValidation: "permissive"`: o Resend envia os válidos e devolve `errors[]`
+  com índice e motivo de cada recusado — cada um grava o seu.
+- Erro do request inteiro **passageiro** (429, 5xx, rede) ou **cota** → o lote
+  volta para a fila (`claimed_at = null`), não vira "Falhou". Permanente
+  (remetente não verificado, chave) → falha para todos, com o motivo.
+- O webhook grava o motivo de **bounce** (tipo/subtipo/mensagem) e de
+  **reclamação de spam** no mesmo `error`.
+- A tela ganhou a coluna **Motivo**. Linhas antigas com o texto fixo aparecem
+  como "Motivo não registrado" — o erro real não foi guardado e não dá para
+  reconstruir. `lib/marketing/falhas.ts`, `npm run test:email-falhas`.

@@ -55,6 +55,20 @@ export async function POST(request: Request) {
       p_type: type,
       p_at: at,
     });
+    /*
+     * Bounce e reclamação chegam com o MOTIVO (caixa inexistente, caixa cheia,
+     * marcado como spam). Sem gravar, a tela dizia só "Retornou" e ninguém
+     * sabia se era para corrigir o e-mail ou tirar o contato da lista.
+     */
+    if (type === "bounced" || type === "complained") {
+      const b = evt?.data?.bounce ?? {};
+      const detalhe = [b.type, b.subType, b.message].filter(Boolean).join(" · ");
+      const motivo =
+        type === "complained"
+          ? "O destinatário marcou o e-mail como spam"
+          : `Retornou: a caixa do destinatário recusou a mensagem${detalhe ? ` (${detalhe})` : ""}`;
+      await db.from("email_campaign_recipients").update({ error: motivo }).eq("resend_id", resendId);
+    }
   } catch (error) {
     console.error("[marketing] webhook falhou:", error);
     return Response.json({ error: "erro ao processar" }, { status: 500 });

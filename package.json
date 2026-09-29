@@ -23,7 +23,8 @@
     "test:quadro": "node scripts/test-quadro-leads.mjs",
     "test:cursos": "node --import ./scripts/lib/alias-register.mjs scripts/test-cursos.mjs",
     "test:fup": "node --import ./scripts/lib/alias-register.mjs scripts/test-fup.mjs",
-    "test:form": "node --import ./scripts/lib/alias-register.mjs scripts/test-form-campos.mjs"
+    "test:form": "node --import ./scripts/lib/alias-register.mjs scripts/test-form-campos.mjs",
+    "test:email-falhas": "node scripts/test-email-falhas.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
