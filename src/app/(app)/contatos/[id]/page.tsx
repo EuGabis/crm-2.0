@@ -107,7 +107,13 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
     const ok = await dbContactActions.update(contact.id, { ownerId: novoDono });
     setSalvandoDono(false);
     if (!ok) {
-      toast.error("Não foi possível trocar o proprietário");
+      // O gatilho `protege_owner_do_contato` recusa assumir um contato cuja
+      // conversa aberta está com outro atendente (202609291400).
+      toast.error(
+        isAdmin
+          ? "Não foi possível trocar o proprietário"
+          : "Não foi possível — se a conversa deste contato está com outro atendente, só o administrador define o proprietário"
+      );
       return;
     }
     const nome = team.find((u) => u.id === novoDono)?.name;
