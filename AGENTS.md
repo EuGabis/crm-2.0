@@ -9387,3 +9387,22 @@ derrubava o lote inteiro de 100**.
 - A tela ganhou a coluna **Motivo**. Linhas antigas com o texto fixo aparecem
   como "Motivo não registrado" — o erro real não foi guardado e não dá para
   reconstruir. `lib/marketing/falhas.ts`, `npm run test:email-falhas`.
+
+## Envio de campanha: vários lotes por tique (2026-09-29, sem migração)
+
+Era UM lote de 100 por campanha por minuto (~6 mil/h; a campanha de 21 mil
+levava ~3,5 h), e cada destinatário era gravado numa ida sequencial ao banco.
+
+- O tique envia lotes em laço dentro de **45 s** (`ORCAMENTO_MS`; a rota tem
+  `maxDuration = 60`), com **600 ms** entre chamadas ao Resend
+  (`INTERVALO_RESEND_MS` — cada Batch conta como UMA requisição no limite por
+  segundo da conta). Teórico: ~70 lotes/minuto, ~7 mil e-mails/minuto.
+- Gravações de status em fatias paralelas de 20.
+- ⚠️ 429/5xx/rede/cota **interrompem** a campanha no tique (o lote volta à
+  fila); erro permanente (remetente/chave) também para — senão queimaria a
+  campanha inteira em um minuto.
+- ⚠️ `sent`/`failed` da campanha passaram a ser **recontados** dos
+  destinatários: somar sobre o valor lido no começo do tique perdia envios com
+  vários lotes e tiques sobrepostos.
+- O teto real passa a ser a **cota do plano do Resend** (diária/mensal); ao
+  estourar, o envio espera em vez de marcar falha.

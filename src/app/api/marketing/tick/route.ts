@@ -2,6 +2,12 @@ import { processDueCampaigns } from "@/lib/marketing/engine";
 
 /** Nunca cachear: a rota é o batimento do envio de marketing. */
 export const dynamic = "force-dynamic";
+/**
+ * O motor envia vários lotes por tique dentro de 45 s (`ORCAMENTO_MS`); sem
+ * este teto explícito a Vercel usaria o padrão do plano e poderia cortar o
+ * tique no meio de um lote.
+ */
+export const maxDuration = 60;
 
 /**
  * Batimento do envio de campanhas de e-mail.
