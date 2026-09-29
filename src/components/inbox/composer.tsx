@@ -24,7 +24,7 @@ import {
   Zap,
 } from "lucide-react";
 import { toast } from "sonner";
-import { inspecionarAudio, resumoDaInspecao } from "@/lib/whatsapp/audio";
+import { fecharFluxoOgg, inspecionarAudio, resumoDaInspecao } from "@/lib/whatsapp/audio";
 import OpusMediaRecorder from "opus-media-recorder";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -652,7 +652,16 @@ export function Composer({ conversationId }: { conversationId: string }) {
         setRecording(false);
         if (cancelRef.current) return;
         const secs = Math.max(1, Math.round((Date.now() - startedRef.current) / 1000));
-        const bruto = new Blob(chunksRef.current, { type: mimeArquivo });
+        /*
+         * O `opus-media-recorder` às vezes deixa a última página sem a marca EOS.
+         * Fechar o fluxo aqui ajuda o decodificador do navegador na conversão
+         * para MP3 e, se ela falhar, o Ogg original já sai válido (a rota
+         * também fecha, como rede).
+         */
+        const gravado = new Blob(chunksRef.current, { type: mimeArquivo });
+        const bruto = mimeArquivo === "audio/ogg"
+          ? new Blob([fecharFluxoOgg(await gravado.arrayBuffer()).bytes], { type: mimeArquivo })
+          : gravado;
 
         /*
          * ⚠️ **A gravação sai em MP3, e isso está PROVADO, não deduzido.** O

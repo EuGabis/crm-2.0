@@ -568,6 +568,59 @@ export function corrigirPreSkip(bytes: ArrayBuffer): ResultadoPreSkip {
   };
 }
 
+export interface ResultadoFechamento {
+  bytes: ArrayBuffer;
+  corrigido: boolean;
+  nota: string;
+}
+
+/**
+ * Fecha um fluxo Ogg que saiu do gravador SEM a marca EOS na última página.
+ *
+ * Caso real (2026-09-29): a conversão para MP3 no navegador falhou, o composer
+ * mandou o Ogg original do `opus-media-recorder` e a rota o recusou com
+ * "última página sem a marca EOS (fluxo não fechado)" — um áudio inteiro, com
+ * todas as páginas presentes, perdido por um bit. O fim do fluxo é só o bit
+ * 0x04 do `header_type` da última página; o conteúdo está completo.
+ *
+ * ⚠️ Mesma autovalidação de `corrigirPreSkip`: só age se o CRC de TODAS as
+ * páginas conferir e se as páginas cobrirem o arquivo inteiro (sem sobra). Um
+ * arquivo TRUNCADO não é "sem EOS": marcar o fim de um fluxo cortado no meio
+ * esconderia o defeito verdadeiro, e ele continua recusado.
+ */
+export function fecharFluxoOgg(bytes: ArrayBuffer): ResultadoFechamento {
+  const orig = new Uint8Array(bytes);
+  const paginas = paginasComCrc(orig);
+  if (!paginas.length) return { bytes, corrigido: false, nota: "" };
+  const ultima = paginas[paginas.length - 1]!;
+  if (orig[ultima.inicio + 5]! & 0x04) return { bytes, corrigido: false, nota: "" };
+  if (ultima.fim !== orig.length) {
+    return { bytes, corrigido: false, nota: "eos: NAO fechado (arquivo com sobra/truncado)" };
+  }
+  const ruins = paginas.filter((p) => p.crcGravado !== p.crcCalculado).length;
+  if (ruins) {
+    return {
+      bytes,
+      corrigido: false,
+      nota: `eos: NAO fechado (crc divergente em ${ruins}/${paginas.length} paginas)`,
+    };
+  }
+
+  const novo = new Uint8Array(orig);
+  novo[ultima.inicio + 5] = novo[ultima.inicio + 5]! | 0x04;
+  // O CRC é calculado com o próprio campo zerado (`crcOgg` já faz isso).
+  const crc = crcOgg(novo, ultima.inicio, ultima.fim);
+  novo[ultima.inicio + 22] = crc & 0xff;
+  novo[ultima.inicio + 23] = (crc >>> 8) & 0xff;
+  novo[ultima.inicio + 24] = (crc >>> 16) & 0xff;
+  novo[ultima.inicio + 25] = (crc >>> 24) & 0xff;
+  return {
+    bytes: novo.buffer.slice(novo.byteOffset, novo.byteOffset + novo.byteLength) as ArrayBuffer,
+    corrigido: true,
+    nota: `eos fechado (crc refeito, ${paginas.length} paginas conferidas)`,
+  };
+}
+
 /** Quantas páginas têm CRC íntegro — entra no retrato do balão. */
 export function resumoCrc(bytes: ArrayBuffer): string {
   const p = paginasComCrc(new Uint8Array(bytes));

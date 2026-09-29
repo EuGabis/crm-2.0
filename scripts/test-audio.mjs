@@ -29,6 +29,7 @@ const {
   cabecalhoOpus,
   crcOgg,
   corrigirPreSkip,
+  fecharFluxoOgg,
   analisarMp4,
   trilhasDoMp4,
   retratoDoAudio,
@@ -349,6 +350,83 @@ console.log("  corrigirPreSkip — e o CRC refeito");
 {
   const r = corrigirPreSkip(new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3, 4]).buffer);
   verdade("sem OpusHead: não mexe", r.corrigido === false, r.nota);
+}
+
+/* ================================================================== *
+ * 4b. Fechar fluxo sem EOS — o caso de 29/09
+ * ================================================================== */
+
+console.log("  fecharFluxoOgg — marca EOS e refaz o CRC");
+
+function crcsConferem(buf) {
+  const b = new Uint8Array(buf);
+  let paginas = 0;
+  let batem = 0;
+  let i = 0;
+  while (i + 27 <= b.length && b[i] === 0x4f && b[i + 1] === 0x67) {
+    const nSeg = b[i + 26];
+    let carga = 0;
+    for (let k = 0; k < nSeg; k++) carga += b[i + 27 + k];
+    const fim = i + 27 + nSeg + carga;
+    if (fim > b.length) break;
+    const gravado =
+      (b[i + 22] | (b[i + 23] << 8) | (b[i + 24] << 16) | b[i + 25] * 0x1000000) >>> 0;
+    const janela = b.slice(i, fim);
+    janela.fill(0, 22, 26);
+    paginas++;
+    if (crcPorTabela(janela) === gravado) batem++;
+    i = fim;
+  }
+  return `${batem}/${paginas}`;
+}
+
+const semEos = () =>
+  juntar(
+    pagina({ carga: opusHead(), flags: BOS, seq: 0 }),
+    pagina({ carga: opusTags(), seq: 1 }),
+    pagina({ carga: new Uint8Array(80).fill(0x7c), granule: 48960, seq: 2 }),
+    pagina({ carga: new Uint8Array(80).fill(0x7c), granule: 97920, seq: 3 }),
+  );
+
+{
+  const antes = semEos();
+  verdade("sem EOS: inspeção REPROVA antes", inspecionarAudio(antes).aceitavel === false);
+  const r = fecharFluxoOgg(antes);
+  verdade("sem EOS: fechou", r.corrigido === true, r.nota);
+  conferir("sem EOS: tamanho intacto", r.bytes.byteLength, antes.byteLength);
+  conferir("sem EOS: fluxo fica válido", analisarOgg(r.bytes).problemas, []);
+  conferir("sem EOS: CRC de todas as páginas confere (tabela)", crcsConferem(r.bytes), "4/4");
+  verdade("sem EOS: inspeção APROVA depois", inspecionarAudio(r.bytes).aceitavel === true);
+  // Só a última página ganha o bit: EOS no meio quebraria o fluxo.
+  const b = new Uint8Array(r.bytes);
+  conferir("sem EOS: BOS da primeira preservado", b[5], BOS);
+}
+
+{
+  const orig = fluxoCompleto();
+  const r = fecharFluxoOgg(orig);
+  verdade("já com EOS: não mexe", r.corrigido === false);
+  verdade("já com EOS: mesmos bytes", r.bytes === orig);
+}
+
+{
+  // Truncado: marcar fim num fluxo cortado esconderia o defeito verdadeiro.
+  const cheio = new Uint8Array(semEos());
+  const r = fecharFluxoOgg(cheio.slice(0, cheio.length - 10).buffer);
+  verdade("truncado: NÃO fecha", r.corrigido === false, r.nota);
+  verdade("truncado: continua reprovado", inspecionarAudio(r.bytes).aceitavel === false);
+}
+
+{
+  const b = new Uint8Array(semEos());
+  b[23] ^= 0xff;
+  const r = fecharFluxoOgg(b.buffer);
+  verdade("CRC corrompido: RECUSA fechar", r.corrigido === false && /crc/i.test(r.nota), r.nota);
+}
+
+{
+  const r = fecharFluxoOgg(new Uint8Array([0xff, 0xfb, 0x90, 0x00, 1, 2, 3]).buffer);
+  verdade("mp3: não mexe", r.corrigido === false && r.nota === "");
 }
 
 /* ================================================================== *

@@ -9350,3 +9350,22 @@ PRIMEIRA: campanha antiga só tem `value`, e `private.materialize_recipients`
 contato). ⚠️ O envio é bloqueado enquanto a store de contatos carrega: a lista
 sairia incompleta, e campanha enviada não tem desfazer — o "0 destinatários"
 durante a carga agora diz "Carregando contatos…".
+
+## Áudio Ogg recusado por "última página sem EOS" (2026-09-29)
+
+Balão: *"O arquivo tem cabeçalho de OGG/Opus válido mas o fluxo está incompleto
+(última página sem a marca EOS)"*. É a NOSSA pré-checagem (`inspecionarAudio`),
+não a Meta. O caminho: a conversão para MP3 no navegador falhou, o composer
+mandou o Ogg original do `opus-media-recorder`, e esse Ogg saiu sem o bit EOS
+(0x04 do `header_type` da última página) — com o áudio inteiro presente.
+
+`fecharFluxoOgg` (em `lib/whatsapp/audio.ts`) liga o bit e refaz o CRC da
+página. Roda na rota ANTES da inspeção e no composer ANTES da conversão (ajuda o
+decodificador do navegador). ⚠️ Mesma autovalidação de `corrigirPreSkip`: só
+age com o CRC de TODAS as páginas conferindo e sem sobra — arquivo truncado
+continua recusado, porque marcar o fim de um fluxo cortado esconderia o defeito.
+Marcador: `oggSemEosFechado` em `GET /api/whatsapp/send-media`.
+`npm run test:audio` — 103 asserções.
+
+⏳ A causa da falha da conversão para MP3 não foi medida (o `console.warn`
+"[audio] falha ao converter para MP3" fica no navegador de quem gravou).
