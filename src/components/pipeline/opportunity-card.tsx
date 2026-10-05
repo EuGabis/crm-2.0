@@ -41,7 +41,7 @@ import {
 import { conversationActions } from "@/lib/data/repos/db/conversations";
 import { oppActions } from "@/lib/data/repos/db/pipeline";
 import { taskActions } from "@/lib/data/repos/db/contacts-module";
-import { appointmentActions } from "@/lib/data/repos/db/appointments";
+import { anoPlausivel, appointmentActions } from "@/lib/data/repos/db/appointments";
 import { formatBRL } from "@/lib/data/repos/opportunities";
 import { CURSOS } from "@/lib/data/cursos";
 import type { Opportunity, User } from "@/lib/data/types";
@@ -309,6 +309,11 @@ function OpportunityCardBase({
       return;
     }
     const start = new Date(`${apptDate}T${apptTime}:00`);
+    // ⚠️ Ano de 5 dígitos no campo de data derrubava a tela de Calendários.
+    if (!Number.isFinite(start.getTime()) || !anoPlausivel(start.toISOString())) {
+      toast.error("Data inválida — confira o ano (4 dígitos)");
+      return;
+    }
     setBusy(true);
     const ok = await appointmentActions.add({
       title,
