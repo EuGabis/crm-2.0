@@ -79,7 +79,13 @@ npm run build    # build + type check — deve passar sem erros
 
 ## Produção
 
-- **App no ar:** https://lito-crm.vercel.app (projeto Vercel `lito-crm`, escopo
+- **Domínio desde 2026-10-05: https://www.litocrm.app.** Ainda há URLs
+  `lito-crm.vercel.app` neste arquivo e nas migrações antigas — leia como o
+  domínio novo. Os crons do banco foram movidos pela migração
+  `202610051200_dominio_litocrm_app.sql`. Webhooks externos (Meta, Resend, Guru),
+  Supabase Auth (Site URL/Redirect URLs) e Google Cloud (origens/redirects OAuth)
+  são configurados nos painéis de cada um, não no código.
+- **App no ar (domínio antigo, segue servido pela Vercel):** https://lito-crm.vercel.app (projeto Vercel `lito-crm`, escopo
   `gabriels-projects-fa9c86e6`).
 - **Deploy = merge na `main`** — a integração GitHub↔Vercel builda e publica sozinha.
   **NÃO rode `vercel deploy` / `vercel --prod` local**: isso sobe seu código local

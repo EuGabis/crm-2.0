@@ -35,7 +35,7 @@ function genSlug(): string {
 }
 
 export function embedSnippet(slug: string): string {
-  const base = process.env.NEXT_PUBLIC_APP_URL || "https://lito-crm.vercel.app";
+  const base = process.env.NEXT_PUBLIC_APP_URL || "https://www.litocrm.app";
   return `<script src="${base.replace(/\/$/, "")}/api/forms/${slug}/embed.js"></script>`;
 }
 

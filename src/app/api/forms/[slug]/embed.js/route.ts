@@ -16,7 +16,7 @@ function js(body: string, status = 200) {
 
 export async function GET(request: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const base = process.env.NEXT_PUBLIC_APP_URL || "https://lito-crm.vercel.app";
+  const base = process.env.NEXT_PUBLIC_APP_URL || "https://www.litocrm.app";
 
   let form: any = null;
   try {
