@@ -32,15 +32,21 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const isAuthRoute = request.nextUrl.pathname.startsWith("/login");
+  const path = request.nextUrl.pathname;
+  const isAuthRoute = path.startsWith("/login");
+  // "Esqueci minha senha": chamada por quem ainda não tem sessão.
+  const isPublicApi = path.startsWith("/api/auth/");
+  // A página de redefinição recebe a pessoa JÁ logada (verifyOtp cria a sessão)
+  // e não pode ser desviada para o painel antes de ela escolher a senha nova.
+  const isRecovery = path.startsWith("/login/redefinir");
 
-  if (!user && !isAuthRoute) {
+  if (!user && !isAuthRoute && !isPublicApi) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
-  if (user && isAuthRoute) {
+  if (user && isAuthRoute && !isRecovery) {
     const url = request.nextUrl.clone();
     url.pathname = "/dashboard";
     return NextResponse.redirect(url);

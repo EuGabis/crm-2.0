@@ -598,6 +598,52 @@ export const teamActions = {
     return { ok: true };
   },
 
+  /**
+   * Nome, e-mail e senha de um membro — moram em `auth.users`, que só a API
+   * admin altera; quem confere que é admin e da mesma empresa é a rota.
+   */
+  async updateAccount(
+    userId: string,
+    patch: { name?: string; email?: string; password?: string }
+  ): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const res = await fetch("/api/team/member", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, acao: "editar", ...patch }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, error: j.error ?? "Não foi possível salvar a conta" };
+      const s = useTeamStore.getState();
+      s.patch({
+        members: s.members.map((m) =>
+          m.userId === userId ? { ...m, name: j.name ?? m.name, email: j.email ?? m.email } : m
+        ),
+      });
+      return { ok: true };
+    } catch {
+      return { ok: false, error: "Falha de conexão ao salvar a conta" };
+    }
+  },
+
+  /** Envia o link de redefinição de senha; devolve o link para copiar se o e-mail falhar. */
+  async sendPasswordReset(
+    userId: string
+  ): Promise<{ ok: boolean; error?: string; warning?: string; link?: string }> {
+    try {
+      const res = await fetch("/api/team/member", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, acao: "redefinir" }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, error: j.error ?? "Não foi possível enviar o link" };
+      return { ok: true, warning: j.warning, link: j.link };
+    } catch {
+      return { ok: false, error: "Falha de conexão ao enviar o link" };
+    }
+  },
+
   async removeMember(userId: string): Promise<{ ok: boolean; error?: string }> {
     const loc = locationId();
     if (!loc) return { ok: false, error: "Empresa não encontrada" };

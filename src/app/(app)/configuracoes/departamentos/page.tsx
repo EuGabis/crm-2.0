@@ -457,7 +457,7 @@ export default function DepartamentosPage() {
                     <div className="flex gap-1">
                       <button
                         onClick={() => setEditingId(m.userId)}
-                        title="Editar função e acessos"
+                        title="Editar usuário: conta, senha, função e acessos"
                         className="flex size-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                       >
                         <UserCog className="size-3.5" />
@@ -1245,8 +1245,17 @@ function PermissionsDialog({
   );
   const [permissions, setPermissions] = useState<ModulePermissions>(member.permissions);
   const [saving, setSaving] = useState(false);
+  const [nome, setNome] = useState(member.name);
+  const [email, setEmail] = useState(member.email);
+  const [senha, setSenha] = useState("");
+  const [enviandoLink, setEnviandoLink] = useState(false);
+  const [linkManual, setLinkManual] = useState<string | null>(null);
 
   useEffect(() => {
+    setNome(member.name);
+    setEmail(member.email);
+    setSenha("");
+    setLinkManual(null);
     setRole(member.role);
     setOnlyAssigned(member.onlyAssigned);
     setDepartmentId(member.departmentId ?? SEM_DEPARTAMENTO);
@@ -1276,8 +1285,36 @@ function PermissionsDialog({
       return next;
     });
 
+  const enviarLink = async () => {
+    setEnviandoLink(true);
+    const r = await teamActions.sendPasswordReset(member.userId);
+    setEnviandoLink(false);
+    if (!r.ok) return toast.error(r.error ?? "Não foi possível enviar o link");
+    if (r.warning) {
+      toast.warning(r.warning, { duration: 9000 });
+      setLinkManual(r.link ?? null);
+    } else toast.success(`Link de redefinição enviado para ${member.email}`);
+  };
+
   const save = async () => {
+    const conta: { name?: string; email?: string; password?: string } = {};
+    if (nome.trim() !== member.name) conta.name = nome.trim();
+    if (email.trim().toLowerCase() !== member.email.toLowerCase()) conta.email = email.trim();
+    if (senha) conta.password = senha;
+    if (conta.password && conta.password.length < 8) {
+      toast.error("A senha precisa ter pelo menos 8 caracteres");
+      return;
+    }
     setSaving(true);
+    if (Object.keys(conta).length > 0) {
+      const r = await teamActions.updateAccount(member.userId, conta);
+      if (!r.ok) {
+        setSaving(false);
+        toast.error(r.error ?? "Não foi possível salvar a conta");
+        return;
+      }
+      setSenha("");
+    }
     const res = await teamActions.updateMember(member.userId, {
       role,
       onlyAssigned: role === "admin" ? false : onlyAssigned,
@@ -1302,6 +1339,64 @@ function PermissionsDialog({
           <DialogTitle>{member.name}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
+          <div className="space-y-3 rounded-lg border border-slate-200 p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Conta</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Nome</Label>
+                <Input value={nome} onChange={(e) => setNome(e.target.value)} className="h-8 text-xs" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">E-mail de acesso</Label>
+                <Input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="h-8 text-xs"
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Nova senha</Label>
+              <Input
+                type="password"
+                autoComplete="new-password"
+                value={senha}
+                onChange={(e) => setSenha(e.target.value)}
+                placeholder="Deixe em branco para manter a atual"
+                className="h-8 text-xs"
+              />
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] leading-tight text-slate-400">
+                Ou mande um link para a pessoa escolher a senha dela.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 shrink-0 text-[11px]"
+                onClick={enviarLink}
+                disabled={enviandoLink}
+              >
+                {enviandoLink ? "Enviando..." : "Enviar link de redefinição"}
+              </Button>
+            </div>
+            {linkManual && (
+              <div className="flex gap-2">
+                <Input readOnly value={linkManual} className="h-7 text-[10px]" />
+                <Button
+                  size="sm"
+                  className="h-7 text-[11px]"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(linkManual);
+                    toast.success("Link copiado");
+                  }}
+                >
+                  Copiar
+                </Button>
+              </div>
+            )}
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label className="text-xs">Função</Label>
