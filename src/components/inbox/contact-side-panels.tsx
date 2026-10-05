@@ -28,7 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { appointmentActions, useDbAppointments } from "@/lib/data/repos/db/appointments";
+import { anoPlausivel, appointmentActions, useDbAppointments } from "@/lib/data/repos/db/appointments";
 import { useDbStore, useDbTeam } from "@/lib/data/repos/db/contacts";
 import { useMyMembership } from "@/lib/data/repos/db/team";
 import { taskActions, useContactsModule } from "@/lib/data/repos/db/contacts-module";
@@ -463,6 +463,11 @@ export function AppointmentsPanel({ contactId }: { contactId: string }) {
       return;
     }
     const start = new Date(`${date}T${time}:00`);
+    // ⚠️ Ano de 5 dígitos no campo de data derrubava a tela de Calendários.
+    if (!Number.isFinite(start.getTime()) || !anoPlausivel(start.toISOString())) {
+      toast.error("Data inválida — confira o ano (4 dígitos)");
+      return;
+    }
     setBusy(true);
     const ok = await appointmentActions.add({
       title: t,

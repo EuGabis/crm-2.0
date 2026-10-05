@@ -67,6 +67,18 @@ export function dataLegivel(iso: string | null | undefined): boolean {
   return !!iso && Number.isFinite(Date.parse(iso));
 }
 
+/**
+ * Ano plausível para um compromisso. ⚠️ É a trava no ÚNICO ponto que grava
+ * (`add`/`update`/`move`): o compromisso de ano 20266 de 2026-10-05 veio de um
+ * campo de data com o ano digitado errado, e há três telas que criam
+ * compromisso — validar só numa deixou passar pelas outras.
+ */
+export function anoPlausivel(iso: string | null | undefined): boolean {
+  if (!dataLegivel(iso)) return false;
+  const ano = new Date(iso as string).getUTCFullYear();
+  return ano >= 2000 && ano <= 2100;
+}
+
 export function useDbAppointments() {
   const { appointments: todos, loading, loaded, load } = useApptStore();
   useEffect(() => {
@@ -100,6 +112,7 @@ export const appointmentActions = {
     end: string; // ISO
     calendar?: string;
   }): Promise<boolean> {
+    if (!anoPlausivel(input.start) || !anoPlausivel(input.end)) return false;
     const locationId = useDbStore.getState().locationId;
     if (!locationId) return false;
     const supabase = createClient();
@@ -143,6 +156,8 @@ export const appointmentActions = {
       calendar?: string;
     }
   ): Promise<boolean> {
+    if (input.start !== undefined && !anoPlausivel(input.start)) return false;
+    if (input.end !== undefined && !anoPlausivel(input.end)) return false;
     const patch: Record<string, unknown> = {};
     if (input.title !== undefined) patch.title = input.title;
     if (input.contactId !== undefined) patch.contact_id = input.contactId;
@@ -180,6 +195,7 @@ export const appointmentActions = {
    * volta sozinha se o banco recusar.
    */
   async move(id: string, newStart: string): Promise<boolean> {
+    if (!anoPlausivel(newStart)) return false;
     const s = useApptStore.getState();
     const current = s.appointments.find((a) => a.id === id);
     if (!current) return false;
