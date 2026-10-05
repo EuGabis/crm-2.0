@@ -214,6 +214,26 @@ console.log("── Banco vivo: NÃO pode pedir reenvio ──");
 }
 {
   /*
+   * 4b. [real 2026-10-05] A gravação ESTOURA O TEMPO LIMITE com o banco
+   *     sobrecarregado e, um instante depois, a sonda passa. Antes isso virava
+   *     "problema na mensagem" → 200 → a Meta não reenviava e a mensagem do
+   *     cliente sumia. Erro passageiro pede reenvio mesmo com a sonda ok.
+   */
+  capturar();
+  let vez = 0;
+  const db = fakeDb({
+    whatsapp_channels: () => {
+      vez++;
+      return vez === 1 ? { data: CANAL, error: null } : { data: [], error: null };
+    },
+    messages: () => ({ data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } }),
+  });
+  const r = await processarLote(db, loteComMensagem());
+  soltar();
+  eq("[real] tempo limite na gravação com sonda ok → PEDE reenvio", r, { indisponivel: true });
+}
+{
+  /*
    * 5. Número que não é deste CRM: sem erro e sem linha. NÃO pode pedir reenvio —
    *    seria laço infinito, a Meta reenviando para sempre um número que nunca
    *    vai ser nosso. É a distinção que o `error` descartado apagava.
