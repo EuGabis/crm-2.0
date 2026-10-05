@@ -9457,3 +9457,20 @@ estava cadastrado com ele parou, e a falha não aparece em lugar nenhum do CRM:
 - Crons do banco: migração `202610051200`. Guru, Resend e Supabase Auth: cada
   um no seu painel. Links em e-mail: `lib/config/app-url.ts` ignora o domínio
   aposentado.
+
+## Mensagem recebida grava o horário da META, não o do processamento (2026-10-05)
+
+Depois da queda do webhook (domínio antigo), a Meta reenviou as mensagens
+retidas e o webhook as gravou com `created_at = now()`. O CRM achou que o
+cliente tinha acabado de escrever, liberou texto livre e a Meta recusou com
+**#131047** (mais de 24h): 162 falhas num dia só no número de Vendas.
+
+- O insert agora usa `m.timestamp` da Meta (`lib/whatsapp/horario.ts`, teste
+  `npm run test:horario-wa`). Inválido ou >5 min no futuro → `now()`.
+- Mensagem escrita há mais de 24h não aciona resposta automática, bot nem IA:
+  qualquer texto livre seria recusado.
+- ⚠️ `last_message_at` da conversa continua sendo o horário de CHEGADA, de
+  propósito: a conversa precisa subir na lista para alguém ver a mensagem.
+- ⚠️ As mensagens já gravadas com o horário errado NÃO foram corrigidas: o
+  horário original não foi guardado em lugar nenhum. Para esses contatos, só
+  template.
