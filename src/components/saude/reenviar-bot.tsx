@@ -23,6 +23,7 @@ export function ReenviarBot() {
   const [previa, setPrevia] = useState<Previa | null>(null);
   const [carregando, setCarregando] = useState(false);
   const [enviando, setEnviando] = useState(false);
+  const [progresso, setProgresso] = useState<string | null>(null);
 
   const verPrevia = async () => {
     setCarregando(true);
@@ -47,16 +48,20 @@ export function ReenviarBot() {
     });
     if (!ok) return;
     setEnviando(true);
+    setProgresso("Enviando...");
     let total = 0;
     let erros = 0;
     try {
       // Rodadas de até 40 s até acabar (a rota tem limite de tempo).
-      for (let rodada = 0; rodada < 20; rodada++) {
+      // ⚠️ Teto de 10 rodadas e parada quando uma rodada não avança: nunca
+      // insistir no mesmo conjunto (era o "reenviando infinito").
+      for (let rodada = 1; rodada <= 10; rodada++) {
         const res = await fetch("/api/whatsapp/reenviar-bot", { method: "POST" });
         const j = await res.json();
         if (!res.ok) throw new Error(j.error ?? `HTTP ${res.status}`);
         total += j.enviadas;
         erros += j.totalErros;
+        setProgresso(`Rodada ${rodada}: ${total} enviada(s), ${erros} sem sucesso, ${j.restantes} conversa(s) restantes`);
         if (j.erros?.length) console.warn("[reenvio do bot]", j.erros);
         if (!j.restantes || j.conversas === 0) break;
       }
@@ -116,6 +121,7 @@ export function ReenviarBot() {
             {enviando ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
             {enviando ? "Reenviando..." : "Reenviar agora"}
           </Button>
+          {progresso && <p className="text-[11px] text-slate-500">{progresso}</p>}
         </div>
       )}
     </section>

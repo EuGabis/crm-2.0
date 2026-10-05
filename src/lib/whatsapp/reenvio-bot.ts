@@ -19,6 +19,8 @@ export interface MsgDaConversa {
   automated: boolean | null;
   internal: boolean | null;
   body: string | null;
+  /** Motivo gravado na falha. Começa com MARCA_REENVIO quando o reenvio já foi tentado. */
+  error_detail?: string | null;
   /** created_at em ISO */
   at: string;
 }
@@ -34,6 +36,14 @@ export interface Plano {
 }
 
 const ENTREGUE = new Set(["sent", "delivered", "read"]);
+
+/**
+ * Prefixo gravado em `error_detail` quando o REENVIO também falha. Mensagem com
+ * essa marca não entra de novo: sem isso, a recusa permanente (ex.: a Meta
+ * dizendo que a janela fechou) era retentada a cada rodada e a tela ficava
+ * "reenviando" sem fim (2026-10-05).
+ */
+export const MARCA_REENVIO = "Reenvio falhou";
 /** Folga para o reenvio não cair no limite exato das 24h. */
 const MARGEM_JANELA_MS = 30 * 60_000;
 
@@ -54,7 +64,13 @@ export function planoDeReenvio(msgs: MsgDaConversa[], agoraMs = Date.now()): Pla
   });
   const depois = reais.slice(corte + 1);
   const falhas = depois.filter(
-    (m) => m.direction === "out" && m.status === "failed" && m.automated && (m.type ?? "text") === "text" && (m.body ?? "").trim()
+    (m) =>
+      m.direction === "out" &&
+      m.status === "failed" &&
+      m.automated &&
+      (m.type ?? "text") === "text" &&
+      (m.body ?? "").trim() &&
+      !(m.error_detail ?? "").startsWith(MARCA_REENVIO)
   );
   if (falhas.length === 0) {
     // Falha do bot ANTES do último envio bem-sucedido = a conversa seguiu.
