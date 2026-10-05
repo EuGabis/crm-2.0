@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { create } from "zustand";
 import { createClient } from "@/lib/supabase/client";
 import type { Appointment } from "@/lib/data/types";
@@ -57,13 +57,35 @@ export const useApptStore = create<ApptState>((set, get) => ({
   patch: (appointments) => set({ appointments }),
 }));
 
+/**
+ * Data que o NAVEGADOR consegue ler. O Postgres aceita anos de 5 dígitos
+ * ("20026", erro de digitação no campo de data) e o JavaScript não: um único
+ * compromisso assim fazia o `date-fns` lançar "Invalid time value" e derrubava a
+ * tela de Calendários inteira (2026-10-05).
+ */
+export function dataLegivel(iso: string | null | undefined): boolean {
+  return !!iso && Number.isFinite(Date.parse(iso));
+}
+
 export function useDbAppointments() {
-  const { appointments, loading, loaded, load } = useApptStore();
+  const { appointments: todos, loading, loaded, load } = useApptStore();
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  return { appointments, loading: loading || !loaded };
+  /*
+   * ⚠️ Separados AQUI, no único ponto por onde todas as telas leem (grade,
+   * lista, lembretes, painéis das Conversas). Proteger cada tela teria deixado a
+   * próxima de fora. Os inválidos não somem: voltam em `invalidos` para a tela
+   * dizer qual compromisso precisa ser corrigido.
+   */
+  const { appointments, invalidos } = useMemo(() => {
+    const ok: Appointment[] = [];
+    const ruins: Appointment[] = [];
+    for (const a of todos) (dataLegivel(a.start) && dataLegivel(a.end) ? ok : ruins).push(a);
+    return { appointments: ok, invalidos: ruins };
+  }, [todos]);
+  return { appointments, invalidos, loading: loading || !loaded };
 }
 
 export const appointmentActions = {
