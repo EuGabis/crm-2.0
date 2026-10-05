@@ -9474,3 +9474,19 @@ cliente tinha acabado de escrever, liberou texto livre e a Meta recusou com
 - ⚠️ As mensagens já gravadas com o horário errado NÃO foram corrigidas: o
   horário original não foi guardado em lugar nenhum. Para esses contatos, só
   template.
+
+## Rodízio: quentes com quentes, frios com frios (2026-10-05)
+
+Relato: no quadro "Por atendente" o total do dia saiu igual (11/10/10), mas os
+qualificados não (Alberto 11, Rogério 9, Paulo 4), e o Paulo levou os 4 frios.
+A cota dividia o TOTAL e escolhia o menor total, sem olhar a nota da triagem.
+
+- `escolherPorCarga` ganhou `cargaMesmaTemperatura`: entre quem ainda CABE na
+  cota do total, o lead vai para quem recebeu menos leads da MESMA temperatura
+  hoje; o total só desempata. O teto continua sendo a cota do total.
+- A temperatura sai de `bot_desfechos` pela mesma `temperaturaDe` do selo da
+  caixa — duas regras de "quente" divergiriam.
+- Os TRÊS caminhos que distribuem usam a regra: bot (`distributeOne`),
+  varredura da fila (mapa compartilhado e mutado no laço) e o botão do Relatório.
+- Lead sem nota (Secretaria, que não pontua) segue exatamente como antes.
+- Não compensa o passado: vale a partir do deploy, com a contagem do DIA.
