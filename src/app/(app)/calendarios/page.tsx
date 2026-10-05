@@ -488,6 +488,15 @@ function AppointmentDialog({
       toast.error("O horário de término precisa ser depois do início");
       return;
     }
+    /*
+     * ⚠️ O campo de data do navegador aceita ano de 5 dígitos ("20026") e o
+     * Postgres grava, mas o navegador não consegue ler de volta — um compromisso
+     * assim derrubou a tela de Calendários inteira (2026-10-05).
+     */
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(`${date}T${startTime}:00-03:00`))) {
+      toast.error("Data inválida — confira o ano (4 dígitos)");
+      return;
+    }
     setSaving(true);
     const payload = {
       title: title.trim(),
@@ -736,6 +745,58 @@ function AppointmentDialog({
   );
 }
 
+/**
+ * Compromissos com data que o navegador não consegue ler (ex.: ano "20026").
+ * Antes, UM deles derrubava a tela inteira com "Invalid time value"; agora eles
+ * ficam fora da grade e aparecem aqui, para alguém corrigir ou excluir.
+ */
+function CompromissosComDataInvalida() {
+  const { invalidos } = useDbAppointments();
+  const confirm = useConfirm();
+  if (!invalidos.length) return null;
+  const excluir = async (id: string, title: string) => {
+    if (
+      !(await confirm({
+        title: `Excluir o compromisso "${title}"?`,
+        description: "A data dele está corrompida e ele não aparece na agenda.",
+        confirmLabel: "Excluir",
+        destructive: true,
+      }))
+    )
+      return;
+    (await appointmentActions.remove(id))
+      ? toast.success("Compromisso excluído")
+      : toast.error("Não foi possível excluir");
+  };
+  return (
+    <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+      <p className="text-xs font-semibold text-amber-800">
+        {invalidos.length} compromisso(s) com data inválida não aparecem na agenda
+      </p>
+      <p className="mb-2 text-[11px] text-amber-700">
+        Provavelmente o ano foi digitado errado. Exclua e crie de novo com a data certa.
+      </p>
+      <ul className="space-y-1">
+        {invalidos.map((a) => (
+          <li key={a.id} className="flex items-center justify-between gap-2 text-[11px] text-amber-800">
+            <span className="truncate">
+              <strong>{a.title}</strong> · início {String(a.start)} · fim {String(a.end)}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 shrink-0 text-[11px]"
+              onClick={() => excluir(a.id, a.title)}
+            >
+              Excluir
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /* ---------------------------------- Page --------------------------------- */
 
 export default function CalendariosPage() {
@@ -802,6 +863,7 @@ export default function CalendariosPage() {
                 </Button>
               </div>
             </div>
+            <CompromissosComDataInvalida />
             <WeekCalendar
               ownerFilter={owner}
               onCreateAt={openSlot}
