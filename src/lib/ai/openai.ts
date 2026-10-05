@@ -33,15 +33,20 @@ function apiKey(): string {
  * de falha e eles pedem condutas diferentes, o retorno tem de dizer QUAL.**
  */
 export class ErroOpenAI extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-    /** `insufficient_quota`, `invalid_api_key`, `model_not_found`… */
-    readonly code?: string,
-    readonly tipo?: string
-  ) {
+  // Campos declarados à parte, sem "parameter property" no construtor: o Node
+  // executa TypeScript só removendo tipos, e aquela sintaxe o derrubava —
+  // quebrava todo teste que importasse este arquivo (ex.: npm run test:webhook).
+  readonly status: number;
+  /** `insufficient_quota`, `invalid_api_key`, `model_not_found`… */
+  readonly code?: string;
+  readonly tipo?: string;
+
+  constructor(message: string, status: number, code?: string, tipo?: string) {
     super(message);
     this.name = "ErroOpenAI";
+    this.status = status;
+    this.code = code;
+    this.tipo = tipo;
   }
 }
 

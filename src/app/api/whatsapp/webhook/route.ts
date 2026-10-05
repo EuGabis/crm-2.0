@@ -4,6 +4,7 @@ import { isAdvance } from "@/lib/whatsapp/status-rank";
 import { maybeAutoReply } from "@/lib/whatsapp/auto-reply";
 import { getMediaInfo, downloadMedia } from "@/lib/whatsapp/client";
 import { maybeRunBot } from "@/lib/bot/engine";
+import { foraDaJanela, horarioDaMensagem } from "@/lib/whatsapp/horario";
 import { maybeAutoRespostaAgendada } from "@/lib/bot/enviar-auto-resposta";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -601,7 +602,11 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
     inReplyToLocal = quoted?.id ?? null;
   }
 
+  // Horário em que o CLIENTE escreveu (da Meta), não o do processamento —
+  // ver lib/whatsapp/horario.ts. Reenvio atrasado não pode reabrir a janela de 24h.
+  const escritaEm = horarioDaMensagem(m.timestamp);
   const { error: insErr } = await db.from("messages").insert({
+    created_at: escritaEm.toISOString(),
     location_id: channel.location_id,
     conversation_id: conv.id,
     direction: "in",
@@ -628,6 +633,13 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
    * e-mail, assunto — para no fim ninguém atender. A janela existe para dizer
    * "não estamos agora": ela precisa calar o fluxo E o auto-responder de IA.
    */
+  /*
+   * Mensagem escrita há mais de 24h (chegou atrasada por reenvio da Meta): não
+   * aciona resposta automática, bot nem IA. A Meta recusaria qualquer texto
+   * livre (#131047), e o fio ganharia um balão "falhou" que ninguém pediu.
+   */
+  if (foraDaJanela(escritaEm)) return;
+
   const respondeuAgendado = await maybeAutoRespostaAgendada(db, {
     locationId: channel.location_id,
     channelId: channel.id,
