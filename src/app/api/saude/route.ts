@@ -4,6 +4,7 @@ import { appBaseUrl } from "@/lib/config/app-url";
 import {
   avaliarCron,
   avaliarHttp,
+  classificarFalhaWhatsapp,
   formatarMinutos,
   minutosDesde,
   piorStatus,
@@ -225,6 +226,34 @@ export async function GET() {
 
   // ---------------- WhatsApp ----------------
   const canais: any[] = Array.isArray(d.whatsapp) ? d.whatsapp.filter((w: any) => w.ativo) : [];
+
+  /*
+   * Falhas de 24h separadas por TIPO. #131047 (janela de 24h), #131049 (limite
+   * de marketing) e afins são a Meta aplicando regra — não defeito do CRM.
+   * Contadas junto, elas pintavam de vermelho um número que estava funcionando
+   * e escondiam a falha de verdade (token, conta, cobrança) no meio do ruído.
+   */
+  const desde24h = new Date(agora - 24 * 3600 * 1000).toISOString();
+  const { data: falhasRows } = await supabase
+    .from("messages")
+    .select("channel_id, error_detail")
+    .eq("direction", "out")
+    .eq("status", "failed")
+    .gte("created_at", desde24h)
+    .limit(3000);
+  const falhasPorCanal = new Map<string, { sistema: number; regra: Map<string, number>; ultimoSistema: string | null }>();
+  for (const row of falhasRows ?? []) {
+    if (!row.channel_id) continue;
+    const acc = falhasPorCanal.get(row.channel_id) ?? { sistema: 0, regra: new Map(), ultimoSistema: null };
+    const c = classificarFalhaWhatsapp(row.error_detail);
+    if (c.tipo === "regra") acc.regra.set(c.rotulo, (acc.regra.get(c.rotulo) ?? 0) + 1);
+    else {
+      acc.sistema += 1;
+      acc.ultimoSistema ??= row.error_detail ?? null;
+    }
+    falhasPorCanal.set(row.channel_id, acc);
+  }
+
   const meta = await Promise.all(
     canais.map(async (w) => {
       const inicio = Date.now();
@@ -245,18 +274,35 @@ export async function GET() {
     const statusMeta: Status = m.erro
       ? "falha"
       : qualidade === "RED" ? "falha" : qualidade === "YELLOW" ? "atencao" : "ok";
-    const falhas = Number(w.falhas_24h ?? 0), saidas = Number(w.saidas_24h ?? 0);
-    const taxa = saidas ? falhas / saidas : 0;
+    const saidas = Number(w.saidas_24h ?? 0);
+    const fc = falhasPorCanal.get(w.id);
+    // Sem a leitura detalhada (consulta falhou), cai no total — melhor acusar
+    // a mais do que esconder.
+    const falhasSistema = fc ? fc.sistema : Number(w.falhas_24h ?? 0);
+    const recusas = fc ? [...fc.regra.values()].reduce((a, b) => a + b, 0) : 0;
+    const taxa = saidas ? falhasSistema / saidas : 0;
     const desdeEntrada = minutosDesde(w.ultima_entrada, agora);
     add({
       id: `wa-${w.id}`, grupo: "WhatsApp", nome: `${w.nome}${w.telefone ? ` · ${w.telefone}` : ""}`,
-      status: piorStatus([statusMeta, falhas >= 3 ? porLimite(taxa, 0.1, 0.3) : "ok"]),
+      status: piorStatus([statusMeta, falhasSistema >= 3 ? porLimite(taxa, 0.1, 0.3) : "ok"]),
       resumo: [
         m.erro ? "Meta não respondeu" : `Meta: ${m.info?.status ?? "?"} · qualidade ${qualidade ?? "?"} · ${m.ms} ms`,
-        `${saidas} enviadas / ${falhas} falhas em 24h`,
+        `${saidas} enviadas · ${falhasSistema} falhas do sistema · ${recusas} recusadas por regra (24h)`,
         desdeEntrada === null ? "sem mensagem recebida em 7 d" : `última recebida ${formatarMinutos(desdeEntrada)}`,
       ].join(" · "),
-      detalhe: m.erro ?? (w.ultimo_erro ? `Última falha: ${w.ultimo_erro}` : undefined),
+      detalhe:
+        m.erro ??
+        ([
+          fc?.ultimoSistema ? `Última falha do sistema: ${fc.ultimoSistema}` : null,
+          fc && fc.regra.size
+            ? `Recusadas pela Meta por regra (não é defeito): ${[...fc.regra.entries()]
+                .sort((a, b) => b[1] - a[1])
+                .map(([motivo, n]) => `${n}× ${motivo}`)
+                .join(", ")}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join("\n") || undefined),
     });
   });
 

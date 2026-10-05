@@ -1,6 +1,6 @@
 // Saúde do sistema: limiares e leitura dos crons/HTTP. Regra errada aqui não dá
 // erro — só pinta de verde o que está quebrado.
-import { avaliarCron, avaliarHttp, intervaloDoCron, piorStatus, porLimite } from "../src/lib/saude/avaliar.ts";
+import { avaliarCron, avaliarHttp, classificarFalhaWhatsapp as cl, intervaloDoCron, piorStatus, porLimite } from "../src/lib/saude/avaliar.ts";
 
 let ok = 0, falhas = 0;
 const eq = (nome, a, b) => {
@@ -41,6 +41,14 @@ eq("pior: lista vazia → ok", piorStatus([]), "ok");
 eq("limite: abaixo", porLimite(0, 1, 10), "ok");
 eq("limite: no limiar de atenção", porLimite(1, 1, 10), "atencao");
 eq("limite: no limiar de falha", porLimite(10, 1, 10), "falha");
+
+eq("[real] #131047 janela 24h → regra", cl("Message failed to send because more than 24 hours have passed since the customer last replied to this number. · Re-engagement message · Re-engagement message · #131047").tipo, "regra");
+eq("#131049 limite de marketing → regra", cl("This message was not delivered to maintain healthy ecosystem engagement. · #131049").tipo, "regra");
+eq("#131026 não entregável → regra", cl("Message Undeliverable · #131026").tipo, "regra");
+eq("#131042 cobrança DA CONTA → sistema", cl("Business eligibility payment issue · #131042").tipo, "sistema");
+eq("#190 token → sistema", cl("Error validating access token · #190").tipo, "sistema");
+eq("sem código → sistema (não esconder o desconhecido)", cl("falha estranha").tipo, "sistema");
+eq("vazio → sistema", cl(null).tipo, "sistema");
 
 console.log(`\n${ok} ok · ${falhas} falha(s)`);
 if (falhas) process.exit(1);
