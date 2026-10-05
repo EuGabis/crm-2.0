@@ -5,6 +5,7 @@ import { Activity, AlertTriangle, CheckCircle2, Info, Loader2, RefreshCw, XCircl
 import { Button } from "@/components/ui/button";
 import { piorStatus, type Checagem, type Status } from "@/lib/saude/avaliar";
 import { cn } from "@/lib/utils";
+import { ReenviarBot } from "@/components/saude/reenviar-bot";
 
 const ATUALIZA_MS = 60_000;
 
@@ -133,6 +134,7 @@ export default function SaudePage() {
               </section>
             );
           })}
+          <ReenviarBot />
           <p className="text-[11px] text-slate-400">
             Diagnósticos completos (abrem em JSON):{" "}
             <a href="/api/ai/diagnostico" target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">

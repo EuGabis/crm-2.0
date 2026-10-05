@@ -194,7 +194,7 @@ function matchOption(options: BotOption[], replyId: string | null, text: string)
 }
 
 /** Grava a mensagem de saída do bot no inbox + atualiza a conversa. */
-async function recordOut(ctx: Ctx, body: string, waId: string | null) {
+async function recordOut(ctx: Ctx, body: string, waId: string | null, erro?: string) {
   const nowIso = new Date().toISOString();
   await ctx.db.from("messages").insert({
     location_id: ctx.channel.location_id,
@@ -206,6 +206,9 @@ async function recordOut(ctx: Ctx, body: string, waId: string | null) {
     channel_id: ctx.channel.id,
     wa_message_id: waId,
     status: waId ? "sent" : "failed",
+    // O motivo da falha ia para o lixo (`catch {}`): sem ele, "token inválido"
+    // e "janela de 24h" eram indistinguíveis no balão e na tela de Saúde.
+    ...(!waId && erro ? { error_detail: erro.slice(0, 500) } : {}),
     automated: true,
   });
   await ctx.db
@@ -217,13 +220,15 @@ async function recordOut(ctx: Ctx, body: string, waId: string | null) {
 async function botSend(ctx: Ctx, text: string) {
   const to = toWhatsAppNumber(ctx.contact.phone);
   let waId: string | null = null;
+  let erro: string | undefined;
   try {
     const resp: any = await sendText(ctx.channel.phone_number_id, to, text);
     waId = resp?.messages?.[0]?.id ?? null;
-  } catch {
-    // falha de envio não pode derrubar o bot
+  } catch (e) {
+    // falha de envio não pode derrubar o bot — mas o motivo fica gravado
+    erro = e instanceof Error ? e.message : String(e);
   }
-  await recordOut(ctx, text, waId);
+  await recordOut(ctx, text, waId, erro);
 }
 
 async function botSendList(
