@@ -92,15 +92,33 @@ async function fetchAllConversations(
     if (r.error) r = await q();
     return r;
   };
+  /*
+   * 🔴 **Admin vai pela função `caixa_admin`** (202610051900). Medido no admin
+   * real: 6,2 s por página pela consulta comum — a RLS rodando conversa por
+   * conversa, para um usuário que vê todas de qualquer jeito. A função confere
+   * "é admin?" uma vez e lê pelo índice. Quem não é admin recebe vazio e segue
+   * pela consulta comum; função ainda não aplicada (erro) também.
+   */
+  const loc = useDbStore.getState().locationId;
+  let admin = false;
+  if (loc) {
+    const t = await supabase.rpc("caixa_admin", { p_location: loc, p_limite: 1 });
+    admin = !t.error && (t.data?.length ?? 0) > 0;
+  }
   let cursor: string | null = null;
   for (let voltas = 0; voltas < 200; voltas++) {
     const c = cursor;
     const { data, error } = await pagina(() => {
+      if (admin) {
+        return supabase.rpc("caixa_admin", { p_location: loc, p_antes: c, p_limite: PAGE });
+      }
       let q = supabase
         .from("conversations")
         .select(CONV_SELECT)
         .not("last_message_at", "is", null)
-        .order("last_message_at", { ascending: false })
+        // `nullsFirst: false` casa com o índice (desc NULLS LAST); sem isso o
+        // planner pode trocar o Index Scan por varredura + ordenação.
+        .order("last_message_at", { ascending: false, nullsFirst: false })
         .order("id", { ascending: false })
         .limit(PAGE);
       if (c) q = q.lte("last_message_at", c);
@@ -124,12 +142,14 @@ async function fetchAllConversations(
     cursor = ultimo;
   }
   const nulos = await pagina(() =>
-    supabase
-      .from("conversations")
-      .select(CONV_SELECT)
-      .is("last_message_at", null)
-      .order("id", { ascending: false })
-      .range(0, 4999)
+    admin
+      ? supabase.rpc("caixa_admin", { p_location: loc, p_limite: 5000, p_sem_mensagem: true })
+      : supabase
+          .from("conversations")
+          .select(CONV_SELECT)
+          .is("last_message_at", null)
+          .order("id", { ascending: false })
+          .range(0, 4999)
   );
   if (nulos.error) return { data: null, error: nulos.error };
   for (const r of nulos.data ?? []) if (!vistos.has(r.id)) all.push(r);

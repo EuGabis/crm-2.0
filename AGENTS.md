@@ -9490,3 +9490,19 @@ A cota dividia o TOTAL e escolhia o menor total, sem olhar a nota da triagem.
   varredura da fila (mapa compartilhado e mutado no laço) e o botão do Relatório.
 - Lead sem nota (Secretaria, que não pontua) segue exatamente como antes.
 - Não compensa o passado: vale a partir do deploy, com a contagem do DIA.
+
+## Caixa do ADMIN pela função `caixa_admin` (202610051900)
+
+Medido como o admin real (2026-10-05): a primeira página da caixa levava
+**6,2 s** (64 mil blocos) pela consulta comum — a RLS de `conversations`
+rodando conversa por conversa para quem vê todas de qualquer jeito. No pico,
+passava dos 8 s e a caixa do admin não carregava.
+
+- `public.caixa_admin(location, antes, limite, sem_mensagem)` é `security
+  definer` com `private.is_admin` na PRIMEIRA linha; quem não é admin recebe
+  vazio e o app segue pela consulta comum (vendedores intocados).
+- Mesmo formato da consulta da caixa (`*` + `contact`), então `mapConversation`
+  não muda. Ordem `last_message_at desc NULLS LAST, id desc` = a do índice
+  `conversations_ordem_caixa_idx`; a consulta comum ganhou `nullsFirst: false`
+  pelo mesmo motivo.
+- ⚠️ Ao mexer na função, mantenha o guard no topo.
