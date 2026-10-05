@@ -536,12 +536,29 @@ export function NotificationsPanel() {
     // isto, a mensagem que chega às 10h00m05s só viraria aviso às 10h01 — e,
     // como a pessoa costuma clicar no sino antes disso, parecia que só a ação
     // manual atualizava.
+    /*
+     * ⚠️ **No máximo uma varredura a cada 10 s por aba** (2026-10-05). Antes era
+     * um debounce de 600 ms: cada mensagem de QUALQUER conversa da empresa
+     * disparava a varredura inteira (conversas, agendadas, compromissos,
+     * tarefas, leads, vendas) em CADA aba aberta — a consulta de não lidas
+     * aparecia com 4 s na tela de Saúde, repetida dezenas de vezes por minuto.
+     * Agora a primeira mensagem avisa na hora; as que chegam em rajada caem
+     * numa varredura só, até 10 s depois.
+     */
+    const INTERVALO_MIN_MS = 10_000;
+    let ultimaVarredura = 0;
     let debounce: ReturnType<typeof setTimeout> | null = null;
+    const varrer = () => {
+      ultimaVarredura = Date.now();
+      void run();
+    };
     const bump = () => {
-      if (debounce) clearTimeout(debounce);
-      // Uma mensagem mexe em `messages` E em `conversations`: sem o debounce,
-      // seriam duas varreduras para o mesmo evento.
-      debounce = setTimeout(() => void run(), 600);
+      if (debounce) return; // já há uma varredura marcada
+      const espera = Math.max(600, ultimaVarredura + INTERVALO_MIN_MS - Date.now());
+      debounce = setTimeout(() => {
+        debounce = null;
+        varrer();
+      }, espera);
     };
     const supabase = createClient();
     const channel = supabase
@@ -550,7 +567,7 @@ export function NotificationsPanel() {
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, bump)
       .subscribe();
 
-    const timer = setInterval(() => void run(), REFRESH_MS);
+    const timer = setInterval(varrer, REFRESH_MS);
     return () => {
       alive = false;
       clearInterval(timer);
