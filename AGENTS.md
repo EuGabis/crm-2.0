@@ -9434,3 +9434,26 @@ OpenAI (chave + `ai_logs ':erro'`), Guru (último sync) e variáveis de ambiente
 - Limiares em `lib/saude/avaliar.ts`, com teste (`npm run test:saude`): agenda
   de cron que a função não entende devolve `null` e NÃO acusa atraso — falso
   alarme ensina a ignorar a tela.
+
+## Troca de domínio (2026-10-05): o que quebrou e onde se conserta
+
+`lito-crm.vercel.app` passou a responder **404 DEPLOYMENT_NOT_FOUND**. Tudo que
+estava cadastrado com ele parou, e a falha não aparece em lugar nenhum do CRM:
+
+- **Webhook da Meta** — mora no app **WABA LIVRE** (developers.facebook.com →
+  app → WhatsApp → Configuração). Sintoma: templates parados em `sent`, nunca
+  `delivered`/`read`, e respostas dos clientes sumindo. URL certa:
+  `https://www.litocrm.app/api/whatsapp/webhook`.
+- ⚠️ **Sempre com `www`.** `litocrm.app` responde **308** para o `www`, e a Meta
+  NÃO segue redirecionamento: "não foi possível validar a URL de callback",
+  com o token certo.
+- ⚠️ **`WHATSAPP_TOKEN` ≠ `WHATSAPP_VERIFY_TOKEN`.** O primeiro é a chave de
+  ENVIO (Graph API); o segundo só serve para a verificação do webhook. Trocar o
+  errado derruba todo envio no próximo deploy. O token de envio é gerado em
+  business.facebook.com → Usuários do sistema → **Gabriel** → Gerar token (app
+  WABA LIVRE, expiração Nunca, `whatsapp_business_messaging` +
+  `whatsapp_business_management`). O usuário precisa ter a conta do WhatsApp
+  **Lito CRM** (WABA `1826165525416327`) atribuída, senão o token não envia.
+- Crons do banco: migração `202610051200`. Guru, Resend e Supabase Auth: cada
+  um no seu painel. Links em e-mail: `lib/config/app-url.ts` ignora o domínio
+  aposentado.
