@@ -118,3 +118,32 @@ export function formatarMinutos(min: number): string {
   if (min < 1440) return `há ${(min / 60).toFixed(1).replace(".", ",")} h`;
   return `há ${Math.round(min / 1440)} d`;
 }
+
+/**
+ * Recusas da Meta que NÃO são defeito do sistema: a regra da plataforma ou o
+ * destinatário recusou. Pintar a tela de vermelho por elas esconderia a falha
+ * de verdade (token, conta, cobrança) atrás de ruído do dia a dia.
+ */
+const RECUSA_POR_REGRA: Record<string, string> = {
+  "131047": "janela de 24h fechada (só template)",
+  "131049": "limite de marketing do destinatário",
+  "131026": "número sem WhatsApp / não entregável",
+  "131050": "cliente parou de receber marketing",
+  "130472": "experimento da Meta (não entregue)",
+  "131021": "destinatário é o próprio número",
+};
+
+export type TipoFalhaWa = "regra" | "sistema";
+
+/** Classifica o `error_detail` gravado no balão pelo código `#NNNNNN` da Meta. */
+export function classificarFalhaWhatsapp(detalhe: string | null | undefined): {
+  tipo: TipoFalhaWa;
+  codigo: string | null;
+  rotulo: string;
+} {
+  const codigo = /#(\d{5,6})\b/.exec(detalhe ?? "")?.[1] ?? null;
+  if (codigo && RECUSA_POR_REGRA[codigo]) {
+    return { tipo: "regra", codigo, rotulo: RECUSA_POR_REGRA[codigo] };
+  }
+  return { tipo: "sistema", codigo, rotulo: codigo ? `#${codigo}` : "sem código" };
+}
