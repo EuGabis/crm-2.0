@@ -5,8 +5,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useMyMembership } from "@/lib/data/repos/db/team";
 
-const GROUPS: { title: string; items: { label: string; href?: string }[] }[] = [
+const GROUPS: { title: string; items: { label: string; href?: string; admin?: boolean }[] }[] = [
   {
     title: "Minha Empresa",
     items: [
@@ -35,12 +36,14 @@ const GROUPS: { title: string; items: { label: string; href?: string }[] }[] = [
       { label: "Pontuação de leads", href: "/configuracoes/pontuacao" },
       { label: "Domínios e redirecionamentos", href: "/configuracoes/dominios" },
       { label: "Integrações", href: "/configuracoes/integracoes" },
+      { label: "Saúde do sistema", href: "/configuracoes/saude", admin: true },
     ],
   },
 ];
 
 export default function SettingsLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const { isAdmin } = useMyMembership();
   return (
     <div className="flex min-h-full">
       <aside className="w-60 shrink-0 border-r bg-white p-4">
@@ -56,7 +59,7 @@ export default function SettingsLayout({ children }: { children: ReactNode }) {
               {g.title}
             </p>
             <ul className="space-y-0.5">
-              {g.items.map((item) =>
+              {g.items.filter((item) => !item.admin || isAdmin).map((item) =>
                 item.href ? (
                   <li key={item.label}>
                     <Link

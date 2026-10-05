@@ -9412,3 +9412,25 @@ levava ~3,5 h), e cada destinatário era gravado numa ida sequencial ao banco.
   vários lotes e tiques sobrepostos.
 - O teto real passa a ser a **cota do plano do Resend** (diária/mensal); ao
   estourar, o envio espera em vez de marcar falha.
+
+## Saúde do sistema (Configurações → Saúde, migração 202610051500)
+
+Tela só de admin que junta, numa rodada (`GET /api/saude`, a cada minuto com a
+aba visível): Postgres (latência, conexões, consultas acima de 3 s), crons
+(`cron.job_run_details`), respostas HTTP do `pg_net` (15 min), filas
+(automações, agendadas, transcrição, leads na fila, e-mail), cada canal de
+WhatsApp (estado e qualidade na Meta + falhas de 24h), Resend (domínios),
+OpenAI (chave + `ai_logs ':erro'`), Guru (último sync) e variáveis de ambiente.
+
+- `public.saude_sistema(location)` é `security definer` porque `cron`, `net` e
+  `pg_stat_activity` não são legíveis pelo `authenticated`; a checagem de
+  ADMIN é a primeira linha. Cada bloco tem `exception` próprio — o painel
+  existe para o dia em que algo quebrou, e um bloco falhando não apaga o resto.
+- ⚠️ "sem resposta" (NULL) no `pg_net` NÃO é falha: é o banco desistindo de
+  esperar após 8 s enquanto a rota segue rodando na Vercel (tiques longos).
+- ⚠️ A checagem da OpenAI usa `GET /v1/models`, que responde OK em conta SEM
+  crédito. Por isso ela soma as falhas reais de `ai_logs` e a tela linka o
+  diagnóstico com geração (`/api/ai/diagnostico`).
+- Limiares em `lib/saude/avaliar.ts`, com teste (`npm run test:saude`): agenda
+  de cron que a função não entende devolve `null` e NÃO acusa atraso — falso
+  alarme ensina a ignorar a tela.
