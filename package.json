@@ -12,6 +12,7 @@
     "db:apply": "node scripts/apply-migration.mjs",
     "test:audio": "node scripts/test-audio.mjs",
     "test:saude": "node scripts/test-saude.mjs",
+    "test:reenvio-bot": "node scripts/test-reenvio-bot.mjs",
     "test:horario-wa": "node scripts/test-horario-wa.mjs",
     "test:bot": "node scripts/test-bot-campos.mjs",
     "test:inbox": "node --import ./scripts/lib/alias-register.mjs scripts/test-inbox-store.mjs",
