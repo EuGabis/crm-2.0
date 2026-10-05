@@ -89,6 +89,35 @@ function motivoDe(e: unknown): string {
  * Roda SÓ no caminho de erro — no fluxo normal não custa nada. E é `head`, então
  * o Postgres não devolve linha nenhuma.
  */
+/**
+ * Erros que o próprio Postgres/PostgREST declara PASSAGEIROS: tempo limite,
+ * falta de conexão, conflito de transação. Pedem reenvio SEMPRE.
+ *
+ * 🔴 2026-10-05: uma mensagem do cliente sumiu. A gravação estourou o tempo
+ * limite com o banco sobrecarregado; um instante depois a sonda (consulta leve)
+ * passou, o erro foi classificado como "problema na mensagem" e o webhook
+ * respondeu 200 — a Meta não reenviou e a mensagem se perdeu, com a prévia da
+ * conversa já atualizada ("Olá" na lista, nada no fio).
+ *
+ * ⚠️ Lista de CÓDIGOS SQLSTATE, que são estáveis no Postgres — diferente do
+ * que a decisão de 09-04 recusou (farejar mensagens de erro de PostgREST/undici,
+ * que mudam de versão). Erro sem código continua indo para a sonda.
+ */
+const CODIGOS_PASSAGEIROS = new Set([
+  "57014", // statement timeout
+  "57P01", "57P03", // banco reiniciando / indisponível
+  "40001", "40P01", // conflito de serialização / deadlock
+  "53300", "53400", // conexões esgotadas / limite de configuração
+  "55P03", // lock não obtido
+  "08000", "08001", "08003", "08004", "08006", // conexão
+  "PGRST000", "PGRST001", "PGRST002", "PGRST003", // PostgREST sem conexão / timeout no pool
+]);
+
+export function erroPassageiro(e: unknown): boolean {
+  const code = (e as { code?: unknown } | null)?.code;
+  return typeof code === "string" && CODIGOS_PASSAGEIROS.has(code);
+}
+
 async function bancoRespondendo(db: any): Promise<boolean> {
   try {
     const { error } = await db
@@ -204,7 +233,7 @@ export async function processarLote(db: any, body: any): Promise<{ indisponivel:
            * deste `catch`, e está certo: reenviar daria o mesmo erro para
            * sempre. Banco fora vira 503.
            */
-          if (await bancoRespondendo(db)) {
+          if (!erroPassageiro(e) && (await bancoRespondendo(db))) {
             logFalha("mensagem recebida (o banco respondeu — problema na mensagem)", e);
           } else {
             logFalha("mensagem recebida (banco indisponível — pedindo reenvio)", e);
@@ -224,7 +253,7 @@ export async function processarLote(db: any, body: any): Promise<{ indisponivel:
              * porque a sonda já está aqui: dois critérios diferentes para a
              * mesma pergunta divergiriam na primeira mudança.
              */
-            if (await bancoRespondendo(db)) {
+            if (!erroPassageiro(e) && (await bancoRespondendo(db))) {
               logFalha("evento de status (o banco respondeu — problema no evento)", e);
             } else {
               logFalha("evento de status (banco indisponível — pedindo reenvio)", e);
@@ -292,7 +321,12 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
     .select("id")
     .eq("wa_message_id", waId)
     .maybeSingle();
-  if (erroDup) throw new Error(`não deu para checar duplicata: ${erroDup.message ?? erroDup}`);
+  // ⚠️ Mantém o `code`: é por ele que `erroPassageiro` decide pedir reenvio.
+  if (erroDup) {
+    throw Object.assign(new Error(`não deu para checar duplicata: ${erroDup.message ?? erroDup}`), {
+      code: erroDup.code,
+    });
+  }
   if (dup) return;
 
   const phone: string = m.from ?? "";
