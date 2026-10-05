@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { differenceInCalendarDays, format, isToday, isYesterday } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -469,6 +469,32 @@ export function ConversationList({
   const [foto, setFoto] = useState<string[] | null>(null);
   const visible = ordemAncorada(filtradas, foto);
 
+  /*
+   * 🔴 **Monta 60 linhas e acrescenta ao rolar** (2026-10-05). A lista desenhava
+   * TODAS as conversas visíveis: para o admin, ~12 mil linhas com avatar, selos e
+   * etiquetas — rolar, clicar e trocar de conversa ficavam lentos só para quem
+   * enxerga tudo. Mesmo remédio do funil (`stage-column.tsx`).
+   *
+   * ⚠️ Os contadores, o "selecionar todas" e os filtros continuam sobre a lista
+   * INTEIRA (`visible`); só o desenho é parcial.
+   * ⚠️ O limite não volta a 60 quando a lista muda: voltar jogaria para o topo a
+   * rolagem de quem está lá embaixo a cada mensagem nova.
+   */
+  const LINHAS_POR_VEZ = 60;
+  const [limite, setLimite] = useState(LINHAS_POR_VEZ);
+  const fimRef = useRef<HTMLDivElement>(null);
+  const temMais = visible.length > limite;
+  useEffect(() => {
+    const el = fimRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      (entradas) => entradas[0]?.isIntersecting && setLimite((n) => n + LINHAS_POR_VEZ),
+      { rootMargin: "400px" }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [temMais]);
+
   return (
     <div className="flex h-full w-[300px] shrink-0 flex-col border-r bg-white">
       <div className="flex items-center justify-between border-b px-3 py-2">
@@ -777,7 +803,7 @@ export function ConversationList({
         }}
         className="min-h-0 flex-1 overflow-y-auto [scrollbar-width:thin]"
       >
-        {visible.map((conv) => {
+        {visible.slice(0, limite).map((conv) => {
           // Fallback: se o contato ainda não carregou/não é visível, a linha NÃO
           // pode sumir (senão a conversa não aparece). Mostra "Contato" até vir.
           // Nome/telefone vêm DENORMALIZADOS na conversa (join no load) — sem
@@ -897,6 +923,11 @@ export function ConversationList({
             </div>
           );
         })}
+        {visible.length > limite && (
+          <div ref={fimRef} className="py-3 text-center text-[10px] text-slate-400">
+            carregando mais conversas ({visible.length - limite} restantes)…
+          </div>
+        )}
         {visible.length === 0 && (
           <p className="p-6 text-center text-[11px] leading-relaxed text-slate-400">
             {q

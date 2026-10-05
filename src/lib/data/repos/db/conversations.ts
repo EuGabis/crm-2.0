@@ -61,7 +61,15 @@ export type { ConversationFilter } from "@/lib/data/types";
  * mensagem), e no Postgres NULL vem PRIMEIRO no `desc`. `nullsFirst: false`
  * mantém essas no fim, onde a caixa já as coloca.
  */
-async function fetchAllConversations(supabase: any) {
+async function fetchAllConversations(
+  supabase: any,
+  /**
+   * Chamado a cada página com tudo o que já chegou. É o que deixa a caixa
+   * aparecer na PRIMEIRA página em vez de esperar todas (2026-10-05: o admin vê
+   * 12,7 mil conversas = 13 páginas em série antes de qualquer coisa na tela).
+   */
+  aoChegar?: (parcial: any[]) => void,
+) {
   /*
    * 🔴 Paginação por CURSOR, não por offset (2026-09-23). Com 8 mil conversas,
    * `.range()` fazia cada página refazer Seq Scan + RLS por linha + sort da
@@ -107,6 +115,7 @@ async function fetchAllConversations(supabase: any) {
       all.push(r);
       novos++;
     }
+    aoChegar?.(all);
     if (rows.length < PAGE) break;
     const ultimo = rows[rows.length - 1].last_message_at;
     // Página sem nenhuma linha nova = o cursor não anda (mil conversas com o
@@ -291,8 +300,27 @@ export const useConvStore = create<ConvState>((set, get) => ({
     // cada conversa é carregado sob demanda ao abri-la (loadMessagesFor). A
     // lista usa o preview desnormalizado (last_message_preview), sem depender
     // deste array.
+    /*
+     * 🔴 **A caixa aparece na PRIMEIRA página** (2026-10-05). Antes ela esperava
+     * todas — para o admin, 12,7 mil conversas em 13 páginas em série — e uma
+     * página tardia com erro zerava tudo. Agora cada página já entra na tela e,
+     * se uma página tardia falhar, o que chegou fica (com o erro no console).
+     *
+     * ⚠️ Mescla, não substitui: conversa que o Realtime trouxe enquanto as
+     * páginas chegavam (lead novo) não pode sumir quando a página seguinte entra.
+     */
+    let parcial: any[] = [];
+    const aplicar = (linhas: any[]) => {
+      const vindas = linhas.map(mapConversation);
+      const ids = new Set(vindas.map((c) => c.id));
+      const extras = get().conversations.filter((c) => !ids.has(c.id));
+      set({ conversations: [...extras, ...vindas], loaded: true, loading: false });
+    };
     const [convs, msgs, snips, views] = await Promise.all([
-      fetchAllConversations(supabase),
+      fetchAllConversations(supabase, (linhas) => {
+        parcial = linhas;
+        aplicar(linhas);
+      }),
       supabase
         .from("messages")
         .select("*")
@@ -341,10 +369,11 @@ export const useConvStore = create<ConvState>((set, get) => ({
       }
     }
     const recentes = (msgs.data ?? []).map(mapMessage);
+    // Página tardia falhou: fica o que já chegou, em vez de esvaziar a caixa.
+    aplicar(convs.data ?? parcial);
     set({
       loaded: true,
       loading: false,
-      conversations: (convs.data ?? []).map(mapConversation),
       // Vieram em ordem decrescente (para o teto pegar as mais novas); a UI
       // reordena por conversa, então a ordem do array cru não importa.
       messages: mesclarMensagens(recentes, get().messages),
