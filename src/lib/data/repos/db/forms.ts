@@ -5,6 +5,7 @@ import { create } from "zustand";
 import { createClient } from "@/lib/supabase/client";
 import type { FormField, LeadForm } from "@/lib/data/types";
 import { useDbStore } from "./contacts";
+import { appBaseUrl } from "@/lib/config/app-url";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -35,7 +36,7 @@ function genSlug(): string {
 }
 
 export function embedSnippet(slug: string): string {
-  const base = process.env.NEXT_PUBLIC_APP_URL || "https://www.litocrm.app";
+  const base = appBaseUrl();
   return `<script src="${base.replace(/\/$/, "")}/api/forms/${slug}/embed.js"></script>`;
 }
 

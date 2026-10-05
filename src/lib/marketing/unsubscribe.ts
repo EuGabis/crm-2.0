@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "crypto";
+import { appBaseUrl } from "@/lib/config/app-url";
 
 /**
  * Assinatura dos links de descadastro (unsubscribe).
@@ -27,7 +28,7 @@ export function verifyUnsubscribe(contactId: string, sig: string): boolean {
 }
 
 export function unsubscribeUrl(contactId: string, campaignId?: string): string {
-  const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const base = appBaseUrl();
   const c = encodeURIComponent(contactId);
   const s = signUnsubscribe(contactId);
   const q = campaignId ? `&campaign=${encodeURIComponent(campaignId)}` : "";

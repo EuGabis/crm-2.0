@@ -2,6 +2,7 @@ import { Resend } from "resend";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { renderResetEmail } from "@/lib/email/reset-template";
 import { replyToAddress, senderAddress } from "@/lib/email/sender";
+import { originDaRequisicao } from "@/lib/config/app-url";
 
 /** Caminho da página que troca o token pela sessão e pede a nova senha. */
 export const RESET_PATH = "/login/redefinir";
@@ -63,5 +64,5 @@ export async function enviarRedefinicao(
 }
 
 export function appOrigin(request: Request): string {
-  return process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
+  return originDaRequisicao(request);
 }
