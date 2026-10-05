@@ -16,6 +16,7 @@ import { normalize } from "@/lib/bot/types";
  */
 export { PRESENCE_MS } from "@/lib/presence";
 import { PRESENCE_MS } from "@/lib/presence";
+import { temperaturaDe } from "@/lib/leads/temperatura";
 
 /** Status da oportunidade deduzido do nome da etapa (igual ao pipeline.ts). */
 function statusForStageName(name: string): "open" | "won" | "lost" {
@@ -271,6 +272,83 @@ export async function recebidosNoDiaPorAtendente(
   return cargas;
 }
 
+/** Temperatura de cada lead: "quente" | "frio". Lead sem nota não entra. */
+export type TemperaturaLead = "quente" | "frio";
+/** Leads do dia por temperatura e por atendente. MUTÁVEL, como `cargas`. */
+export type CargasPorTemperatura = Map<TemperaturaLead, Map<string, number>>;
+
+/**
+ * A temperatura de cada conversa, pela nota da triagem do bot (`bot_desfechos`).
+ * Usa o desfecho MAIS RECENTE (conversa reaberta passa pela triagem de novo) e a
+ * mesma regra do selo da caixa (`temperaturaDe`) — duas regras de "quente"
+ * divergiriam e o lead seria quente na tela e frio na distribuição.
+ */
+export async function temperaturasDasConversas(
+  db: any,
+  convIds: string[],
+): Promise<Map<string, TemperaturaLead>> {
+  const out = new Map<string, TemperaturaLead>();
+  for (let i = 0; i < convIds.length; i += 200) {
+    const { data, error } = await db
+      .from("bot_desfechos")
+      .select("conversation_id, pontos, limiar, created_at")
+      .in("conversation_id", convIds.slice(i, i + 200))
+      .order("created_at", { ascending: false });
+    if (error) continue; // sem nota legível: o lead só não entra no equilíbrio por temperatura
+    const vistos = new Set<string>();
+    for (const d of data ?? []) {
+      if (vistos.has(d.conversation_id)) continue;
+      vistos.add(d.conversation_id);
+      const t = temperaturaDe(d);
+      if (t) out.set(d.conversation_id, t);
+    }
+  }
+  return out;
+}
+
+/**
+ * Quantos leads QUENTES e quantos FRIOS cada atendente recebeu hoje, nos números
+ * do setor. Mesmo recorte de `recebidosNoDiaPorAtendente` (atribuídos hoje, sem
+ * plantão), só separado pela nota da triagem.
+ *
+ * Existe por causa do relato de 2026-10-05: o total do dia saiu igual (11/10/10),
+ * mas os QUALIFICADOS não — Alberto 11, Rogério 9, Paulo 4, e o Paulo levou os
+ * 4 frios. A cota dividia o total e não olhava a qualidade.
+ */
+export async function recebidosNoDiaPorTemperatura(
+  db: any,
+  locationId: string,
+  channelIds: string[],
+  pool: string[],
+): Promise<CargasPorTemperatura> {
+  const zerado = () => new Map<string, number>(pool.map((u) => [u, 0]));
+  const out: CargasPorTemperatura = new Map([
+    ["quente", zerado()],
+    ["frio", zerado()],
+  ]);
+  if (!pool.length || !channelIds.length) return out;
+  const { data, error } = await db
+    .from("conversations")
+    .select("id, assigned_to")
+    .eq("location_id", locationId)
+    .in("channel_id", channelIds)
+    .in("assigned_to", pool)
+    .gte("atribuida_em", inicioDoDiaSP())
+    .is("plantao_id", null);
+  if (error || !data?.length) return out;
+  const temps = await temperaturasDasConversas(
+    db,
+    data.map((c: any) => c.id as string),
+  );
+  for (const c of data) {
+    const t = temps.get(c.id);
+    if (!t || !c.assigned_to) continue;
+    const m = out.get(t)!;
+    m.set(c.assigned_to, (m.get(c.assigned_to) ?? 0) + 1);
+  }
+  return out;
+}
+
 /**
  * A COTA de cada pessoa neste momento: quantos leads cabem a cada um do pool.
  *
@@ -360,6 +438,18 @@ export function escolherPorCarga(
    * fatia. A saída é tirá-lo do `lead_pool` do setor — não mexer nesta conta.
    */
   poolParaCota?: string[],
+  /**
+   * Leads de HOJE com a mesma temperatura deste (quente ou frio), por atendente.
+   *
+   * 🔴 Relato de 2026-10-05: o total saiu igual (11/10/10) e os qualificados não
+   * (11/9/4) — o Paulo levou os frios. Com este mapa, entre quem ainda CABE na
+   * cota, o lead vai para quem recebeu menos da mesma temperatura; o total só
+   * desempata. O teto continua sendo a cota do TOTAL: ninguém passa da própria
+   * fatia por estar "atrás" em quentes.
+   *
+   * Ausente (lead sem nota, setor que não pontua): comportamento de antes.
+   */
+  cargaMesmaTemperatura?: Map<string, number>,
 ): string | null {
   if (!disponiveis.length || !poolInteiro.length) return null;
   const carga = (u: string) => cargas.get(u) ?? 0;
@@ -367,8 +457,11 @@ export function escolherPorCarga(
   const cota = cotaPorAtendente(base.map(carga), filaRestante, base.length);
   const cabem = disponiveis.filter((u) => carga(u) < cota);
   if (!cabem.length) return null;
-  const menor = Math.min(...cabem.map(carga));
-  const empatados = cabem.filter((u) => carga(u) === menor);
+  const temp = (u: string) => cargaMesmaTemperatura?.get(u) ?? 0;
+  const menorTemp = Math.min(...cabem.map(temp));
+  const naTemperatura = cabem.filter((u) => temp(u) === menorTemp);
+  const menor = Math.min(...naTemperatura.map(carga));
+  const empatados = naTemperatura.filter((u) => carga(u) === menor);
   if (empatados.length === 1) return empatados[0];
   /*
    * Roda o pool a partir do cursor e pega o primeiro empatado que aparecer —
@@ -719,6 +812,11 @@ export async function distributeOne(
      * férias, por exemplo) autorizar a troca do proprietário sem querer.
      */
     donoAnterior?: string | null;
+    /**
+     * Leads do dia por temperatura, compartilhado pelo laço da varredura (MUTÁVEL,
+     * como `cargas`). Sem ele, é lido do banco.
+     */
+    cargasTemp?: CargasPorTemperatura;
   },
 ): Promise<string | null> {
   const { pool, cursor } = await departmentPool(db, args.locationId, args.deptId);
@@ -894,12 +992,21 @@ export async function distributeOne(
      * ⚠️ O denominador é o POOL (o time), NÃO os elegíveis — passar `elegiveis`
      * aqui foi a causa do despejo de 17/09. Ver `poolParaCota`.
      */
-    user = escolherPorCarga(list, cargas, pool, args.filaRestante ?? 1, cursor, pool);
+    // Temperatura DESTE lead (nota da triagem): equilibra quentes com quentes e
+    // frios com frios. Sem nota, a escolha é a de antes.
+    const tempLead = (await temperaturasDasConversas(db, [args.conversationId])).get(args.conversationId);
+    let cargasTemp = args.cargasTemp;
+    if (tempLead && !cargasTemp) {
+      cargasTemp = await recebidosNoDiaPorTemperatura(db, args.locationId, channelIds, pool);
+    }
+    const mapaTemp = tempLead ? cargasTemp?.get(tempLead) : undefined;
+    user = escolherPorCarga(list, cargas, pool, args.filaRestante ?? 1, cursor, pool, mapaTemp);
     if (!user) return null;
     // O mapa acompanha a atribuição: o próximo lead do MESMO tique já vê a carga
     // nova e vai para outra pessoa. Sem isso, dez leads seguidos iriam todos
     // para quem estava mais leve na primeira leitura.
     cargas.set(user, (cargas.get(user) ?? 0) + 1);
+    if (mapaTemp) mapaTemp.set(user, (mapaTemp.get(user) ?? 0) + 1);
   } else {
     // Comportamento de sempre nos demais setores: a vez do cursor.
     user = list[cursor % list.length];
@@ -1104,6 +1211,14 @@ export async function distributeDepartment(
   const cargas = porCota
     ? await recebidosNoDiaPorAtendente(db, locationId, channelIds ?? [], pool)
     : null;
+  // Temperatura de cada lead do clique e a contagem do dia por temperatura —
+  // lidas UMA vez e mutadas a cada entrega, como `cargas`.
+  const tempsDosLeads = porCota
+    ? await temperaturasDasConversas(db, convs.slice(0, take).map((c: any) => c.id as string))
+    : new Map<string, TemperaturaLead>();
+  const cargasTemp = porCota && tempsDosLeads.size
+    ? await recebidosNoDiaPorTemperatura(db, locationId, channelIds ?? [], pool)
+    : null;
   let feitas = 0;
   for (let i = 0; i < take; i++) {
     const conv = convs[i];
@@ -1116,11 +1231,14 @@ export async function distributeDepartment(
        * a mesma razão pela qual a varredura passa prontas + retidas.
        */
       // Mesmo denominador do outro caminho: o TIME. Ver `poolParaCota`.
-      user = escolherPorCarga(list, cargas, pool, convs.length - feitas, cursor + feitas, pool);
+      const t = tempsDosLeads.get(conv.id);
+      const mapaTemp = t ? cargasTemp?.get(t) : undefined;
+      user = escolherPorCarga(list, cargas, pool, convs.length - feitas, cursor + feitas, pool, mapaTemp);
       // Ninguém abaixo da cota: o RESTO FICA NA FILA, visível a todos, em vez de
       // ser empurrado para quem já está cheio. "Todos" pode não levar todos.
       if (!user) break;
       cargas.set(user, (cargas.get(user) ?? 0) + 1);
+      if (mapaTemp) mapaTemp.set(user, (mapaTemp.get(user) ?? 0) + 1);
     } else {
       user = list[(cursor + feitas) % list.length];
     }
@@ -1877,6 +1995,8 @@ export async function distribuirFilaDoSetor(
      */
     const { pool: poolDoSetor } = await departmentPool(db, locationId, dep.id);
     const cargas = await recebidosNoDiaPorAtendente(db, locationId, channelIds, poolDoSetor);
+    // Mesma ideia para a temperatura: lida uma vez, compartilhada e mutada.
+    const cargasTemp = await recebidosNoDiaPorTemperatura(db, locationId, channelIds, poolDoSetor);
     const filaTotal = prontas.length + retidas;
     for (const conv of aEntregar) {
       const user = await distributeOne(db, {
@@ -1890,6 +2010,7 @@ export async function distribuirFilaDoSetor(
         // quem deve decidir. Ver `exigirSemDono`.
         exigirSemDono: true,
         cargas,
+        cargasTemp,
         // 🔴 DECRESCE. Com `filaTotal` fixo aqui, cada entrega inflava a cota em
         // 1/pool e a pessoa online nunca batia no teto — o despejo de 10 e 11/09.
         filaRestante: filaTotal - feitasAqui,

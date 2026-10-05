@@ -1522,5 +1522,25 @@ console.log("\nA corrida entre a devolucao e a varredura (18/09)\n");
   eq("[real] bot sem channelIds usa a carga do dia -> vai para quem recebeu menos", user, "bia");
 }
 
+/* 2026-10-05: o total saiu igual (11/10/10) e os QUALIFICADOS nao (11/9/4) — o
+   Paulo levou os frios. Entre quem cabe na cota, decide a mesma temperatura. */
+console.log("escolherPorCarga() - equilibrio por temperatura");
+{
+  const POOL3 = ["paulo", "alberto", "rogerio"];
+  const tot = (p, a, r) => new Map([["paulo", p], ["alberto", a], ["rogerio", r]]);
+  eq("[real] totais 10/11/10, quentes 4/11/9 -> lead quente vai para o paulo",
+    escolherPorCarga(POOL3, tot(10, 11, 10), POOL3, 1, 0, POOL3, tot(4, 11, 9)), "paulo");
+  eq("[real] mesmos totais, frios 4/0/0 -> lead frio NAO vai para o paulo",
+    escolherPorCarga(POOL3, tot(10, 11, 10), POOL3, 1, 0, POOL3, tot(4, 0, 0)) !== "paulo", true);
+  eq("frio: empate em frios entre alberto e rogerio -> desempata pelo total (rogerio, 10 < 11)",
+    escolherPorCarga(POOL3, tot(10, 11, 10), POOL3, 1, 0, POOL3, tot(4, 0, 0)), "rogerio");
+  eq("cota do TOTAL continua sendo teto: paulo atras em quentes mas cheio no total -> nao recebe",
+    escolherPorCarga(POOL3, tot(12, 10, 10), POOL3, 0, 0, POOL3, tot(0, 9, 9)) !== "paulo", true);
+  eq("sem mapa de temperatura (lead sem nota) -> comportamento de antes: menor total",
+    escolherPorCarga(POOL3, tot(8, 2, 5), POOL3, 1, 0, POOL3), "alberto");
+  eq("ausente fora da lista nunca recebe, mesmo sendo o mais atras em quentes",
+    escolherPorCarga(["alberto", "rogerio"], tot(5, 5, 5), POOL3, 3, 0, POOL3, tot(0, 3, 3)) !== "paulo", true);
+}
+
 console.log(`\n${ok} assercoes ok, ${falhas} falha(s)\n`);
 process.exit(falhas ? 1 : 0);
