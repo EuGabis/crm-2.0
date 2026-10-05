@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { appBaseUrl } from "@/lib/config/app-url";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export const dynamic = "force-dynamic";
@@ -16,7 +17,7 @@ function js(body: string, status = 200) {
 
 export async function GET(request: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const base = process.env.NEXT_PUBLIC_APP_URL || "https://www.litocrm.app";
+  const base = appBaseUrl();
 
   let form: any = null;
   try {

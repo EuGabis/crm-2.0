@@ -2,6 +2,7 @@ import { Resend } from "resend";
 import { createClient } from "@/lib/supabase/server";
 import { renderInviteEmail } from "@/lib/email/invite-template";
 import { senderAddress } from "@/lib/email/sender";
+import { originDaRequisicao } from "@/lib/config/app-url";
 
 interface InviteBody {
   email?: string;
@@ -100,7 +101,7 @@ export async function POST(request: Request) {
     });
   }
 
-  const origin = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
+  const origin = originDaRequisicao(request);
   const { subject, html, text } = renderInviteEmail({
     inviterName: profile?.name ?? "Um administrador",
     companyName: location?.name ?? "sua empresa",
