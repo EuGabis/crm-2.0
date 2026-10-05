@@ -9412,3 +9412,48 @@ levava ~3,5 h), e cada destinatário era gravado numa ida sequencial ao banco.
   vários lotes e tiques sobrepostos.
 - O teto real passa a ser a **cota do plano do Resend** (diária/mensal); ao
   estourar, o envio espera em vez de marcar falha.
+
+## Saúde do sistema (Configurações → Saúde, migração 202610051500)
+
+Tela só de admin que junta, numa rodada (`GET /api/saude`, a cada minuto com a
+aba visível): Postgres (latência, conexões, consultas acima de 3 s), crons
+(`cron.job_run_details`), respostas HTTP do `pg_net` (15 min), filas
+(automações, agendadas, transcrição, leads na fila, e-mail), cada canal de
+WhatsApp (estado e qualidade na Meta + falhas de 24h), Resend (domínios),
+OpenAI (chave + `ai_logs ':erro'`), Guru (último sync) e variáveis de ambiente.
+
+- `public.saude_sistema(location)` é `security definer` porque `cron`, `net` e
+  `pg_stat_activity` não são legíveis pelo `authenticated`; a checagem de
+  ADMIN é a primeira linha. Cada bloco tem `exception` próprio — o painel
+  existe para o dia em que algo quebrou, e um bloco falhando não apaga o resto.
+- ⚠️ "sem resposta" (NULL) no `pg_net` NÃO é falha: é o banco desistindo de
+  esperar após 8 s enquanto a rota segue rodando na Vercel (tiques longos).
+- ⚠️ A checagem da OpenAI usa `GET /v1/models`, que responde OK em conta SEM
+  crédito. Por isso ela soma as falhas reais de `ai_logs` e a tela linka o
+  diagnóstico com geração (`/api/ai/diagnostico`).
+- Limiares em `lib/saude/avaliar.ts`, com teste (`npm run test:saude`): agenda
+  de cron que a função não entende devolve `null` e NÃO acusa atraso — falso
+  alarme ensina a ignorar a tela.
+
+## Troca de domínio (2026-10-05): o que quebrou e onde se conserta
+
+`lito-crm.vercel.app` passou a responder **404 DEPLOYMENT_NOT_FOUND**. Tudo que
+estava cadastrado com ele parou, e a falha não aparece em lugar nenhum do CRM:
+
+- **Webhook da Meta** — mora no app **WABA LIVRE** (developers.facebook.com →
+  app → WhatsApp → Configuração). Sintoma: templates parados em `sent`, nunca
+  `delivered`/`read`, e respostas dos clientes sumindo. URL certa:
+  `https://www.litocrm.app/api/whatsapp/webhook`.
+- ⚠️ **Sempre com `www`.** `litocrm.app` responde **308** para o `www`, e a Meta
+  NÃO segue redirecionamento: "não foi possível validar a URL de callback",
+  com o token certo.
+- ⚠️ **`WHATSAPP_TOKEN` ≠ `WHATSAPP_VERIFY_TOKEN`.** O primeiro é a chave de
+  ENVIO (Graph API); o segundo só serve para a verificação do webhook. Trocar o
+  errado derruba todo envio no próximo deploy. O token de envio é gerado em
+  business.facebook.com → Usuários do sistema → **Gabriel** → Gerar token (app
+  WABA LIVRE, expiração Nunca, `whatsapp_business_messaging` +
+  `whatsapp_business_management`). O usuário precisa ter a conta do WhatsApp
+  **Lito CRM** (WABA `1826165525416327`) atribuída, senão o token não envia.
+- Crons do banco: migração `202610051200`. Guru, Resend e Supabase Auth: cada
+  um no seu painel. Links em e-mail: `lib/config/app-url.ts` ignora o domínio
+  aposentado.

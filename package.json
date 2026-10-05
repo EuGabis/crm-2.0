@@ -11,6 +11,7 @@
     "db:audit": "node scripts/check-migrations.mjs --todos",
     "db:apply": "node scripts/apply-migration.mjs",
     "test:audio": "node scripts/test-audio.mjs",
+    "test:saude": "node scripts/test-saude.mjs",
     "test:bot": "node scripts/test-bot-campos.mjs",
     "test:inbox": "node --import ./scripts/lib/alias-register.mjs scripts/test-inbox-store.mjs",
     "test:frio": "node --import ./scripts/lib/alias-register.mjs scripts/test-lead-frio.mjs",
