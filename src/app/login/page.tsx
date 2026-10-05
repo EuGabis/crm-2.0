@@ -88,6 +88,35 @@ export default function LoginPage() {
     }
   }, []);
 
+  const [enviandoLink, setEnviandoLink] = useState(false);
+
+  /**
+   * Pede o link de redefinição à rota própria (`/api/auth/recuperar`), que envia
+   * pelo Resend — não pelo SMTP embutido do Supabase, que não entrega.
+   */
+  const esqueci = async () => {
+    const email = form.email.trim();
+    if (!email.includes("@")) {
+      toast.error("Digite seu e-mail no campo acima e clique de novo");
+      return;
+    }
+    setEnviandoLink(true);
+    try {
+      const res = await fetch("/api/auth/recuperar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) toast.error(j.error ?? "Não foi possível enviar o link");
+      else toast.success(j.message ?? "Link enviado", { duration: 8000 });
+    } catch {
+      toast.error("Falha de conexão ao pedir o link");
+    } finally {
+      setEnviandoLink(false);
+    }
+  };
+
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -295,7 +324,19 @@ export default function LoginPage() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-slate-700">Senha</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold text-slate-700">Senha</Label>
+                    {mode === "login" && (
+                      <button
+                        type="button"
+                        onClick={esqueci}
+                        disabled={enviandoLink}
+                        className="text-[11px] font-semibold text-indigo-600 hover:underline disabled:opacity-50"
+                      >
+                        {enviandoLink ? "Enviando..." : "Esqueci minha senha"}
+                      </button>
+                    )}
+                  </div>
                   <Input
                     type="password"
                     value={form.password}
