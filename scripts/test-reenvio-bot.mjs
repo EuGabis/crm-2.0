@@ -30,5 +30,9 @@ eq("sem mensagem do cliente → janela fechada",
   p([m({ status: "failed", at: t(10) })], agora).pulo, "janela fechada");
 eq("falha com texto vazio → ignora",
   p([m({ direction: "in", at: t(60) }), m({ status: "failed", at: t(59), body: "  " })], agora).pulo, "nada para reenviar");
+eq("reenvio já tentado e recusado → não tenta de novo (o laço infinito)",
+  p([m({ direction: "in", at: t(60) }), m({ status: "failed", at: t(59), body: "Q", error_detail: "Reenvio falhou: #131047" })], agora).pulo, "nada para reenviar");
+eq("falha original (sem marca) → ainda reenvia",
+  ids(p([m({ direction: "in", at: t(60) }), m({ status: "failed", at: t(59), body: "Q", error_detail: "Error validating access token · #190" })], agora)), ["Q"]);
 console.log(`\n${ok} ok · ${falhas} falha(s)`);
 if (falhas) process.exit(1);

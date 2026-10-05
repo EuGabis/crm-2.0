@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendText } from "@/lib/whatsapp/client";
 import { toWhatsAppNumber } from "@/lib/whatsapp/phone";
-import { planoDeReenvio, type MsgDaConversa, type MotivoPulo } from "@/lib/whatsapp/reenvio-bot";
+import { MARCA_REENVIO, planoDeReenvio, type MsgDaConversa, type MotivoPulo } from "@/lib/whatsapp/reenvio-bot";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -58,15 +58,27 @@ async function montarPlano(db: any, location: string, horas: number) {
   // Fio de cada conversa (desde 26h antes do período: precisa da última entrada).
   const janelaDesde = new Date(agora - (horas + 26) * 3600_000).toISOString();
   const porConversa = new Map<string, MsgDaConversa[]>();
-  for (let i = 0; i < convIds.length; i += 100) {
-    const lote = convIds.slice(i, i + 100);
+  /*
+   * ⚠️ Lotes PEQUENOS e corte detectado. O PostgREST devolve no máximo 1000
+   * linhas SEM AVISAR; com 100 conversas por lote, um fio podia vir sem a
+   * resposta bem-sucedida de um atendente — e a regra reenviaria a pergunta
+   * antiga numa conversa que já tinha seguido. Lote de 5 e, se mesmo assim
+   * bater no teto, recusa o plano em vez de agir com o fio incompleto.
+   */
+  const LOTE = 5;
+  for (let i = 0; i < convIds.length; i += LOTE) {
+    const lote = convIds.slice(i, i + LOTE);
     const { data, error: e2 } = await db
       .from("messages")
-      .select("id, conversation_id, direction, status, type, automated, internal, body, created_at")
+      .select("id, conversation_id, direction, status, type, automated, internal, body, error_detail, created_at")
       .in("conversation_id", lote)
       .gte("created_at", janelaDesde)
-      .limit(10000);
+      .order("created_at", { ascending: true })
+      .limit(1000);
     if (e2) throw new Error(`fio: ${e2.message}`);
+    if ((data?.length ?? 0) >= 1000) {
+      throw new Error("fio de conversa grande demais para conferir com segurança — reenvio não feito");
+    }
     for (const m of data ?? []) {
       const arr = porConversa.get(m.conversation_id) ?? [];
       arr.push({ ...m, at: m.created_at });
@@ -153,33 +165,62 @@ export async function POST(request: Request) {
 
   let enviadas = 0, conversasFeitas = 0;
   const erros: string[] = [];
+  /**
+   * Marca a mensagem como "reenvio já tentado". ⚠️ Sem a marca, a recusa
+   * permanente era retentada a cada rodada — o "reenviando infinito".
+   */
+  const marcar = (ids: string[], motivo: string) =>
+    db
+      .from("messages")
+      .update({ error_detail: `${MARCA_REENVIO}: ${motivo}`.slice(0, 500) })
+      .in("id", ids);
+
   for (const item of plano.itens) {
     if (Date.now() - inicio > ORCAMENTO_MS) break;
+    conversasFeitas++;
     const canal = item.canal ? canalPorId.get(item.canal) : null;
     const to = toWhatsAppNumber(item.telefone);
     if (!canal?.active || !to) {
-      erros.push(`${item.contato}: ${!to ? "sem telefone" : "canal inativo"}`);
+      const motivo = !to ? "contato sem telefone" : "canal inativo";
+      await marcar(item.mensagens.map((m) => m.id), motivo);
+      erros.push(`${item.contato}: ${motivo}`);
       continue;
     }
     // Em ORDEM: se uma falha, as seguintes da mesma conversa não vão —
     // pergunta 2 sem a pergunta 1 não faz sentido para o cliente.
-    for (const m of item.mensagens) {
+    for (let i = 0; i < item.mensagens.length; i++) {
+      const m = item.mensagens[i];
+      let resp: any;
       try {
-        const resp: any = await sendText(canal.phone_number_id, to, m.body);
-        const waId = resp?.messages?.[0]?.id ?? null;
-        await db
-          .from("messages")
-          .update({ status: "sent", wa_message_id: waId, error_detail: null })
-          .eq("id", m.id);
-        enviadas++;
+        resp = await sendText(canal.phone_number_id, to, m.body);
       } catch (e) {
         const motivo = e instanceof Error ? e.message : String(e);
-        await db.from("messages").update({ error_detail: `Reenvio falhou: ${motivo}` }).eq("id", m.id);
+        // ⚠️ Marca ESTA e as SEGUINTES: marcando só esta, a próxima rodada
+        // mandaria a pergunta 2 sem a 1.
+        await marcar(item.mensagens.slice(i).map((x) => x.id), motivo);
         erros.push(`${item.contato}: ${motivo.slice(0, 120)}`);
         break;
       }
+      const waId = resp?.messages?.[0]?.id ?? null;
+      const { error: upErr } = await db
+        .from("messages")
+        .update({ status: "sent", wa_message_id: waId, error_detail: null })
+        .eq("id", m.id);
+      enviadas++;
+      if (upErr) {
+        /*
+         * ⚠️ Enviou mas NÃO conseguiu registrar: seguir seria reenviar a mesma
+         * mensagem na próxima rodada e o cliente a receberia em dobro. Para tudo.
+         */
+        return Response.json(
+          {
+            error: `Mensagem enviada, mas não foi possível registrar (${upErr.message}). Reenvio interrompido para não duplicar.`,
+            enviadas,
+          },
+          { status: 500 }
+        );
+      }
     }
-    conversasFeitas++;
   }
 
   return Response.json({
