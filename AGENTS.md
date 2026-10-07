@@ -9506,3 +9506,22 @@ passava dos 8 s e a caixa do admin não carregava.
   `conversations_ordem_caixa_idx`; a consulta comum ganhou `nullsFirst: false`
   pelo mesmo motivo.
 - ⚠️ Ao mexer na função, mantenha o guard no topo.
+
+## "Minhas respostas": respostas rápidas PESSOAIS (202610071000)
+
+Pedido (2026-10-07): com a Meta cobrando por mensagem enviada, o vendedor monta
+a resposta inteira de uma vez com os textos DELE. Botão **"Minhas respostas"**
+ao lado de "Respostas rápidas" no composer, mesma mecânica (inserir, lápis para
+editar, criar dali mesmo).
+
+- Mesma tabela `snippets`, coluna `owner_id`: NULL = da empresa, preenchido =
+  pessoal. **É RLS**: as quatro policies da 0003 ganharam
+  `owner_id is null or owner_id = auth.uid()` — a pessoal de um não chega nem na
+  consulta do outro, e o `with check` impede criar/passar resposta em nome de
+  colega ou "adotar" uma da empresa.
+- `useSnippets()` passou a devolver só as da EMPRESA (a aba Respostas rápidas e o
+  marketing listam o acervo compartilhado); `useMinhasRespostas()` as pessoais.
+- ⚠️ As pessoais não aparecem em aba nenhuma, então **excluir mora no diálogo de
+  edição** (vale para as duas listas).
+- ⚠️ Sem a migração, criar resposta pessoal FALHA de propósito: cair num insert
+  sem dono publicaria para a empresa um texto que a pessoa pediu só para ela.
