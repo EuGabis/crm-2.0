@@ -160,6 +160,12 @@ export interface Snippet {
   id: string;
   name: string;
   content: string;
+  /**
+   * null = resposta rápida da EMPRESA; preenchido = "Minhas respostas" (só o
+   * dono lê — a RLS da 202610071000 garante). Antes da migração a coluna não
+   * existe e tudo chega como da empresa, que é o estado real até ali.
+   */
+  ownerId: string | null;
 }
 
 const mapConversation = (r: any): Conversation => ({
@@ -397,7 +403,12 @@ export const useConvStore = create<ConvState>((set, get) => ({
       // Vieram em ordem decrescente (para o teto pegar as mais novas); a UI
       // reordena por conversa, então a ordem do array cru não importa.
       messages: mesclarMensagens(recentes, get().messages),
-      snippets: (snips.data ?? []).map((r: any) => ({ id: r.id, name: r.name, content: r.content })),
+      snippets: (snips.data ?? []).map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        content: r.content,
+        ownerId: r.owner_id ?? null,
+      })),
       views: (views.data ?? []).map(mapView),
     });
 
@@ -852,13 +863,29 @@ export function useMessagesLoading(conversationId: string | null) {
   return useConvStore((s) => !!conversationId && s.loadingMessagesFor === conversationId);
 }
 
-export function useSnippets() {
+function useTodosSnippets() {
   const { snippets, load } = useConvStore();
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return snippets;
+}
+
+/**
+ * Respostas rápidas da EMPRESA. As pessoais ficam fora de propósito: a aba
+ * "Respostas rápidas" e o marketing listam o acervo compartilhado, e misturar a
+ * pessoal ali faria parecer que ela é de todos.
+ */
+export function useSnippets() {
+  const todos = useTodosSnippets();
+  return useMemo(() => todos.filter((s) => !s.ownerId), [todos]);
+}
+
+/** "Minhas respostas": só as do usuário logado (a RLS já não entrega as dos outros). */
+export function useMinhasRespostas() {
+  const todos = useTodosSnippets();
+  return useMemo(() => todos.filter((s) => !!s.ownerId), [todos]);
 }
 
 export function useRealtimeStatus() {
@@ -1994,18 +2021,34 @@ export const inboxViewActions = {
 };
 
 export const snippetActions = {
-  async add(name: string, content: string): Promise<boolean> {
+  /**
+   * `pessoal: true` grava com `owner_id` = quem está logado ("Minhas respostas").
+   * ⚠️ Sem a migração 202610071000 a coluna não existe e o insert FALHA — de
+   * propósito: cair num insert sem dono publicaria para a empresa inteira um
+   * texto que a pessoa pediu para ser só dela.
+   */
+  async add(name: string, content: string, opts: { pessoal?: boolean } = {}): Promise<boolean> {
     const location = loc();
     if (!location) return false;
+    let ownerId: string | null = null;
+    if (opts.pessoal) {
+      ownerId = await autor();
+      if (!ownerId) return false;
+    }
     const supabase = createClient();
     const { data, error } = await supabase
       .from("snippets")
-      .insert({ location_id: location, name, content })
+      .insert({ location_id: location, name, content, ...(ownerId ? { owner_id: ownerId } : {}) })
       .select()
       .single();
     if (error || !data) return false;
     const s = useConvStore.getState();
-    s.patch({ snippets: [...s.snippets, { id: data.id, name: data.name, content: data.content }] });
+    s.patch({
+      snippets: [
+        ...s.snippets,
+        { id: data.id, name: data.name, content: data.content, ownerId: data.owner_id ?? null },
+      ],
+    });
     return true;
   },
   /**
@@ -2029,7 +2072,7 @@ export const snippetActions = {
     if (!data?.length) return false;
     const s = useConvStore.getState();
     s.patch({
-      snippets: s.snippets.map((x) => (x.id === id ? { id, name, content } : x)),
+      snippets: s.snippets.map((x) => (x.id === id ? { ...x, name, content } : x)),
     });
     return true;
   },

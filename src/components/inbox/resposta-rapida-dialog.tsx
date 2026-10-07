@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { snippetActions } from "@/lib/data/repos/db/conversations";
+import { useConfirm } from "@/components/shared/confirm";
 
 /**
  * Criar ou editar uma resposta rápida, sem sair da conversa.
@@ -33,15 +34,43 @@ import { snippetActions } from "@/lib/data/repos/db/conversations";
  */
 export function RespostaRapidaDialog({
   item,
+  pessoal = false,
   onOpenChange,
 }: {
   item: { id: string; name: string; content: string };
+  /** "Minhas respostas": grava com dono e só quem criou vê. */
+  pessoal?: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const [name, setName] = useState(item.name);
   const [content, setContent] = useState(item.content);
   const [saving, setSaving] = useState(false);
   const editando = !!item.id;
+  const confirm = useConfirm();
+
+  // Excluir mora aqui porque as pessoais NÃO aparecem na aba "Respostas
+  // rápidas" (que lista o acervo da empresa) — sem este botão não haveria onde
+  // apagar uma resposta pessoal.
+  const excluir = async () => {
+    if (
+      !(await confirm({
+        title: `Excluir "${item.name}"?`,
+        description: pessoal ? "Ela some só da sua lista." : "Ela some para toda a equipe.",
+        confirmLabel: "Excluir",
+        destructive: true,
+      }))
+    )
+      return;
+    setSaving(true);
+    const ok = await snippetActions.remove(item.id);
+    setSaving(false);
+    if (!ok) {
+      toast.error("Não foi possível excluir");
+      return;
+    }
+    toast.success("Resposta excluída");
+    onOpenChange(false);
+  };
 
   const salvar = async () => {
     const n = name.trim();
@@ -53,17 +82,19 @@ export function RespostaRapidaDialog({
     setSaving(true);
     const ok = editando
       ? await snippetActions.update(item.id, n, c)
-      : await snippetActions.add(n, c);
+      : await snippetActions.add(n, c, { pessoal });
     setSaving(false);
     if (!ok) {
       toast.error(
         editando
-          ? "Não foi possível salvar — só administradores editam respostas rápidas"
-          : "Não foi possível criar a resposta rápida"
+          ? "Não foi possível salvar a alteração"
+          : pessoal
+            ? "Não foi possível criar — peça ao administrador para aplicar a atualização de \"Minhas respostas\""
+            : "Não foi possível criar a resposta rápida"
       );
       return;
     }
-    toast.success(editando ? "Resposta rápida atualizada" : `"${n}" criada`);
+    toast.success(editando ? "Resposta atualizada" : `"${n}" criada`);
     onOpenChange(false);
   };
 
@@ -71,8 +102,21 @@ export function RespostaRapidaDialog({
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{editando ? "Editar resposta rápida" : "Nova resposta rápida"}</DialogTitle>
+          <DialogTitle>
+            {pessoal
+              ? editando
+                ? "Editar minha resposta"
+                : "Nova resposta pessoal"
+              : editando
+                ? "Editar resposta rápida"
+                : "Nova resposta rápida"}
+          </DialogTitle>
         </DialogHeader>
+        {pessoal && (
+          <p className="-mt-2 text-xs text-slate-500">
+            Só você vê esta resposta. Ela não aparece para o resto da equipe.
+          </p>
+        )}
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="rr-nome" className="text-xs">
@@ -103,6 +147,17 @@ export function RespostaRapidaDialog({
           </div>
         </div>
         <DialogFooter>
+          {editando && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mr-auto h-8 text-xs text-red-600 hover:bg-red-50"
+              onClick={() => void excluir()}
+              disabled={saving}
+            >
+              Excluir
+            </Button>
+          )}
           <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>

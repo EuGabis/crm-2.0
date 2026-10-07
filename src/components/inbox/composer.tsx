@@ -22,6 +22,7 @@ import {
   Trash2,
   X,
   Zap,
+  UserRound,
 } from "lucide-react";
 import { toast } from "sonner";
 import { fecharFluxoOgg, inspecionarAudio, resumoDaInspecao } from "@/lib/whatsapp/audio";
@@ -50,8 +51,10 @@ import {
   useMessages,
   useReplyStore,
   useReplyTarget,
+  useMinhasRespostas,
   useSnippets,
   useTemplateIntentStore,
+  type Snippet,
 } from "@/lib/data/repos/db/conversations";
 import { whatsappActions } from "@/lib/data/repos/db/whatsapp";
 import { TemplatePicker } from "@/components/whatsapp/template-picker";
@@ -304,10 +307,18 @@ export function Composer({ conversationId }: { conversationId: string }) {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cancelRef = useRef(false);
   const snippets = useSnippets();
-  /** Resposta rápida em edição. `id` vazio = criando. `null` = diálogo fechado. */
-  const [editando, setEditando] = useState<{ id: string; name: string; content: string } | null>(
-    null
-  );
+  const minhasRespostas = useMinhasRespostas();
+  /**
+   * Resposta em edição. `id` vazio = criando. `null` = diálogo fechado.
+   * `pessoal` decide em qual das duas listas ela nasce.
+   */
+  const [editando, setEditando] = useState<{
+    id: string;
+    name: string;
+    content: string;
+    pessoal: boolean;
+  } | null>(null);
+  const inserirResposta = (texto: string) => setBody((b) => (b ? `${b} ${texto}` : texto));
   const conversation = useConversation(conversationId);
   const contactId = conversation?.contactId ?? null;
   const { contact, refresh: recarregarContato } = useDbContact(contactId);
@@ -1390,65 +1401,40 @@ export function Composer({ conversationId }: { conversationId: string }) {
             atendimento, e "Nova resposta rápida" cria dali mesmo. Antes, criar
             exigia sair da conversa e ir na aba Trechos, e editar não existia.
           */}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <button
-                  title="Respostas rápidas"
-                  className="ml-1 flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-indigo-600 hover:bg-indigo-50"
-                />
-              }
-            >
-              <Zap className="size-3.5" /> Respostas rápidas
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-72">
-              <DropdownMenuLabel className="text-[10px] text-slate-400">
-                Clique para inserir no texto
-              </DropdownMenuLabel>
-              {snippets.length === 0 && (
-                <DropdownMenuItem disabled className="text-xs text-slate-400">
-                  Nenhuma resposta rápida ainda
-                </DropdownMenuItem>
-              )}
-              {snippets.map((s) => (
-                <div key={s.id} className="flex items-start gap-1 px-1">
-                  <DropdownMenuItem
-                    className="min-w-0 flex-1 flex-col items-start text-xs"
-                    onClick={() => setBody((b) => (b ? `${b} ${s.content}` : s.content))}
-                  >
-                    <span className="font-semibold">{s.name}</span>
-                    <span className="line-clamp-2 text-[10px] text-slate-400">{s.content}</span>
-                  </DropdownMenuItem>
-                  {/*
-                    ⚠️ Fora do DropdownMenuItem, e é por isso que o botão vive num
-                    <div> irmão: clicar dentro do item fecharia o menu E inseriria
-                    o texto no campo, que é o oposto de "editar".
-                  */}
-                  <button
-                    type="button"
-                    title={`Editar "${s.name}"`}
-                    onClick={() => setEditando(s)}
-                    className="mt-1 flex size-6 shrink-0 items-center justify-center rounded text-slate-300 hover:bg-slate-100 hover:text-slate-600"
-                  >
-                    <Pencil className="size-3" />
-                  </button>
-                </div>
-              ))}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="text-xs font-medium text-indigo-600"
-                onClick={() => setEditando({ id: "", name: "", content: body.trim() })}
-              >
-                <Plus className="size-3.5" /> Nova resposta rápida
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <MenuDeRespostas
+            titulo="Respostas rápidas"
+            icone={<Zap className="size-3.5" />}
+            itens={snippets}
+            vazio="Nenhuma resposta rápida ainda"
+            novaLabel="Nova resposta rápida"
+            onInserir={inserirResposta}
+            onEditar={(s) => setEditando({ ...s, pessoal: false })}
+            onNova={() => setEditando({ id: "", name: "", content: body.trim(), pessoal: false })}
+          />
+          {/*
+            "Minhas respostas": a mesma mecânica, mas só de quem escreveu (RLS da
+            202610071000). Pedido de quando a Meta passou a cobrar por mensagem:
+            o vendedor monta a resposta inteira com os textos DELE, numa só
+            mensagem, sem encher a lista compartilhada da equipe.
+          */}
+          <MenuDeRespostas
+            titulo="Minhas respostas"
+            icone={<UserRound className="size-3.5" />}
+            itens={minhasRespostas}
+            vazio="Você ainda não salvou nenhuma"
+            dica="Só você vê estas respostas"
+            novaLabel="Nova resposta pessoal"
+            onInserir={inserirResposta}
+            onEditar={(s) => setEditando({ ...s, pessoal: true })}
+            onNova={() => setEditando({ id: "", name: "", content: body.trim(), pessoal: true })}
+          />
           {/* Montado só quando há item, e com `key`: é o que garante campos
               limpos a cada abertura sem precisar de efeito. */}
           {editando && (
             <RespostaRapidaDialog
               key={editando.id || "novo"}
               item={editando}
+              pessoal={editando.pessoal}
               onOpenChange={(o) => !o && setEditando(null)}
             />
           )}
@@ -1487,5 +1473,82 @@ export function Composer({ conversationId }: { conversationId: string }) {
         }}
       />
     </div>
+  );
+}
+
+/**
+ * Um menu de respostas (da empresa ou pessoais) — um componente só para as duas
+ * listas não divergirem: inserir, editar pelo lápis e criar dali mesmo.
+ */
+function MenuDeRespostas({
+  titulo,
+  icone,
+  itens,
+  vazio,
+  dica = "Clique para inserir no texto",
+  novaLabel,
+  onInserir,
+  onEditar,
+  onNova,
+}: {
+  titulo: string;
+  icone: React.ReactNode;
+  itens: Snippet[];
+  vazio: string;
+  dica?: string;
+  novaLabel: string;
+  onInserir: (texto: string) => void;
+  onEditar: (s: { id: string; name: string; content: string }) => void;
+  onNova: () => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <button
+            title={titulo}
+            className="ml-1 flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-indigo-600 hover:bg-indigo-50"
+          />
+        }
+      >
+        {icone} {titulo}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-[70vh] w-72 overflow-y-auto">
+        <DropdownMenuLabel className="text-[10px] text-slate-400">{dica}</DropdownMenuLabel>
+        {itens.length === 0 && (
+          <DropdownMenuItem disabled className="text-xs text-slate-400">
+            {vazio}
+          </DropdownMenuItem>
+        )}
+        {itens.map((s) => (
+          <div key={s.id} className="flex items-start gap-1 px-1">
+            <DropdownMenuItem
+              className="min-w-0 flex-1 flex-col items-start text-xs"
+              onClick={() => onInserir(s.content)}
+            >
+              <span className="font-semibold">{s.name}</span>
+              <span className="line-clamp-2 text-[10px] text-slate-400">{s.content}</span>
+            </DropdownMenuItem>
+            {/*
+              ⚠️ Fora do DropdownMenuItem, e é por isso que o botão vive num
+              <div> irmão: clicar dentro do item fecharia o menu E inseriria
+              o texto no campo, que é o oposto de "editar".
+            */}
+            <button
+              type="button"
+              title={`Editar "${s.name}"`}
+              onClick={() => onEditar({ id: s.id, name: s.name, content: s.content })}
+              className="mt-1 flex size-6 shrink-0 items-center justify-center rounded text-slate-300 hover:bg-slate-100 hover:text-slate-600"
+            >
+              <Pencil className="size-3" />
+            </button>
+          </div>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem className="text-xs font-medium text-indigo-600" onClick={onNova}>
+          <Plus className="size-3.5" /> {novaLabel}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
