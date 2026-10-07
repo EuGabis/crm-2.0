@@ -9525,3 +9525,22 @@ editar, criar dali mesmo).
   edição** (vale para as duas listas).
 - ⚠️ Sem a migração, criar resposta pessoal FALHA de propósito: cair num insert
   sem dono publicaria para a empresa um texto que a pessoa pediu só para ela.
+
+## Caixa dos USUÁRIOS pela função `caixa_usuario` (202610071200)
+
+Irmã da `caixa_admin`. A policy "membros leem" de `conversations` chama, por
+CONVERSA, `le_todas_conversas`, `sees_all`, `channel_allowed` (duas subconsultas),
+`is_admin` e `conv_with_bot` — e para quem vê pouco (vendedor com only_assigned)
+o Index Scan atravessa a tabela inteira pagando isso em cada linha descartada.
+
+- A função responde as perguntas sobre a PESSOA uma vez (admin? lê todas? vê o
+  pool? quais números o setor enxerga?) e filtra por coluna, pelo índice
+  `conversations_ordem_caixa_idx`. Cobre o admin também; o app chama ela primeiro
+  e só cai na caixa_admin/consulta comum se a sonda der erro (não aplicada).
+- 🔴 **Reproduz as DUAS policies de SELECT de `conversations`** ("membros leem"
+  da 202609110930 + "quem finalizou le" da 202609231300). **Ao mudar uma delas,
+  mude a função junto** — divergindo, a caixa vaza ou esconde, sem erro.
+- Guard de empresa na primeira linha (padrão 0049).
+- ⏳ Não medido em produção (sem o conector do Supabase na sessão). As 3.000
+  mensagens recentes do `load()` continuam pela RLS — se a caixa seguir lenta
+  depois da lista aparecer, é a próxima candidata a função própria.

@@ -99,18 +99,29 @@ async function fetchAllConversations(
    * "é admin?" uma vez e lê pelo índice. Quem não é admin recebe vazio e segue
    * pela consulta comum; função ainda não aplicada (erro) também.
    */
+  /*
+   * 🔴 **E todo mundo vai pela função `caixa_usuario`** (202610071200), irmã da
+   * caixa_admin: responde "quem é esta pessoa / quais números ela vê" UMA vez e
+   * filtra por coluna, em vez da policy chamando cinco funções por conversa. Ela
+   * cobre o admin também. Erro na sonda (migração ainda não aplicada) cai no
+   * caminho anterior: caixa_admin para o admin, consulta comum para o resto.
+   */
   const loc = useDbStore.getState().locationId;
-  let admin = false;
+  let rpc: "caixa_usuario" | "caixa_admin" | null = null;
   if (loc) {
-    const t = await supabase.rpc("caixa_admin", { p_location: loc, p_limite: 1 });
-    admin = !t.error && (t.data?.length ?? 0) > 0;
+    const u = await supabase.rpc("caixa_usuario", { p_location: loc, p_limite: 1 });
+    if (!u.error) rpc = "caixa_usuario";
+    else {
+      const t = await supabase.rpc("caixa_admin", { p_location: loc, p_limite: 1 });
+      if (!t.error && (t.data?.length ?? 0) > 0) rpc = "caixa_admin";
+    }
   }
   let cursor: string | null = null;
   for (let voltas = 0; voltas < 200; voltas++) {
     const c = cursor;
     const { data, error } = await pagina(() => {
-      if (admin) {
-        return supabase.rpc("caixa_admin", { p_location: loc, p_antes: c, p_limite: PAGE });
+      if (rpc) {
+        return supabase.rpc(rpc, { p_location: loc, p_antes: c, p_limite: PAGE });
       }
       let q = supabase
         .from("conversations")
@@ -142,8 +153,8 @@ async function fetchAllConversations(
     cursor = ultimo;
   }
   const nulos = await pagina(() =>
-    admin
-      ? supabase.rpc("caixa_admin", { p_location: loc, p_limite: 5000, p_sem_mensagem: true })
+    rpc
+      ? supabase.rpc(rpc, { p_location: loc, p_limite: 5000, p_sem_mensagem: true })
       : supabase
           .from("conversations")
           .select(CONV_SELECT)
