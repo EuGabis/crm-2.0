@@ -22,6 +22,7 @@ import {
   Trash2,
   UserPlus,
   Ban,
+  Bot,
   MoreVertical,
   Pencil,
 } from "lucide-react";
@@ -1208,6 +1209,16 @@ function MessageBubble({
         {message.internal && (
           <p className="mb-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-600">
             Comentário interno
+          </p>
+        )}
+        {/*
+          Saída AUTOMÁTICA (FUP, bot, resposta automática) tinha a mesma cara do
+          balão do vendedor, e o vendedor lia o FUP como se ele mesmo tivesse
+          mandado (2026-10-08). O selo diz que foi o sistema.
+        */}
+        {isOut && !message.internal && message.automated && (
+          <p className="mb-0.5 flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide text-indigo-100">
+            <Bot className="size-3" aria-hidden /> Enviada automaticamente
           </p>
         )}
         {quoted && (

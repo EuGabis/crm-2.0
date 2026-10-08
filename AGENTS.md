@@ -9572,3 +9572,11 @@ select count(*) from public.messages
   Qualificado / aberto" vai para "Controle de Leads → Perdido / lost" — no
   próprio funil, para não duplicar a pessoa no Comercial. Retroativo na
   `202610081000` (só onde o card do Comercial AINDA está em Perdido Quente).
+- **O FUP não sobe mais a conversa na caixa** (2026-10-08): ele gravava
+  `last_message_at = agora` + prévia "📨 FUP…", e dezenas de leads perdidos iam
+  ao topo da caixa do vendedor. Agora só a mensagem entra no fio; a lista se
+  mexe quando o cliente responder. A `202610081100` devolve ao lugar as que já
+  subiram (só onde a prévia ainda é a do FUP).
+- **Saída automática tem selo** "Enviada automaticamente" no balão
+  (`message.automated`): FUP, bot e resposta automática tinham a cara do balão
+  do vendedor, que lia o FUP como mensagem dele.
