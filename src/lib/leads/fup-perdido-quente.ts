@@ -366,12 +366,14 @@ async function enviarFup(db: any, conv: any, cache: Map<string, any>): Promise<b
 
   try {
     const r: any = await sendTemplate(canal.phone_number_id, to, FUP_TEMPLATE, tpl.language, components);
-    const msg = await registrar({ status: "sent", wa_message_id: r?.messages?.[0]?.id ?? null });
-    if (msg?.created_at) {
-      await db.from("conversations")
-        .update({ last_message_at: msg.created_at, last_message_preview: "📨 FUP: convite para o grupo" })
-        .eq("id", conv.id);
-    }
+    await registrar({ status: "sent", wa_message_id: r?.messages?.[0]?.id ?? null });
+    /*
+     * ⚠️ NÃO mexe em `last_message_at` nem na prévia da conversa (relato de
+     * 2026-10-08): fazia a conversa SUBIR na caixa do vendedor, como se ele
+     * tivesse acabado de falar com o cliente — dezenas de leads perdidos
+     * empurrando os vivos para baixo. A mensagem fica no fio; a lista só se
+     * mexe quando o cliente responder.
+     */
     return true;
   } catch (e) {
     return falhar(e instanceof Error ? e.message : "Falha na Cloud API");
