@@ -9567,3 +9567,8 @@ select date_trunc('day', created_at)::date dia, status, count(*),
 select count(*) from public.messages
  where type = 'event' and body like 'Lead movido para Comercial → Perdido Quente%';
 ```
+- **O card de entrada vai junto** (2026-10-08, pedido do Gabriel): ao mover para
+  Comercial → Perdido Quente, o card do contato em "Controle de Leads →
+  Qualificado / aberto" vai para "Controle de Leads → Perdido / lost" — no
+  próprio funil, para não duplicar a pessoa no Comercial. Retroativo na
+  `202610081000` (só onde o card do Comercial AINDA está em Perdido Quente).

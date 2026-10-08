@@ -242,7 +242,58 @@ async function moverParaPerdidoQuente(db: any, conv: any, cache: Map<string, any
     channel: "whatsapp",
     body: `Lead movido para ${FUNIL} → ${FASE} · 48h sem resposta do cliente`,
   });
+  await encerrarQualificadoDaEntrada(db, conv, card.id);
   return true;
+}
+
+const FUNIL_ENTRADA = "Controle de Leads";
+const FASE_ENTRADA = "Qualificado";
+const FASE_ENTRADA_PERDIDO = "Perdido";
+
+/**
+ * O card do bot no funil de entrada vai junto (pedido de 2026-10-08).
+ *
+ * Quando o contato já tinha card no Comercial, só ele era movido e o card de
+ * entrada ficava em "Controle de Leads → Qualificado / aberto" — o mesmo lead
+ * perdido num funil e qualificado no outro (43 casos medidos).
+ *
+ * ⚠️ Vai para "Perdido" DO PRÓPRIO funil de entrada, não para o Comercial: lá já
+ * existe o card do contato, e levar este também deixaria dois cards da mesma
+ * pessoa em Perdido Quente.
+ * ⚠️ Só a fase Qualificado e só aberto: card de entrada em outra fase, ou já
+ * fechado, foi decisão de alguém e não é deste robô.
+ * Nome exato não resolvido = não mexe (lição do "Controle de Leads").
+ */
+async function encerrarQualificadoDaEntrada(db: any, conv: any, jaMovido: string) {
+  const { data: pip } = await db.from("pipelines").select("id")
+    .eq("location_id", conv.location_id).eq("name", FUNIL_ENTRADA).limit(1).maybeSingle();
+  if (!pip) return;
+  const { data: fases } = await db.from("stages").select("id, name").eq("pipeline_id", pip.id);
+  const qualificado = (fases ?? []).find((f: any) => f.name.trim().toLowerCase() === FASE_ENTRADA.toLowerCase());
+  const perdido = (fases ?? []).find((f: any) => f.name.trim().toLowerCase() === FASE_ENTRADA_PERDIDO.toLowerCase());
+  if (!qualificado || !perdido) {
+    console.warn(`[fup] fases "${FASE_ENTRADA}"/"${FASE_ENTRADA_PERDIDO}" não encontradas em ${FUNIL_ENTRADA}`);
+    return;
+  }
+  const { data, error } = await db.from("opportunities")
+    .update({ stage_id: perdido.id, status: "lost" })
+    .eq("contact_id", conv.contact_id)
+    .eq("pipeline_id", pip.id)
+    .eq("stage_id", qualificado.id)
+    .eq("status", "open")
+    .neq("id", jaMovido)
+    .select("id");
+  if (error) console.warn(`[fup] não encerrou o card de entrada: ${error.message}`);
+  else if (data?.length) {
+    await db.from("messages").insert({
+      location_id: conv.location_id,
+      conversation_id: conv.id,
+      direction: "out",
+      type: "event",
+      channel: "whatsapp",
+      body: `Card de ${FUNIL_ENTRADA} movido para ${FASE_ENTRADA_PERDIDO} · 48h sem resposta do cliente`,
+    });
+  }
 }
 
 async function enviarFup(db: any, conv: any, cache: Map<string, any>): Promise<boolean> {
