@@ -9544,3 +9544,31 @@ o Index Scan atravessa a tabela inteira pagando isso em cada linha descartada.
 - ⏳ Não medido em produção (sem o conector do Supabase na sessão). As 3.000
   mensagens recentes do `load()` continuam pela RLS — se a caixa seguir lenta
   depois da lista aparecer, é a próxima candidata a função própria.
+
+### FUP único: a varredura nunca chegava aos elegíveis (2026-10-08)
+
+Revisão do `fupPerdidoQuente` (sem acesso ao banco na sessão — não medido):
+
+- 🔴 **Inanição:** a lista de quentes vinha do desfecho MAIS NOVO para o mais
+  velho, com 3 consultas por conversa e 20 s de orçamento. Os triados nas últimas
+  48h (impossíveis de estar elegíveis) consumiam o tique, e os antigos — os únicos
+  elegíveis — nunca eram alcançados. Agora: desfecho com mais de 48h,
+  `last_message_at` mais velho que 48h no próprio filtro, e "já recebeu o FUP?"
+  num lote só.
+- 🔴 **Card GANHO era movido para Perdido Quente / lost** quando o cliente que já
+  comprou voltava como lead quente. Agora `status = 'won'` nunca é tocado.
+
+Para conferir em produção:
+```sql
+select date_trunc('day', created_at)::date dia, status, count(*),
+       left(max(error_detail), 100) motivo
+  from public.messages where template_name = 'fup_unico_autom_tico'
+ group by 1, 2 order by 1 desc;
+select count(*) from public.messages
+ where type = 'event' and body like 'Lead movido para Comercial → Perdido Quente%';
+```
+- **O card de entrada vai junto** (2026-10-08, pedido do Gabriel): ao mover para
+  Comercial → Perdido Quente, o card do contato em "Controle de Leads →
+  Qualificado / aberto" vai para "Controle de Leads → Perdido / lost" — no
+  próprio funil, para não duplicar a pessoa no Comercial. Retroativo na
+  `202610081000` (só onde o card do Comercial AINDA está em Perdido Quente).

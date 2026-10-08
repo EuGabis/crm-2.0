@@ -79,6 +79,15 @@ export async function fupPerdidoQuente(): Promise<Resultado> {
    * que isso já teria sido pego.
    */
   const desde = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  /*
+   * 🔴 Só desfechos com MAIS de 48h. A lista vem do mais novo para o mais velho
+   * e o tique tem 20 s: sem este corte, cada rodada gastava o orçamento
+   * conferindo leads triados ontem (que não podem estar parados há 48h — a
+   * triagem é mensagem do cliente) e NUNCA chegava aos antigos, que são
+   * justamente os elegíveis. A conversa reaberta re-triada ganha desfecho novo
+   * e o cliente escreveu, então também não seria elegível.
+   */
+  const ate = new Date(Date.now() - FUP_ESPERA_MS).toISOString();
   const vistos = new Set<string>();
   const quentes: string[] = [];
   for (let from = 0; ; from += 1000) {
@@ -88,6 +97,7 @@ export async function fupPerdidoQuente(): Promise<Resultado> {
       .not("conversation_id", "is", null)
       .not("pontos", "is", null)
       .gte("created_at", desde)
+      .lte("created_at", ate)
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
       .range(from, from + 999);
@@ -116,11 +126,28 @@ export async function fupPerdidoQuente(): Promise<Resultado> {
       .is("closed_at", null)
       .is("archived_at", null)
       .not("assigned_to", "is", null)
-      .not("channel_id", "is", null);
+      .not("channel_id", "is", null)
+      /*
+       * Conversa com movimento nas últimas 48h não pode estar elegível: se o
+       * movimento foi do cliente, a bola é nossa; se foi do vendedor, o prazo
+       * não venceu. Corta no banco o que antes custava 3 consultas por conversa.
+       */
+      .lte("last_message_at", ate);
+
+    // "Já recebeu o FUP?" de uma vez para o lote, e não uma consulta por
+    // conversa: as que já receberam continuam na lista todo tique, para sempre.
+    const idsLote = (convs ?? []).map((c: any) => c.id);
+    const jaReceberam = new Set<string>();
+    if (idsLote.length) {
+      const { data: envs } = await db.from("messages").select("conversation_id")
+        .in("conversation_id", idsLote).eq("template_name", FUP_TEMPLATE);
+      for (const m of envs ?? []) jaReceberam.add(m.conversation_id);
+    }
 
     for (const conv of convs ?? []) {
       if (res.enviados + res.falhas >= POR_TIQUE) return res;
       if (Date.now() - inicio > ORCAMENTO_MS) return res;
+      if (jaReceberam.has(conv.id)) continue;
 
       const [entrada, saida, ja] = await Promise.all([
         db.from("messages").select("created_at").eq("conversation_id", conv.id)
@@ -186,8 +213,14 @@ async function moverParaPerdidoQuente(db: any, conv: any, cache: Map<string, any
    * trabalhado o lead sujaria o funil do time.
    */
   const { data: cards } = await db.from("opportunities")
-    .select("id, pipeline_id, stage_id")
+    .select("id, pipeline_id, stage_id, status")
     .eq("contact_id", conv.contact_id)
+    /*
+     * 🔴 Card GANHO nunca é movido. Sem isto, o contato que já comprou (card
+     * "Ganho" no Comercial) e voltou como lead quente tinha a VENDA reescrita
+     * para Perdido Quente / lost — apagando receita do relatório.
+     */
+    .neq("status", "won")
     .order("created_at", { ascending: false })
     .order("id", { ascending: false })
     .limit(20);
@@ -209,7 +242,58 @@ async function moverParaPerdidoQuente(db: any, conv: any, cache: Map<string, any
     channel: "whatsapp",
     body: `Lead movido para ${FUNIL} → ${FASE} · 48h sem resposta do cliente`,
   });
+  await encerrarQualificadoDaEntrada(db, conv, card.id);
   return true;
+}
+
+const FUNIL_ENTRADA = "Controle de Leads";
+const FASE_ENTRADA = "Qualificado";
+const FASE_ENTRADA_PERDIDO = "Perdido";
+
+/**
+ * O card do bot no funil de entrada vai junto (pedido de 2026-10-08).
+ *
+ * Quando o contato já tinha card no Comercial, só ele era movido e o card de
+ * entrada ficava em "Controle de Leads → Qualificado / aberto" — o mesmo lead
+ * perdido num funil e qualificado no outro (43 casos medidos).
+ *
+ * ⚠️ Vai para "Perdido" DO PRÓPRIO funil de entrada, não para o Comercial: lá já
+ * existe o card do contato, e levar este também deixaria dois cards da mesma
+ * pessoa em Perdido Quente.
+ * ⚠️ Só a fase Qualificado e só aberto: card de entrada em outra fase, ou já
+ * fechado, foi decisão de alguém e não é deste robô.
+ * Nome exato não resolvido = não mexe (lição do "Controle de Leads").
+ */
+async function encerrarQualificadoDaEntrada(db: any, conv: any, jaMovido: string) {
+  const { data: pip } = await db.from("pipelines").select("id")
+    .eq("location_id", conv.location_id).eq("name", FUNIL_ENTRADA).limit(1).maybeSingle();
+  if (!pip) return;
+  const { data: fases } = await db.from("stages").select("id, name").eq("pipeline_id", pip.id);
+  const qualificado = (fases ?? []).find((f: any) => f.name.trim().toLowerCase() === FASE_ENTRADA.toLowerCase());
+  const perdido = (fases ?? []).find((f: any) => f.name.trim().toLowerCase() === FASE_ENTRADA_PERDIDO.toLowerCase());
+  if (!qualificado || !perdido) {
+    console.warn(`[fup] fases "${FASE_ENTRADA}"/"${FASE_ENTRADA_PERDIDO}" não encontradas em ${FUNIL_ENTRADA}`);
+    return;
+  }
+  const { data, error } = await db.from("opportunities")
+    .update({ stage_id: perdido.id, status: "lost" })
+    .eq("contact_id", conv.contact_id)
+    .eq("pipeline_id", pip.id)
+    .eq("stage_id", qualificado.id)
+    .eq("status", "open")
+    .neq("id", jaMovido)
+    .select("id");
+  if (error) console.warn(`[fup] não encerrou o card de entrada: ${error.message}`);
+  else if (data?.length) {
+    await db.from("messages").insert({
+      location_id: conv.location_id,
+      conversation_id: conv.id,
+      direction: "out",
+      type: "event",
+      channel: "whatsapp",
+      body: `Card de ${FUNIL_ENTRADA} movido para ${FASE_ENTRADA_PERDIDO} · 48h sem resposta do cliente`,
+    });
+  }
 }
 
 async function enviarFup(db: any, conv: any, cache: Map<string, any>): Promise<boolean> {
