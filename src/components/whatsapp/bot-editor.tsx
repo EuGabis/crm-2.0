@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useBotFlow } from "@/lib/data/repos/db/bot-flows";
 import { useDbTeam } from "@/lib/data/repos/db/contacts";
-import { normalize, type BotFlow, type BotNode, type BotOption } from "@/lib/bot/types";
+import { type BotFlow, type BotNode, type BotOption } from "@/lib/bot/types";
+import { chaveDoPeso, pesoDaResposta } from "@/lib/bot/score";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -73,7 +74,9 @@ export function BotEditor({
 
   async function handleSave() {
     if (!draft) return;
-    // Reconstrói os pesos a partir dos títulos atuais das opções (some com chaves órfãs).
+    // Reconstrói os pesos a partir das opções atuais (some com chaves órfãs).
+    // ⚠️ A chave é o VALOR da opção — é o que o motor guarda na variável. Pelo
+    // título, opção com valor diferente somava zero (ver `chaveDoPeso`).
     const clean = structuredClone(draft);
     for (const node of Object.values(clean.nodes)) {
       if (node.type === "score") {
@@ -83,7 +86,7 @@ export function BotEditor({
           ) as any;
           if (!ask?.options?.length) continue;
           const rebuilt: Record<string, number> = {};
-          for (const opt of ask.options) rebuilt[normalize(opt.title)] = table[normalize(opt.title)] ?? 0;
+          for (const opt of ask.options) rebuilt[chaveDoPeso(opt)] = pesoDaResposta(table, [opt], opt.value ?? opt.title);
           node.weights[varKey] = rebuilt;
         }
       }
@@ -389,14 +392,14 @@ function ScoreEditor({
               <p className="text-[11px] text-slate-400">Esta pergunta não tem opções.</p>
             )}
             {opts.map((opt) => {
-              const k = normalize(opt.title);
+              const k = chaveDoPeso(opt);
               return (
                 <div key={opt.id} className="flex items-center justify-between gap-2 py-0.5">
                   <span className="text-xs text-slate-600">{opt.title}</span>
                   <input
                     type="number"
                     className="h-7 w-16 rounded-lg border px-2 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                    value={node.weights[varKey]?.[k] ?? 0}
+                    value={pesoDaResposta(node.weights[varKey] ?? {}, [opt], opt.value ?? opt.title)}
                     onChange={(e) => {
                       const n = Number(e.target.value) || 0;
                       onPatch(node.id, {

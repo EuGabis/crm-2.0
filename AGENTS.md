@@ -9600,3 +9600,19 @@ ausente, os leads devem ficar na fila de pendentes dele."*
 - ⚠️ Só nesse setor. Sem `rodizio_offline` (Secretaria) o ausente segue fora.
 - Em Vendas o "Ausente" deixa de cortar a chegada de lead; ele só manda o lead
   para Pendentes.
+
+## Peso do bot: pelo VALOR da opção, não pelo título (2026-10-13)
+
+O lead João Lucas (11 94722-1599) respondeu "Em 2 ou 3 meses" (6) + "Parcelado
+no cartão" (8) na Triagem Vendas e recebeu a mensagem de FRIO: o bot somou 8.
+
+- O motor guarda na variável o `value` da opção, mas o **editor** gravava os
+  pesos pelo `title`. Onde os dois diferem (título curto por causa do limite de
+  24 caracteres da lista do WhatsApp, valor = frase inteira), o peso não era
+  achado e valia 0.
+- `lib/bot/score.ts`: `chaveDoPeso` (o editor grava pelo valor) e
+  `pesoDaResposta` (o motor procura pelo valor e, não achando, pelo título da
+  opção escolhida — fluxos já salvos pelo título voltam a somar sem precisar
+  reabrir e salvar). `npm run test:bot`.
+- ⚠️ Não reprocessa quem já foi classificado errado: o lead frio por esse
+  defeito continua frio até alguém movê-lo à mão.
