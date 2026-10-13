@@ -16,6 +16,7 @@ import {
 } from "@/lib/leads/distribution";
 import { normalize, type BotFlow, type BotNode, type BotOption } from "./types";
 import { extrairEmail, extrairEmailOuDoc, limitarNome } from "./campos";
+import { pesoDaResposta } from "./score";
 import { triagemFlow } from "./flows/triagem";
 import { secretariaFlow } from "./flows/secretaria";
 import { vendasFlow } from "./flows/vendas";
@@ -590,7 +591,11 @@ async function advance(
       let sum = 0;
       const respostas: Record<string, string> = {};
       for (const [v, table] of Object.entries(node.weights)) {
-        sum += table[normalize(vars[v])] ?? 0;
+        // Peso pelo VALOR da opção, com volta ao título (ver `pesoDaResposta`).
+        const ask = Object.values(flow.nodes).find(
+          (n) => n.type === "ask" && n.var === v,
+        ) as Extract<BotNode, { type: "ask" }> | undefined;
+        sum += pesoDaResposta(table, ask?.options, vars[v]);
         // Guarda a resposta que gerou o peso — sem isso, auditar um número
         // exigiria a sessão, que é apagada quando a conversa reabre.
         respostas[v] = String(vars[v] ?? "");
