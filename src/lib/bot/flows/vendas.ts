@@ -8,6 +8,11 @@ import type { BotFlow } from "../types";
  * problemas". Os dois coexistem; quem decide qual roda é o seletor "Bot de
  * atendimento" do NÚMERO, em Canais. Trocar de volta é um clique.
  *
+ * ⚠️ **O bot que RODA é a cópia no banco**, criada pela migração
+ * 202610131500 a partir da Triagem Comercial de produção (funil, etapas e textos
+ * dela, só com as duas perguntas que pontuam e a régua trocadas). Este arquivo é
+ * só o padrão em código, usado quando a empresa não tem a linha em `bot_flows`.
+ *
  * Perguntas: nome → curso → quando começa → como investe → situação.
  * **Só as perguntas 3 e 4 pontuam.** Soma ≥ 10 = qualificado (quente) e vai
  * para o rodízio; abaixo disso recebe o agradecimento com o site.
