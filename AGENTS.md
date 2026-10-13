@@ -9580,3 +9580,23 @@ select count(*) from public.messages
 - **Saída automática tem selo** "Enviada automaticamente" no balão
   (`message.automated`): FUP, bot e resposta automática tinham a cara do balão
   do vendedor, que lia o FUP como mensagem dele.
+
+## Vendas: o AUSENTE recebe — em Pendentes (2026-10-13, sem migração)
+
+Medido: **271 leads parados na fila** de Vendas ("Nenhum atendente no rodízio")
+com Paulo e Rogério online. Recebidos no dia: Paulo 26 · Rogério 26 · Alberto 1
+(**ausente**). A cota divide pelo TIME (regra de 17/09), e a fatia do ausente
+ficava reservada — ninguém abaixo da cota estava disponível, e o lead não saía.
+
+Regra do Gabriel: *"o Alberto deve receber mesmo offline; como ele está
+ausente, os leads devem ficar na fila de pendentes dele."*
+
+- Com `rodizio_offline` ligado, a lista do rodízio é o **pool inteiro**: quem não
+  está disponível (offline OU ausente) recebe com `assigned_offline = true` →
+  aba Pendentes. Nos três caminhos (`distributeOne` serve bot e varredura;
+  `distributeDepartment` é o botão do Relatório).
+- O SLA do dono ausente fica parado (`dono_online` exige não-ausente), então o
+  lead não é devolvido por espera — fica com ele.
+- ⚠️ Só nesse setor. Sem `rodizio_offline` (Secretaria) o ausente segue fora.
+- Em Vendas o "Ausente" deixa de cortar a chegada de lead; ele só manda o lead
+  para Pendentes.
