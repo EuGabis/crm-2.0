@@ -1220,38 +1220,52 @@ function comFila(st, convs) {
 }
 
 {
-  /* 🔴 O defeito que existia: com `rodizio_offline` ligado, o AUSENTE recebia.
-     "Se Alberto estiver Ausente -> Lead -> Rogério". */
-  const st = vendasRegraNova({ alberto: "ausente", rogerio: "offline" });
-  comFila(st, [naFila("k1"), naFila("k2"), naFila("k3")]);
-  const db = fakeDb(st);
-  await distribuirFilaDoSetor(db, "loc1");
-  const por = contarPorPessoa(db);
-  eq("[regra] o AUSENTE nao recebe nada", por.alberto ?? 0, 0);
   /*
-   * 🔴 REESCRITO em 17/09. A versao anterior exigia `por.rogerio === 3` — "tudo
-   * para quem nao esta ausente" —, e foi essa regra que produziu o despejo
-   * medido: com um dos tres ausente, o denominador virou 2 e a fila de 122 deu
-   * 61 por pessoa.
+   * 🔴 REGRA DE 2026-10-13 (reescreve a de 17/09 neste setor): com
+   * `rodizio_offline` ligado, o AUSENTE também recebe — na aba Pendentes.
+   * "O Alberto deve receber mesmo offline; como ele está ausente, os leads devem
+   * ficar na fila de pendentes dele."
    *
-   * Aqui o TIME sao 2 (alberto ausente + rogerio), e a cota de 3 leads da
-   * ceil(3/2) = 2: o Rogerio leva a fatia dele e o terceiro ESPERA o Alberto.
-   * Lead parado esperando quem nao esta e o preco declarado de "dividir
-   * igualmente entre os 3".
+   * A versão anterior deste teste exigia "o ausente não recebe nada" e a fatia
+   * dele reservada na fila — e foi isso que, medido em produção, deixou 271
+   * leads presos com Paulo 26 · Rogério 26 · Alberto 1 (ausente).
    */
-  eq("[regra] a cota divide pelo TIME, ausente incluso no denominador", por.rogerio, 2);
-  eq("[regra] so ele recebeu — o resto FICA na fila", Object.keys(por).length, 1);
+  const st = vendasRegraNova({ alberto: "ausente", rogerio: "offline" });
+  comFila(st, [naFila("k1"), naFila("k2"), naFila("k3"), naFila("k4")]);
+  const db = fakeDb(st);
+  const r = await distribuirFilaDoSetor(db, "loc1");
+  const por = contarPorPessoa(db);
+  eq("[regra 13/10] ausente RECEBE a fatia dele", por.alberto, 2);
+  eq("[regra 13/10] e o offline a dele", por.rogerio, 2);
+  eq("[regra 13/10] nada fica preso na fila", r.naFila, 0);
+  eq(
+    "[regra 13/10] o lead do ausente vai para PENDENTES",
+    db.atribuicoes().filter((e) => e.patch.assigned_to === "alberto").every((e) => e.patch.assigned_offline === true),
+    true,
+  );
 }
 
 {
-  // Todos ausentes: ninguém recebe, e o lead FICA NA FILA (não some, não cai
-  // em quem declarou indisponibilidade).
+  /* 🔴 O caso REAL de 13/10: Paulo 26 · Rogério 26 · Alberto 1 (ausente) e a
+     fila parada. A fila tem de andar, e o Alberto recebe até alcançar os outros. */
+  const st = vendasRegraNova({ paulo: "online", rogerio: "online", alberto: "ausente" });
+  comFila(st, Array.from({ length: 10 }, (_, i) => naFila(`r${i}`)));
+  const cargas = new Map([["paulo", 26], ["rogerio", 26], ["alberto", 1]]);
+  const user = escolherPorCarga(["paulo", "rogerio", "alberto"], cargas, ["paulo", "rogerio", "alberto"], 10, 0);
+  eq("[real 13/10] com 26/26/1, o proximo lead vai para o Alberto (ausente)", user, "alberto");
+  const db = fakeDb(st);
+  const r = await distribuirFilaDoSetor(db, "loc1");
+  eq("[real 13/10] a fila andou", r.distribuidas, 10);
+}
+
+{
+  // Todos ausentes: com a regra de vendas, recebem mesmo assim — em Pendentes.
   const st = vendasRegraNova({ paulo: "ausente", alberto: "ausente" });
   comFila(st, [naFila("k1")]);
   const db = fakeDb(st);
   const r = await distribuirFilaDoSetor(db, "loc1");
-  eq("[regra] todos ausentes -> ninguem recebe", r.distribuidas, 0);
-  eq("[regra] e o lead continua na fila, visivel", r.naFila, 1);
+  eq("[regra 13/10] todos ausentes -> o lead sai (para Pendentes)", r.distribuidas, 1);
+  eq("[regra 13/10] e marcado como pendente", db.atribuicoes()[0].patch.assigned_offline, true);
 }
 
 /* ---------------- Plantão ---------------- */

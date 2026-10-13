@@ -896,7 +896,24 @@ export async function distributeOne(
    */
   const elegiveis =
     alwaysAll || porCotaAntes ? await elegiveisOrdered(db, args.locationId, pool) : online;
-  const list = semExcluidos(alwaysAll ? elegiveis : online);
+  /*
+   * 🔴 **Setor que distribui mesmo para offline: o AUSENTE também recebe — na
+   * aba Pendentes.** Regra do Gabriel (2026-10-13): "o Alberto deve receber
+   * mesmo offline; como ele está ausente, os leads devem ficar na fila de
+   * pendentes dele". Medido no dia: Paulo 26 · Rogério 26 · Alberto 1 (ausente)
+   * — a cota guardava a fatia do Alberto e **271 leads ficaram presos na fila
+   * do setor**, com dois vendedores online. Reservar a fatia de quem não pode
+   * receber é segurar lead sem dono nenhum.
+   *
+   * Por isso a lista é o POOL inteiro, e quem não está disponível (offline OU
+   * ausente) recebe com `assigned_offline = true` → Pendentes. Com o dono
+   * ausente o SLA fica parado (`dono_online` exige não-ausente), então o lead
+   * não é devolvido por espera — fica com ele.
+   *
+   * ⚠️ Vale SÓ com `rodizio_offline` ligado (Vendas). Na Secretaria o ausente
+   * continua fora: lá o problema que originou o rodízio foi aluno esperando.
+   */
+  const list = semExcluidos(alwaysAll ? pool : online);
 
   /*
    * 🔴 **PLANTÃO tem prioridade sobre a distribuição normal** (itens 6 e 7).
@@ -1154,7 +1171,9 @@ export async function distributeDepartment(
   // Os elegíveis (pool menos AUSENTES) servem à lista e ao denominador da cota
   // — a fatia de quem declarou indisponibilidade não fica reservada.
   const elegiveis = await elegiveisOrdered(db, locationId, pool);
-  const list = dep?.rodizio_offline === true ? elegiveis : online;
+  // Mesma regra de `distributeOne`: com `rodizio_offline`, o ausente também
+  // recebe (vai para Pendentes) — a fatia dele não fica presa na fila.
+  const list = dep?.rodizio_offline === true ? pool : online;
   if (!list.length) return { atribuidas: 0, retidas: convs.length };
 
   /*
