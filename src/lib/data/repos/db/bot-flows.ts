@@ -7,6 +7,7 @@ import type { BotFlow } from "@/lib/bot/types";
 import { triagemFlow } from "@/lib/bot/flows/triagem";
 import { secretariaFlow } from "@/lib/bot/flows/secretaria";
 import { financeiroFlow } from "@/lib/bot/flows/financeiro";
+import { vendasFlow } from "@/lib/bot/flows/vendas";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -15,6 +16,7 @@ const DEFAULTS: Record<string, BotFlow> = {
   [triagemFlow.key]: triagemFlow,
   [secretariaFlow.key]: secretariaFlow,
   [financeiroFlow.key]: financeiroFlow,
+  [vendasFlow.key]: vendasFlow,
 };
 
 /**

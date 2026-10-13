@@ -12,6 +12,7 @@ import { EditChannelDialog } from "./edit-channel-dialog";
 /** Rótulo amigável de cada fluxo de bot para a coluna "Bot". */
 const BOT_LABELS: Record<string, string> = {
   triagem: "Triagem Comercial",
+  "triagem-vendas": "Triagem Vendas",
 };
 
 export function ChannelsTable() {
