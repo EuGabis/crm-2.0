@@ -18,12 +18,14 @@ import { normalize, type BotFlow, type BotNode, type BotOption } from "./types";
 import { extrairEmail, extrairEmailOuDoc, limitarNome } from "./campos";
 import { triagemFlow } from "./flows/triagem";
 import { secretariaFlow } from "./flows/secretaria";
+import { vendasFlow } from "./flows/vendas";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 const FLOWS: Record<string, BotFlow> = {
   [triagemFlow.key]: triagemFlow,
   [secretariaFlow.key]: secretariaFlow,
+  [vendasFlow.key]: vendasFlow,
 };
 
 /** Carrega a definição editável do banco (bot_flows); cai no fluxo embutido. */

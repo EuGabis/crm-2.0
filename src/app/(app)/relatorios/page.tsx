@@ -651,6 +651,25 @@ const FLUXOS: Fluxo[] = [
     mostraGanhos: true,
   },
   {
+    // Bot novo (2026-10-13), ao lado da Triagem Comercial e não no lugar dela:
+    // pontuam só "quando começa" + "como investe", limiar 10.
+    key: "triagem-vendas",
+    aba: "Vendas",
+    nome: "Triagem Vendas",
+    regua: (
+      <>
+        o lead é <b>qualificado quando a soma de &quot;quando começa&quot; + &quot;como
+        investe&quot; chega a 10</b>
+      </>
+    ),
+    series: [
+      { chave: "quente", rotulo: "Qualificados", cor: VERDE },
+      { chave: "frio", rotulo: "Frios", cor: INDIGO },
+    ],
+    mostraPontos: true,
+    mostraGanhos: true,
+  },
+  {
     key: "triagem-secretaria",
     aba: "Secretaria",
     nome: "Triagem Secretaria",
