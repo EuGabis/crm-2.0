@@ -181,8 +181,23 @@ export const vendasFlow: BotFlow = {
       type: "condition",
       var: "qualificacao",
       equals: "quente",
-      ifTrue: "distribuir_lead",
+      ifTrue: "pergunta_contato",
       ifFalse: "frio_link",
+    },
+    // QUENTE: como na Triagem Comercial, pergunta a preferência antes de passar
+    // ao vendedor. Quem não responde não é distribuído (regra do Gabriel: só vai
+    // para vendedor quem responde todas as perguntas).
+    pergunta_contato: {
+      id: "pergunta_contato",
+      type: "ask",
+      text: "{{first_name}}, obrigado pela resposta! Você vai ser direcionado para nosso consultor de carreira. Como prefere o contato?",
+      var: "pref_contato",
+      listButton: "Escolher",
+      options: [
+        { id: "pref_ligacao", title: "Ligação" },
+        { id: "pref_mensagem", title: "Mensagem" },
+      ],
+      next: "distribuir_lead",
     },
     distribuir_lead: {
       id: "distribuir_lead",
