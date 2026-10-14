@@ -9630,8 +9630,9 @@ em "Curso: selecionar…": o motor só guardava a resposta em `vars.curso`.
   fio registra "Nenhuma etiqueta do catálogo corresponde ao curso X": quem
   configura o bot preenche `tag` na opção (campo no JSON do fluxo). Nunca cria
   etiqueta fora do catálogo.
-- **Sinônimo:** "Mecânico" → INTERESSADO MMA (`SINONIMOS` em `curso.ts`,
-  regra do Gabriel em 14/10). Novo sinônimo do negócio entra ali.
+- **Sinônimos** (`SINONIMOS` em `curso.ts`, lista do Gabriel em 14/10):
+  Mecânico → MMA · Piloto → PP **e** PC (o bot não pergunta qual) · Pós Eng →
+  PÓS ENGENHEIROS · Comissário → COMISSÁRIO. Novo sinônimo entra ali.
 - **Curso do card:** `opt.curso`, senão a formação de `CURSOS` com o mesmo nome,
   senão o texto da opção ("Comissário"). Não chuta a formação. Grava no card mais
   recente do contato sem curso (nunca sobrescreve, nunca card ganho) e guarda em
