@@ -392,8 +392,22 @@ async function loadPipelines(ctx: Ctx) {
 
 const stagesOf = (allStages: any[], pid: string) =>
   allStages.filter((s: any) => s.pipeline_id === pid);
-const stageByName = (stages: any[], name: string) =>
-  name ? stages.find((s: any) => normalize(s.name).includes(normalize(name))) : null;
+/**
+ * Etapa/funil pelo nome: o nome EXATO primeiro, "contém" só como reserva.
+ * ⚠️ Só com "contém", "Qualificado" casaria com "Não qualificado" (ou "Comercial"
+ * com outro funil que contém a palavra) se viesse antes na ordem — e o card iria
+ * para a coluna errada sem erro nenhum.
+ */
+function porNome<T extends { name: string }>(lista: T[], name: string): T | null {
+  if (!name) return null;
+  const alvo = normalize(name);
+  return (
+    lista.find((x) => normalize(x.name) === alvo) ??
+    lista.find((x) => normalize(x.name).includes(alvo)) ??
+    null
+  );
+}
+const stageByName = (stages: any[], name: string) => porNome(stages, name);
 
 /**
  * Escolhe o FUNIL DE LEADS certo — o contato pode ter card em vários funis.
@@ -422,7 +436,7 @@ function resolvePipeline(
   hints: string[],
 ) {
   if (name) {
-    const byName = pipelines.find((p: any) => normalize(p.name).includes(normalize(name)));
+    const byName = porNome(pipelines, name);
     if (byName) return byName;
     // Intenção declarada que não existe: NÃO adivinha. Ver o bloco acima.
     console.warn(

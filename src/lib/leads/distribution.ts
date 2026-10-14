@@ -509,7 +509,10 @@ async function leadsPipelineId(
     .order("position");
   if (!pipelines?.length) return null;
   if (pipelineName) {
-    const byName = pipelines.find((p: any) => normalize(p.name).includes(normalize(pipelineName)));
+    // Nome EXATO primeiro: "contém" sozinho pegaria outro funil com a palavra.
+    const byName =
+      pipelines.find((p: any) => normalize(p.name) === normalize(pipelineName)) ??
+      pipelines.find((p: any) => normalize(p.name).includes(normalize(pipelineName)));
     if (byName) return byName.id;
     /*
      * 🔴 **Aqui era onde o rodízio escrevia no funil errado.** Pedia "Controle
@@ -687,15 +690,38 @@ export async function assignLeadTo(
   if (p.exigirSemDono && (r?.error || !(r?.data?.length ?? 0))) return false;
 
   const pid = await leadsPipelineId(db, p.locationId, p.pipelineName);
-  if (!pid) return true;
-  const { data: opp } = await db
-    .from("opportunities")
-    .select("id, owner_id")
-    .eq("contact_id", p.contactId)
-    .eq("pipeline_id", pid)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  let opp: { id: string; owner_id: string | null } | null = null;
+  if (pid) {
+    const { data } = await db
+      .from("opportunities")
+      .select("id, owner_id")
+      .eq("contact_id", p.contactId)
+      .eq("pipeline_id", pid)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    opp = data ?? null;
+  }
+  /*
+   * Sem card no funil pedido, vale o card que o BOT criou para o contato, em
+   * qualquer funil. A varredura da fila e a devolução pedem "Controle de Leads",
+   * mas desde 14/10/2026 a Triagem Vendas cria o card direto no Comercial — sem
+   * isto, o vendedor nunca viraria dono do card dos leads de vendas.
+   * ⚠️ Só `source = 'Bot'`: card criado por pessoa não é do rodízio.
+   */
+  if (!opp) {
+    const { data } = await db
+      .from("opportunities")
+      .select("id, owner_id")
+      .eq("contact_id", p.contactId)
+      .eq("source", "Bot")
+      .neq("status", "won")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    opp = data ?? null;
+  }
+  if (!opp) return true;
   /*
    * 🔴 Antes era `if (opp) update({ owner_id: userId })` — SEM ler o dono atual.
    * Toda atribuição da conversa reescrevia o proprietário do card, então o
