@@ -46,12 +46,18 @@ const PREFIXO = "interessado";
 
 /**
  * Sinônimos do negócio: a opção do bot usa o nome popular, a etiqueta usa a
- * sigla. "Mecânico" é a formação MMA (Mecânico de Manutenção Aeronáutica) —
- * definido pelo Gabriel em 14/10/2026. Chave = opção normalizada, valor = o que
- * vem depois de "INTERESSADO" na etiqueta.
+ * sigla. Lista do Gabriel em 14/10/2026. Chave = opção normalizada (sem acento,
+ * sem plural, sem "de"); valor = o que vem depois de "INTERESSADO".
+ *
+ * ⚠️ "Piloto" dá DUAS etiquetas (PP e PC): o bot não pergunta qual das duas
+ * formações, e marcar só uma esconderia o lead do filtro da outra.
  */
-const SINONIMOS: Record<string, string> = {
-  mecanico: "MMA",
+const SINONIMOS: Record<string, string[]> = {
+  mecanico: ["MMA"],
+  piloto: ["PP", "PC"],
+  "pos eng": ["PÓS ENGENHEIROS"],
+  "pos engenheiro": ["PÓS ENGENHEIROS"],
+  comissario: ["COMISSÁRIO"],
 };
 
 /**
@@ -59,8 +65,9 @@ const SINONIMOS: Record<string, string> = {
  *
  * Ordem:
  *  1. `opt.tag` explícita (o nome é devolvido na grafia do catálogo, se existir);
- *  2. "INTERESSADO <opção>" exato;
- *  3. a ÚNICA etiqueta "INTERESSADO …" que contém todas as palavras da opção.
+ *  2. os SINÔNIMOS do negócio (Mecânico → MMA, Piloto → PP + PC);
+ *  3. "INTERESSADO <opção>" exato;
+ *  4. a ÚNICA etiqueta "INTERESSADO …" que contém todas as palavras da opção.
  *
  * ⚠️ Mais de uma candidata = nenhuma. "Piloto" casaria com "INTERESSADO PP" e
  * "INTERESSADO PC" se a regra fosse frouxa, e "Masterclass" com as quatro de
@@ -72,23 +79,25 @@ const SINONIMOS: Record<string, string> = {
  * curado pelo admin, e o bot criando etiqueta nova é o que a 202609091600 veio
  * acabar.
  */
-export function etiquetaDoCurso(
+export function etiquetasDoCurso(
   catalogo: readonly string[],
   opt: Pick<BotOption, "title" | "value"> & { tag?: string },
-): string | null {
+): string[] {
   const porNome = (nome: string) => catalogo.find((c) => normalize(c) === normalize(nome)) ?? null;
 
-  if (opt.tag?.trim()) return porNome(opt.tag) ?? opt.tag.trim();
+  if (opt.tag?.trim()) return [porNome(opt.tag) ?? opt.tag.trim()];
 
   const rotulos = [opt.value, opt.title].filter((s): s is string => !!s?.trim());
   for (const r of rotulos) {
-    const sigla = SINONIMOS[palavras(r).join(" ")];
-    const viaSinonimo = sigla ? porNome(`${PREFIXO} ${sigla}`) : null;
-    if (viaSinonimo) return viaSinonimo;
+    const siglas = SINONIMOS[palavras(r).join(" ")];
+    const achadas = (siglas ?? [])
+      .map((sg) => porNome(`${PREFIXO} ${sg}`))
+      .filter((x): x is string => !!x);
+    if (achadas.length) return achadas;
   }
   for (const r of rotulos) {
     const exata = porNome(`${PREFIXO} ${r}`);
-    if (exata) return exata;
+    if (exata) return [exata];
   }
 
   const interessados = catalogo.filter((c) => palavras(c)[0] === PREFIXO);
@@ -99,9 +108,9 @@ export function etiquetaDoCurso(
       const tem = new Set(palavras(c).slice(1));
       return alvo.every((p) => tem.has(p));
     });
-    if (candidatas.length === 1) return candidatas[0];
+    if (candidatas.length === 1) return candidatas;
   }
-  return null;
+  return [];
 }
 
 /**
@@ -122,9 +131,18 @@ export function cursoDaOpcao(
   return cursos.find((c) => normalize(c) === normalize(escolhido)) ?? escolhido;
 }
 
-/** Acrescenta a etiqueta sem repetir (comparação sem caixa, como o catálogo). */
-export function comEtiqueta(tags: readonly string[] | null | undefined, etiqueta: string): string[] | null {
-  const atual = Array.isArray(tags) ? tags : [];
-  if (atual.some((t) => normalize(t) === normalize(etiqueta))) return null;
-  return [...atual, etiqueta];
+/** Acrescenta as etiquetas sem repetir (comparação sem caixa, como o catálogo).
+ *  `null` = nada a acrescentar. */
+export function comEtiquetas(
+  tags: readonly string[] | null | undefined,
+  etiquetas: readonly string[],
+): string[] | null {
+  const atual = Array.isArray(tags) ? [...tags] : [];
+  let mudou = false;
+  for (const e of etiquetas) {
+    if (atual.some((t) => normalize(t) === normalize(e))) continue;
+    atual.push(e);
+    mudou = true;
+  }
+  return mudou ? atual : null;
 }

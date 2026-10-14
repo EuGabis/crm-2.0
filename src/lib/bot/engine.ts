@@ -17,7 +17,7 @@ import {
 import { normalize, type BotFlow, type BotNode, type BotOption } from "./types";
 import { extrairEmail, extrairEmailOuDoc, limitarNome } from "./campos";
 import { pesoDaResposta } from "./score";
-import { ehPerguntaDeCurso, etiquetaDoCurso, cursoDaOpcao, comEtiqueta } from "./curso";
+import { ehPerguntaDeCurso, etiquetasDoCurso, cursoDaOpcao, comEtiquetas } from "./curso";
 import { CURSOS } from "@/lib/data/cursos";
 import { triagemFlow } from "./flows/triagem";
 import { secretariaFlow } from "./flows/secretaria";
@@ -326,18 +326,22 @@ async function aplicarCurso(ctx: Ctx, opt: BotOption, vars: Record<string, any>)
       .from("contact_tags")
       .select("name")
       .eq("location_id", ctx.channel.location_id);
-    const etiqueta = etiquetaDoCurso((catalogo ?? []).map((t: any) => t.name), opt);
-    if (etiqueta) {
+    const etiquetas = etiquetasDoCurso((catalogo ?? []).map((t: any) => t.name), opt);
+    if (etiquetas.length) {
       const { data: c } = await ctx.db
         .from("contacts")
         .select("tags")
         .eq("id", ctx.contact.id)
         .maybeSingle();
-      const novas = comEtiqueta(c?.tags, etiqueta);
+      const novas = comEtiquetas(c?.tags, etiquetas);
       if (novas) {
         const { error } = await ctx.db.from("contacts").update({ tags: novas }).eq("id", ctx.contact.id);
         if (error) console.warn("[bot] etiqueta do curso não gravada:", error.message);
-        else await botLogEvent(ctx, `Etiqueta "${etiqueta}" adicionada pelo curso escolhido`);
+        else
+          await botLogEvent(
+            ctx,
+            `${etiquetas.length > 1 ? "Etiquetas" : "Etiqueta"} ${etiquetas.map((e) => `"${e}"`).join(" e ")} adicionada${etiquetas.length > 1 ? "s" : ""} pelo curso escolhido`,
+          );
       }
     } else {
       // Sem etiqueta correspondente no catálogo: fica dito no fio, para quem
