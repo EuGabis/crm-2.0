@@ -17,6 +17,11 @@ export interface BotOption {
   /** Para onde ir quando ESTA opção é escolhida (ramifica por opção). Sem isso,
    *  segue o `next` da pergunta. */
   next?: string;
+  /** Pergunta do curso: etiqueta do contato para esta opção (senão é deduzida
+   *  do catálogo — ver `lib/bot/curso.ts`). */
+  tag?: string;
+  /** Pergunta do curso: texto gravado no curso do card (senão, o da opção). */
+  curso?: string;
 }
 
 export type BotNode =
@@ -62,6 +67,11 @@ export type BotNode =
        * precisa entrar por migração (foi a lição da 202609011230).
        */
       registraDesfecho?: boolean;
+      /**
+       * Pergunta do CURSO: a opção escolhida vira etiqueta do contato e curso do
+       * card. Sem a marca, vale para a pergunta de lista com `var: "curso"`.
+       */
+      marcaCurso?: boolean;
       next: string | null;
     }
   // Grava a resposta num campo do contato (ex.: first_name a partir de "name").

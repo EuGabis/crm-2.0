@@ -17,6 +17,8 @@ import {
 import { normalize, type BotFlow, type BotNode, type BotOption } from "./types";
 import { extrairEmail, extrairEmailOuDoc, limitarNome } from "./campos";
 import { pesoDaResposta } from "./score";
+import { ehPerguntaDeCurso, etiquetaDoCurso, cursoDaOpcao, comEtiqueta } from "./curso";
+import { CURSOS } from "@/lib/data/cursos";
 import { triagemFlow } from "./flows/triagem";
 import { secretariaFlow } from "./flows/secretaria";
 import { vendasFlow } from "./flows/vendas";
@@ -307,6 +309,59 @@ async function botLogEvent(ctx: Ctx, body: string) {
   });
 }
 
+/**
+ * O lead escolheu o curso na lista → etiqueta no contato + curso no card.
+ *
+ * O curso fica também em `vars._curso`: na maioria dos fluxos o card do funil
+ * ainda nem existe neste ponto (nasce no `sync_card`, depois da nota), e o
+ * insert de lá o grava. Nunca sobrescreve curso que o card já tem — pode ter sido
+ * marcado por uma pessoa. Best-effort: falhar aqui não pode travar a triagem.
+ */
+async function aplicarCurso(ctx: Ctx, opt: BotOption, vars: Record<string, any>) {
+  try {
+    const curso = cursoDaOpcao(CURSOS, opt);
+    if (curso) vars._curso = curso;
+
+    const { data: catalogo } = await ctx.db
+      .from("contact_tags")
+      .select("name")
+      .eq("location_id", ctx.channel.location_id);
+    const etiqueta = etiquetaDoCurso((catalogo ?? []).map((t: any) => t.name), opt);
+    if (etiqueta) {
+      const { data: c } = await ctx.db
+        .from("contacts")
+        .select("tags")
+        .eq("id", ctx.contact.id)
+        .maybeSingle();
+      const novas = comEtiqueta(c?.tags, etiqueta);
+      if (novas) {
+        const { error } = await ctx.db.from("contacts").update({ tags: novas }).eq("id", ctx.contact.id);
+        if (error) console.warn("[bot] etiqueta do curso não gravada:", error.message);
+        else await botLogEvent(ctx, `Etiqueta "${etiqueta}" adicionada pelo curso escolhido`);
+      }
+    } else {
+      // Sem etiqueta correspondente no catálogo: fica dito no fio, para quem
+      // configura o bot saber que precisa preencher `tag` nesta opção.
+      await botLogEvent(ctx, `Nenhuma etiqueta do catálogo corresponde ao curso "${opt.title}"`);
+    }
+
+    if (curso) {
+      const { data: opp } = await ctx.db
+        .from("opportunities")
+        .select("id")
+        .eq("contact_id", ctx.contact.id)
+        .is("course", null)
+        .neq("status", "won")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (opp) await ctx.db.from("opportunities").update({ course: curso }).eq("id", opp.id);
+    }
+  } catch (e) {
+    console.warn("[bot] falha ao marcar o curso:", e instanceof Error ? e.message : e);
+  }
+}
+
 /** Status da oportunidade deduzido do nome da etapa (igual ao pipeline.ts). */
 function statusForStageName(name: string): "open" | "won" | "lost" {
   const n = (name ?? "").toUpperCase();
@@ -433,6 +488,7 @@ async function ensureCard(
     name: await cardName(ctx, vars),
     source: "Bot",
     value: 0,
+    course: vars._curso || null,
     status: statusForStageName(entry.name),
   });
 }
@@ -459,7 +515,7 @@ async function syncCard(
   // Card do contato NESTE funil de leads (o que a pessoa vê no kanban de leads).
   const { data: opp } = await ctx.db
     .from("opportunities")
-    .select("id")
+    .select("id, course")
     .eq("contact_id", ctx.contact.id)
     .eq("pipeline_id", pick.id)
     .order("created_at", { ascending: false })
@@ -469,6 +525,7 @@ async function syncCard(
   if (opp) {
     const patch: any = {};
     if (fullName) patch.name = fullName;
+    if (vars._curso && !opp.course) patch.course = vars._curso;
     if (target) {
       patch.stage_id = target.id;
       patch.status = statusForStageName(target.name);
@@ -487,6 +544,7 @@ async function syncCard(
       name: fullName || (await cardName(ctx, vars)),
       source: "Bot",
       value: 0,
+      course: vars._curso || null,
       status: statusForStageName(stage.name),
     });
     await botLogEvent(ctx, `Card criado no funil na etapa "${stage.name}"`);
@@ -844,6 +902,7 @@ export async function maybeRunBot(
           return true;
         }
         vars[node.var] = opt.value ?? opt.title;
+        if (ehPerguntaDeCurso(node)) await aplicarCurso(ctx, opt, vars);
         /*
          * Nó marcado como desfecho (`registraDesfecho`) → a escolha vira a linha
          * permanente do relatório diário. É o análogo do nó `score`: em cada

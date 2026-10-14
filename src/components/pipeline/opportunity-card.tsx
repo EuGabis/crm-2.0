@@ -484,11 +484,18 @@ function OpportunityCardBase({
             tem curso).
           */}
           {ativo ? (
-            CURSOS.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))
+            <>
+              {/* Curso fora da lista oficial (o bot grava o que o lead escolheu,
+                  ex.: "Comissário") continua sendo o valor do campo. */}
+              {opportunity.course && !CURSOS.includes(opportunity.course) ? (
+                <option value={opportunity.course}>{opportunity.course}</option>
+              ) : null}
+              {CURSOS.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </>
           ) : opportunity.course ? (
             <option value={opportunity.course}>{opportunity.course}</option>
           ) : null}

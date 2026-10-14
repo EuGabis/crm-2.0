@@ -635,31 +635,24 @@ interface Fluxo {
  */
 const FLUXOS: Fluxo[] = [
   {
-    key: "triagem",
-    aba: "Comercial",
-    nome: "Triagem Comercial",
+    /*
+     * 🔴 Comercial e Vendas são UMA aba (2026-10-14). O número trocou de bot
+     * (Triagem Comercial → Triagem Vendas, 202610131500), e com abas separadas o
+     * histórico ficou partido: Comercial vazia, Vendas sem os desfechos antigos.
+     * A rota e a função aceitam os dois fluxos juntos ("a,b").
+     *
+     * ⚠️ A média de pontos mistura réguas diferentes (limiar 9 na Comercial, 10
+     * na Vendas). "Qualificado" é o que cada bot decidiu na época, então a
+     * contagem continua certa; só a média é aproximada, e a régua diz isso.
+     */
+    key: "triagem,triagem-vendas",
+    aba: "Comercial + Vendas",
+    nome: "Triagem Comercial / Vendas",
     regua: (
       <>
-        o lead é <b>qualificado quando a soma das respostas chega a 9</b>
-      </>
-    ),
-    series: [
-      { chave: "quente", rotulo: "Qualificados", cor: VERDE },
-      { chave: "frio", rotulo: "Frios", cor: INDIGO },
-    ],
-    mostraPontos: true,
-    mostraGanhos: true,
-  },
-  {
-    // Bot novo (2026-10-13), ao lado da Triagem Comercial e não no lugar dela:
-    // pontuam só "quando começa" + "como investe", limiar 10.
-    key: "triagem-vendas",
-    aba: "Vendas",
-    nome: "Triagem Vendas",
-    regua: (
-      <>
-        o lead é <b>qualificado quando a soma de &quot;quando começa&quot; + &quot;como
-        investe&quot; chega a 10</b>
+        o lead é <b>qualificado pela régua do bot em vigor na época</b> — Triagem Comercial (soma
+        ≥ 9) até 13/10, Triagem Vendas (&quot;quando começa&quot; + &quot;como investe&quot; ≥
+        10) depois
       </>
     ),
     series: [

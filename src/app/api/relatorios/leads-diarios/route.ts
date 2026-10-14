@@ -355,7 +355,8 @@ export async function GET(request: Request) {
       .from("whatsapp_channels")
       .select("id")
       .eq("location_id", membership.location_id)
-      .eq("bot_flow", flow);
+      // Vários fluxos por vírgula: a aba "Comercial + Vendas" manda os dois.
+      .in("bot_flow", flow.split(",").map((f) => f.trim()).filter(Boolean));
     const chIds = (chs ?? []).map((c: any) => c.id);
     if (chIds.length) {
       const { data: dcs } = await supabase
