@@ -277,24 +277,43 @@ export const oppActions = {
     const location = loc();
     if (!location) return false;
     const supabase = createClient();
-    const { data, error } = await supabase
-      .from("opportunities")
-      .insert({
-        location_id: location,
-        contact_id: input.contactId,
-        pipeline_id: input.pipelineId,
-        stage_id: input.stageId,
-        name: input.contactName,
-        source: input.source,
-        value: input.value,
-        owner_id: input.ownerId !== undefined ? input.ownerId : uid(),
-        // `|| null` e não `?? null`: string vazia do seletor ("selecionar…") é
-        // ausência de curso, não um curso chamado "".
-        course: input.course || null,
-      })
-      .select()
-      .single();
-    if (error || !data) return false;
+    const owner = input.ownerId !== undefined ? input.ownerId : uid();
+    const linha = {
+      location_id: location,
+      contact_id: input.contactId,
+      pipeline_id: input.pipelineId,
+      stage_id: input.stageId,
+      name: input.contactName,
+      source: input.source,
+      value: input.value,
+      owner_id: owner,
+      // `|| null` e não `?? null`: string vazia do seletor ("selecionar…") é
+      // ausência de curso, não um curso chamado "".
+      course: input.course || null,
+    };
+    const { data, error } = await supabase.from("opportunities").insert(linha).select().single();
+    /*
+     * 🔴 Vendedor com `only_assigned` criando card com OUTRO dono (ou sem dono):
+     * a RLS de SELECT (`sees_all or owner_id = auth.uid()`) não deixa ele LER a
+     * linha que acabou de inserir, e o `.select()` derruba o insert inteiro com
+     * 42501 — a tela dizia "Não foi possível criar a oportunidade" para um card
+     * perfeitamente válido. Sem pedir a linha de volta, o INSERT só passa pelo
+     * `with check` (empresa + funil visível), que é a regra de verdade.
+     * O card não entra na store: é de outra pessoa, e quem não o vê não o lê.
+     */
+    if (error?.code === "42501" && owner !== uid()) {
+      const { error: e2 } = await supabase.from("opportunities").insert(linha);
+      if (e2) {
+        console.error("[pipeline] criar oportunidade:", e2.code, e2.message);
+        return false;
+      }
+      void state().reload();
+      return true;
+    }
+    if (error || !data) {
+      if (error) console.error("[pipeline] criar oportunidade:", error.code, error.message);
+      return false;
+    }
     const s = state();
     s.patch({ opportunities: [mapOpportunity(data), ...s.opportunities] });
     return true;

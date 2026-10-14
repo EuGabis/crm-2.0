@@ -39,8 +39,8 @@ export const vendasFlow: BotFlow = {
     cria_card: {
       id: "cria_card",
       type: "ensure_card",
-      pipeline: "Controle de Leads",
-      stage: "NOVO LEAD",
+      pipeline: "Comercial",
+      stage: "Entrada",
       next: "pergunta_nome",
     },
 
@@ -171,9 +171,9 @@ export const vendasFlow: BotFlow = {
     atualiza_card: {
       id: "atualiza_card",
       type: "sync_card",
-      pipeline: "Controle de Leads",
+      pipeline: "Comercial",
       var: "qualificacao",
-      stageMap: { quente: "Qualificado", frio: "Perdido" },
+      stageMap: { quente: "Qualificado", frio: "Perdido Frio" },
       next: "rota_qualificacao",
     },
     rota_qualificacao: {
@@ -202,7 +202,7 @@ export const vendasFlow: BotFlow = {
     distribuir_lead: {
       id: "distribuir_lead",
       type: "distribute",
-      pipeline: "Controle de Leads",
+      pipeline: "Comercial",
       text: "Perfeito, {{first_name}}! Já estou passando você para um consultor. Em breve alguém da nossa tripulação fala com você por aqui. ✈️",
     },
     frio_link: {

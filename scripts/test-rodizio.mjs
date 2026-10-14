@@ -103,6 +103,7 @@ function fakeDb(estado) {
     for (const [c, v] of f.gte) linhas = linhas.filter((l) => (l[c] ?? "") >= v);
     for (const [c, v] of f.lte) linhas = linhas.filter((l) => (l[c] ?? "") <= v);
     for (const [c, v] of f.gt) linhas = linhas.filter((l) => (l[c] ?? "") > v);
+    for (const [c, v] of f.neq) linhas = linhas.filter((l) => l[c] !== v);
     if (f.limite !== null) linhas = linhas.slice(0, f.limite);
     if (f.single) return { data: linhas[0] ?? null, error: null };
     return { data: linhas, error: null };
@@ -118,6 +119,7 @@ function fakeDb(estado) {
       gte: [],
       lte: [],
       gt: [],
+      neq: [],
       limite: null,
       single: false,
       patch: null,
@@ -136,6 +138,7 @@ function fakeDb(estado) {
       // `plantaoAtivo` recorta a janela com lte(inicio) + gt(fim).
       lte: (c, v) => (f.lte.push([c, v]), api),
       gt: (c, v) => (f.gt.push([c, v]), api),
+      neq: (c, v) => (f.neq.push([c, v]), api),
       update: (patch) => ((f.patch = patch), api),
       then: (res) => Promise.resolve(resolver(f)).then(res),
     };
@@ -210,6 +213,22 @@ const naFila = (id, extra = {}) => ({
 });
 
 console.log("\nRodizio - a fila do setor tem saida\n");
+
+/* 0. Card do BOT fora do funil pedido (Triagem Vendas cria no Comercial, 14/10). */
+{
+  const db = fakeDb(
+    cenario({
+      conversations: [naFila("k1")],
+      opportunities: [
+        { id: "o-pessoa", contact_id: "c-k1", source: "Conversas", status: "open", owner_id: null },
+        { id: "o-bot", contact_id: "c-k1", source: "Bot", status: "open", owner_id: null },
+      ],
+    }),
+  );
+  await distribuirFilaDoSetor(db, "loc1");
+  const donos = db.escritas.filter((e) => e.tabela === "opportunities").map((e) => [e.filtros.id, e.patch.owner_id]);
+  eq("sem card no funil pedido -> o vendedor vira dono do card do BOT", donos, [["o-bot", "ana"]]);
+}
 
 /* 1. O caso do relato: lead na fila, gente online -> distribui. */
 {

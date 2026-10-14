@@ -9650,3 +9650,23 @@ concluiu". `p_flow` aceita vários fluxos por vírgula, e a tela tem uma aba
 aplicada antes ou depois do merge — mas **sem ela a aba nova volta vazia**.
 ⚠️ A média de pontos mistura limiar 9 e 10; a contagem de qualificados não
 (cada bot decidiu pela sua régua).
+
+## Triagem Vendas cria o card no COMERCIAL (202610141500)
+
+Regra do Gabriel (14/10): lead chegou → **Comercial / Entrada**, quente →
+**Qualificado**, frio → **Perdido Frio**. A Triagem Vendas, copiada da Comercial,
+apontava para "Controle de Leads". Só o fluxo `triagem-vendas` muda; a migração
+ABORTA se o funil ou uma das três colunas não existir com esse nome exato.
+
+- Funil e coluna passam a ser casados pelo nome EXATO primeiro (`porNome` no
+  motor, `leadsPipelineId` no rodízio). Só com "contém", "Qualificado" casaria com
+  "Não qualificado" se viesse antes.
+- **Dono do card:** a varredura da fila e a devolução pedem "Controle de Leads";
+  sem card ali, `assignLeadTo` usa o card `source = 'Bot'` mais recente do
+  contato (nunca ganho). Sem isso o vendedor nunca viraria dono do card de vendas.
+- **Vendedor criando card com outro dono (ou sem dono):** com `only_assigned`, o
+  `.select()` do insert pedia de volta uma linha que a RLS não deixa ele ler, e o
+  insert inteiro caía em 42501 ("Não foi possível criar a oportunidade").
+  `oppActions.add` refaz o insert sem pedir a linha nesse caso — vale o
+  `with check` (empresa + funil visível). O erro agora vai para o console.
+- ⏳ Leads que já passaram pelo bot ficam onde estão (Controle de Leads).
