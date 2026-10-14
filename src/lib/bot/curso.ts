@@ -45,6 +45,16 @@ function palavras(s: string): string[] {
 const PREFIXO = "interessado";
 
 /**
+ * Sinônimos do negócio: a opção do bot usa o nome popular, a etiqueta usa a
+ * sigla. "Mecânico" é a formação MMA (Mecânico de Manutenção Aeronáutica) —
+ * definido pelo Gabriel em 14/10/2026. Chave = opção normalizada, valor = o que
+ * vem depois de "INTERESSADO" na etiqueta.
+ */
+const SINONIMOS: Record<string, string> = {
+  mecanico: "MMA",
+};
+
+/**
  * A etiqueta do catálogo que corresponde à opção escolhida.
  *
  * Ordem:
@@ -71,6 +81,11 @@ export function etiquetaDoCurso(
   if (opt.tag?.trim()) return porNome(opt.tag) ?? opt.tag.trim();
 
   const rotulos = [opt.value, opt.title].filter((s): s is string => !!s?.trim());
+  for (const r of rotulos) {
+    const sigla = SINONIMOS[palavras(r).join(" ")];
+    const viaSinonimo = sigla ? porNome(`${PREFIXO} ${sigla}`) : null;
+    if (viaSinonimo) return viaSinonimo;
+  }
   for (const r of rotulos) {
     const exata = porNome(`${PREFIXO} ${r}`);
     if (exata) return exata;
