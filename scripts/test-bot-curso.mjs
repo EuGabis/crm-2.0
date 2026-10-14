@@ -7,6 +7,8 @@ const cat = ["Aluno MMA", "INTERESSADO MMA", "INTERESSADO COMISSÁRIO", "INTERES
   "INTERESSADO PÓS ENGENHEIROS", "INTERESSADO MASTERCLASS COMISSARIO", "INTERESSADO MASTERCLASS FRENO", "PAGO"];
 eq("[real] Comissário → INTERESSADO COMISSÁRIO", etiquetaDoCurso(cat, { title: "Comissário" }), "INTERESSADO COMISSÁRIO");
 eq("Pós de Engenheiros → por palavras", etiquetaDoCurso(cat, { title: "Pós de Engenheiros" }), "INTERESSADO PÓS ENGENHEIROS");
+eq("[real] Mecânico → INTERESSADO MMA", etiquetaDoCurso(cat, { title: "Mecânico" }), "INTERESSADO MMA");
+eq("Mecânicos (plural) → MMA", etiquetaDoCurso(cat, { title: "Mecânicos" }), "INTERESSADO MMA");
 eq("Piloto não casa (PP/PC)", etiquetaDoCurso(cat, { title: "Piloto" }), null);
 eq("Masterclass ambígua = nenhuma", etiquetaDoCurso(cat, { title: "Masterclass" }), null);
 eq("tag explícita na grafia do catálogo", etiquetaDoCurso(cat, { title: "Piloto", tag: "interessado pp" }), "INTERESSADO PP");
