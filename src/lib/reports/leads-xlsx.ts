@@ -487,7 +487,10 @@ export async function baixarRelatorioLeadsXlsx(d: DadosLeads): Promise<void> {
    * duas planilhas têm colunas diferentes, então o leitor abriria a errada
    * achando que é a outra.
    */
-  const curto = d.fluxoKey.replace("triagem-", "").replace("triagem", "comercial");
+  const curto = d.fluxoKey
+    .split(",")
+    .map((k) => k.trim().replace("triagem-", "").replace("triagem", "comercial"))
+    .join("-");
   /*
    * ⚠️ As DATAS do recorte no nome, não a data do download: dois recortes
    * baixados no mesmo dia tinham o mesmo nome e um sobrescrevia o outro — e é

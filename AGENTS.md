@@ -9616,3 +9616,34 @@ no cartão" (8) na Triagem Vendas e recebeu a mensagem de FRIO: o bot somou 8.
   reabrir e salvar). `npm run test:bot`.
 - ⚠️ Não reprocessa quem já foi classificado errado: o lead frio por esse
   defeito continua frio até alguém movê-lo à mão.
+
+## O curso escolhido no bot vira etiqueta e curso do card (2026-10-14, sem migração)
+
+O lead clicava "Comissário" na lista do bot e chegava sem etiqueta e com o card
+em "Curso: selecionar…": o motor só guardava a resposta em `vars.curso`.
+
+- `lib/bot/curso.ts` (teste em `npm run test:bot`). Vale para a pergunta de
+  LISTA com `var: "curso"` (ou `marcaCurso: true`) — texto livre nunca vira curso.
+- **Etiqueta:** `opt.tag` explícita, senão "INTERESSADO <opção>" exato do
+  catálogo, senão a ÚNICA "INTERESSADO …" com todas as palavras da opção.
+  ⚠️ Mais de uma candidata = nenhuma ("Piloto" × PP/PC, "Masterclass" × 4) — e o
+  fio registra "Nenhuma etiqueta do catálogo corresponde ao curso X": quem
+  configura o bot preenche `tag` na opção (campo no JSON do fluxo). Nunca cria
+  etiqueta fora do catálogo.
+- **Curso do card:** `opt.curso`, senão a formação de `CURSOS` com o mesmo nome,
+  senão o texto da opção ("Comissário"). Não chuta a formação. Grava no card mais
+  recente do contato sem curso (nunca sobrescreve, nunca card ganho) e guarda em
+  `vars._curso` para o card que o `sync_card`/`ensure_card` criar depois.
+- O seletor de curso do card passou a manter o valor fora da lista oficial.
+- ⏳ Só vale para leads novos; não reprocessa quem já passou pela triagem.
+
+## Leads do dia: Comercial + Vendas numa aba só (202610141000)
+
+Com o número trocando de `triagem` para `triagem-vendas`, o relatório partiu o
+histórico: `triagem_leads` recorta pelo bot ATUAL do número e pelo `flow_key` do
+desfecho — Comercial ficou vazia e Vendas trazia os leads antigos como "não
+concluiu". `p_flow` aceita vários fluxos por vírgula, e a tela tem uma aba
+"Comercial + Vendas" (`triagem,triagem-vendas`). Mesma assinatura, então pode ser
+aplicada antes ou depois do merge — mas **sem ela a aba nova volta vazia**.
+⚠️ A média de pontos mistura limiar 9 e 10; a contagem de qualificados não
+(cada bot decidiu pela sua régua).
