@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { CalendarClock, CheckSquare, ExternalLink, MessageSquare } from "lucide-react";
+import { CalendarClock, CheckSquare, ExternalLink, MessageSquare, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ContactActivity } from "@/components/contacts/contact-activity";
 import { ContactConversations } from "@/components/contacts/contact-conversations";
@@ -27,7 +28,7 @@ import { conversationActions } from "@/lib/data/repos/db/conversations";
 import { useDbAppointments } from "@/lib/data/repos/db/appointments";
 import { useLeadPaymentProfile } from "@/lib/data/repos/db/lead-payments";
 import { useContactNotes } from "@/lib/data/repos/db/notes";
-import { usePipelineDb } from "@/lib/data/repos/db/pipeline";
+import { oppActions, usePipelineDb } from "@/lib/data/repos/db/pipeline";
 import { useMyMembership } from "@/lib/data/repos/db/team";
 import { formatBRL } from "@/lib/data/repos/opportunities";
 import type { Contact, Opportunity } from "@/lib/data/types";
@@ -74,16 +75,22 @@ function formatDoc(raw: string | null | undefined): string {
 /* ------------------------------ corpo do diálogo ---------------------------- */
 
 function LeadDetailBody({
-  opportunity,
+  opportunity: recebida,
   onOpenChange,
 }: {
   opportunity: Opportunity;
   onOpenChange: (v: boolean) => void;
 }) {
   const router = useRouter();
-  const { contact } = useDbContact(opportunity.contactId);
   const team = useDbTeam();
   const { pipelines, opportunities } = usePipelineDb();
+  /*
+   * A versão da STORE, quando existe: a tela de Leads passa uma CÓPIA tirada no
+   * clique, e sem isto o valor editado aqui continuaria o antigo na tela até
+   * fechar e abrir de novo.
+   */
+  const opportunity = opportunities.find((o) => o.id === recebida.id) ?? recebida;
+  const { contact } = useDbContact(opportunity.contactId);
   const { tasks } = useContactsModule();
   const { appointments } = useDbAppointments();
   const { can } = useMyMembership();
@@ -96,6 +103,51 @@ function LeadDetailBody({
   const { notes, reload: reloadNotes } = useContactNotes(opportunity.contactId);
 
   const [tab, setTab] = useState("resumo");
+  const [editando, setEditando] = useState(false);
+  const [edNome, setEdNome] = useState("");
+  const [edValor, setEdValor] = useState("");
+  const [edFonte, setEdFonte] = useState("");
+  const [salvandoEd, setSalvandoEd] = useState(false);
+
+  const abrirEdicao = () => {
+    setEdNome(opportunity.name);
+    setEdValor(String(opportunity.value ?? 0).replace(".", ","));
+    setEdFonte(opportunity.source ?? "");
+    setEditando(true);
+  };
+
+  const salvarEdicao = async () => {
+    const nome = edNome.trim();
+    if (!nome) {
+      toast.error("O nome do lead não pode ficar vazio");
+      return;
+    }
+    // Aceita "1.500,50" e "1500.50": tira o separador de milhar antes da vírgula.
+    const bruto = edValor.trim();
+    const normal = bruto.includes(",") ? bruto.replace(/\./g, "").replace(",", ".") : bruto;
+    const valor = bruto === "" ? 0 : Number(normal);
+    if (!Number.isFinite(valor) || valor < 0) {
+      toast.error("Valor inválido — use números, ex.: 1.500,00");
+      return;
+    }
+    setSalvandoEd(true);
+    const r = await oppActions.update(opportunity.id, {
+      name: nome,
+      value: valor,
+      source: edFonte.trim() || opportunity.source,
+    });
+    setSalvandoEd(false);
+    if (r === "sem-permissao") {
+      toast.error("Você só pode editar os cards em que é o responsável");
+      return;
+    }
+    if (r === "erro") {
+      toast.error("Não foi possível salvar o card");
+      return;
+    }
+    setEditando(false);
+    toast.success("Card atualizado");
+  };
   const [note, setNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
 
@@ -268,9 +320,48 @@ function LeadDetailBody({
           </div>
 
           <div className="rounded-lg border bg-white p-3">
-            <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">
-              Lead
-            </p>
+            <div className="mb-1 flex items-center justify-between">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Lead</p>
+              {!editando && (
+                <button
+                  type="button"
+                  onClick={abrirEdicao}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:underline"
+                >
+                  <Pencil className="size-3" /> Editar
+                </button>
+              )}
+            </div>
+            {editando && (
+              <div className="mb-2 space-y-2 rounded-md border border-indigo-200 bg-indigo-50/40 p-2">
+                <label className="block text-[11px] text-slate-500">
+                  Nome do lead
+                  <Input value={edNome} onChange={(e) => setEdNome(e.target.value)} className="mt-0.5 h-8 text-xs" />
+                </label>
+                <label className="block text-[11px] text-slate-500">
+                  Valor (R$)
+                  <Input
+                    value={edValor}
+                    onChange={(e) => setEdValor(e.target.value)}
+                    inputMode="decimal"
+                    placeholder="0,00"
+                    className="mt-0.5 h-8 text-xs"
+                  />
+                </label>
+                <label className="block text-[11px] text-slate-500">
+                  Fonte
+                  <Input value={edFonte} onChange={(e) => setEdFonte(e.target.value)} className="mt-0.5 h-8 text-xs" />
+                </label>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" className="h-7 text-xs" onClick={() => setEditando(false)} disabled={salvandoEd}>
+                    Cancelar
+                  </Button>
+                  <Button className="h-7 text-xs" onClick={() => void salvarEdicao()} disabled={salvandoEd}>
+                    {salvandoEd ? "Salvando..." : "Salvar"}
+                  </Button>
+                </div>
+              </div>
+            )}
             <dl>
               <DataRow label="Funil" value={pipeline?.name ?? "—"} />
               <DataRow
@@ -464,11 +555,13 @@ export function LeadDetailDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
+  const { opportunities } = usePipelineDb();
+  const nomeAtual = opportunities.find((o) => o.id === opportunity.id)?.name ?? opportunity.name;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[88vh] flex-col overflow-hidden sm:max-w-4xl">
         <DialogHeader className="shrink-0">
-          <DialogTitle className="truncate pr-6 text-base">{opportunity.name}</DialogTitle>
+          <DialogTitle className="truncate pr-6 text-base">{nomeAtual}</DialogTitle>
         </DialogHeader>
         {/* Só monta quando abre: os hooks de dentro disparam consultas (cruzamento
             com a Guru, comentários) que não devem rodar para cada card do funil. */}

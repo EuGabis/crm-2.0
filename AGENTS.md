@@ -9670,3 +9670,19 @@ ABORTA se o funil ou uma das três colunas não existir com esse nome exato.
   `oppActions.add` refaz o insert sem pedir a linha nesse caso — vale o
   `with check` (empresa + funil visível). O erro agora vai para o console.
 - ⏳ Leads que já passaram pelo bot ficam onde estão (Controle de Leads).
+
+## Editar o card pelo detalhe do lead, e o X que não fechava (2026-10-15, sem migração)
+
+- **Editar:** botão "Editar" no bloco LEAD do detalhe (nome, valor, fonte),
+  `oppActions.update`. Confere as LINHAS devolvidas: a policy de UPDATE de
+  `opportunities` exige `sees_all` ou ser o dono, então o vendedor com
+  `only_assigned` edita só os cards dele — e a tela diz isso em vez de "salvo".
+  O corpo do detalhe lê o card da STORE (a tela de Leads passa uma cópia tirada no
+  clique, e o valor editado não apareceria até reabrir).
+- 🔴 **O X não fechava o detalhe aberto pelo card.** O diálogo é portal, mas
+  evento de React sobe pela árvore de COMPONENTES: o clique no X fechava e subia
+  até o `onClick` do card, que reabria na hora. Desde que o card inteiro virou
+  punho de arrasto (2026-09-15), o `pointerdown` de dentro do diálogo também
+  chegava aos listeners de arrasto. Um `span` com `display: contents` em volta do
+  diálogo corta click/pointerdown/keydown. ⚠️ Qualquer diálogo montado DENTRO do
+  card precisa do mesmo corte.
