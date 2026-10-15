@@ -1,9 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Plus, Trash2 } from "lucide-react";
+import { ExternalLink, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { SubNav } from "@/components/layout/subnav";
 import { WeekCalendar } from "@/components/modules/week-calendar";
@@ -205,7 +206,19 @@ function ListaCompromissos({
                     {a.source === "google" ? "Google" : "CRM"}
                   </Badge>
                 </td>
-                <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">{a.contato}</td>
+                <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">
+                  {a.contactId ? (
+                    <Link
+                      href={`/contatos/${a.contactId}`}
+                      className="text-indigo-600 hover:underline"
+                      title="Abrir o cadastro do contato"
+                    >
+                      {a.contato}
+                    </Link>
+                  ) : (
+                    a.contato
+                  )}
+                </td>
                 <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">{a.lead}</td>
                 <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">{a.agenda}</td>
                 <td className="px-4 py-2.5">
@@ -578,19 +591,35 @@ function AppointmentDialog({
               placeholder="Sem contato vinculado"
             />
             {contactId && (
-              <button
-                type="button"
-                className="text-[10px] text-slate-400 underline hover:text-slate-600"
-                onClick={() => {
-                  setContactId("");
-                  // Desvincular o contato tem de soltar o lead junto: lead
-                  // pertence a um contato, e deixar o lead de outra pessoa
-                  // pendurado seria pior do que não ter nenhum.
-                  setOpportunityId("");
-                }}
-              >
-                Desvincular contato
-              </button>
+              <div className="flex items-center gap-3">
+                {/*
+                  Link de verdade (e não botão que navega): abre o cadastro em nova
+                  guia com Ctrl+clique, sem perder o compromisso que está sendo
+                  editado. O clique comum também abre em nova guia, pelo mesmo
+                  motivo — sair daqui descartaria o que ainda não foi salvo.
+                */}
+                <Link
+                  href={`/contatos/${contactId}`}
+                  target="_blank"
+                  rel="noopener"
+                  className="inline-flex items-center gap-1 text-[10px] font-semibold text-indigo-600 hover:underline"
+                >
+                  <ExternalLink className="size-3" /> Abrir contato
+                </Link>
+                <button
+                  type="button"
+                  className="text-[10px] text-slate-400 underline hover:text-slate-600"
+                  onClick={() => {
+                    setContactId("");
+                    // Desvincular o contato tem de soltar o lead junto: lead
+                    // pertence a um contato, e deixar o lead de outra pessoa
+                    // pendurado seria pior do que não ter nenhum.
+                    setOpportunityId("");
+                  }}
+                >
+                  Desvincular contato
+                </button>
+              </div>
             )}
           </div>
           <div className="space-y-1">
