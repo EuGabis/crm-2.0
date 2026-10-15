@@ -9686,3 +9686,10 @@ ABORTA se o funil ou uma das três colunas não existir com esse nome exato.
   chegava aos listeners de arrasto. Um `span` com `display: contents` em volta do
   diálogo corta click/pointerdown/keydown. ⚠️ Qualquer diálogo montado DENTRO do
   card precisa do mesmo corte.
+
+## Calendário: abrir o contato do compromisso (2026-10-15, sem migração)
+
+O diálogo do compromisso mostrava o contato vinculado sem caminho até o cadastro.
+Ganhou **"Abrir contato"** ao lado de "Desvincular contato", e o nome do contato
+na Lista de compromissos virou link. ⚠️ No diálogo o link abre em NOVA GUIA
+mesmo no clique comum: navegar descartaria o compromisso que ainda não foi salvo.
