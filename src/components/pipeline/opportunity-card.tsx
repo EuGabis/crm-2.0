@@ -654,8 +654,23 @@ function OpportunityCardBase({
       {/* ⚠️ Montado só quando abre. Um `<Dialog>` por card são 1.518 diálogos
           na árvore de uma coluna só — cada um com portal, foco e escuta de
           teclado — para uma tela que quase nunca é aberta. */}
+      {/*
+        🔴 O diálogo é PORTAL, mas evento de React sobe pela árvore de
+        COMPONENTES, não pela do DOM: o clique no X fechava o diálogo e subia até
+        o `onClick` do card, que o reabria no mesmo instante — "o X não funciona".
+        E o `pointerdown` de qualquer clique lá dentro chegava aos listeners de
+        arrasto do card. O `span` (display: contents, não ocupa layout) corta os
+        dois aqui.
+      */}
       {detailOpen && (
-        <LeadDetailDialog opportunity={opportunity} open onOpenChange={setDetailOpen} />
+        <span
+          className="contents"
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <LeadDetailDialog opportunity={opportunity} open onOpenChange={setDetailOpen} />
+        </span>
       )}
     </div>
   );

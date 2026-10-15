@@ -221,6 +221,36 @@ export const oppActions = {
     return true;
   },
 
+  /**
+   * Edita nome, valor e fonte do card (detalhe do lead → "Editar").
+   *
+   * ⚠️ Confere as LINHAS devolvidas, não só o `error`: UPDATE recusado pela RLS
+   * volta calado. A policy de UPDATE exige `sees_all` ou ser o dono do card, então
+   * o vendedor que só vê os próprios cards não edita o do colega — e a tela
+   * precisa dizer isso em vez de "salvo".
+   */
+  async update(
+    id: string,
+    patch: { name?: string; value?: number; source?: string },
+  ): Promise<"ok" | "sem-permissao" | "erro"> {
+    const s = state();
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("opportunities")
+      .update(patch)
+      .eq("id", id)
+      .select("id");
+    if (error) {
+      console.error("[pipeline] editar oportunidade:", error.code, error.message);
+      return "erro";
+    }
+    if (!data?.length) return "sem-permissao";
+    s.patch({
+      opportunities: s.opportunities.map((o) => (o.id === id ? { ...o, ...patch } : o)),
+    });
+    return "ok";
+  },
+
   /** Define/limpa o curso da oportunidade (seletor no card). "" = sem curso. */
   async setCourse(id: string, course: string | null): Promise<boolean> {
     const s = state();
