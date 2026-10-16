@@ -317,6 +317,32 @@ async function botLogEvent(ctx: Ctx, body: string) {
  * insert de lá o grava. Nunca sobrescreve curso que o card já tem — pode ter sido
  * marcado por uma pessoa. Best-effort: falhar aqui não pode travar a triagem.
  */
+/**
+ * Etiqueta configurada na OPÇÃO (`opt.tag`) de qualquer pergunta de lista —
+ * ex.: "Quero começar agora" → "Agora" (pedido de 2026-10-16). A pergunta do
+ * curso tem regra própria (`aplicarCurso`). Usa a grafia do catálogo quando a
+ * etiqueta existe lá. Best-effort: etiqueta não pode travar a triagem.
+ */
+async function aplicarEtiquetaDaOpcao(ctx: Ctx, tag: string) {
+  try {
+    const { data: cat } = await ctx.db
+      .from("contact_tags")
+      .select("name")
+      .eq("location_id", ctx.channel.location_id)
+      .ilike("name", tag)
+      .limit(1);
+    const nome = (cat?.[0]?.name as string | undefined) ?? tag;
+    const { data: c } = await ctx.db.from("contacts").select("tags").eq("id", ctx.contact.id).maybeSingle();
+    const novas = comEtiquetas(c?.tags, [nome]);
+    if (!novas) return;
+    const { error } = await ctx.db.from("contacts").update({ tags: novas }).eq("id", ctx.contact.id);
+    if (error) console.warn("[bot] etiqueta da opção não gravada:", error.message);
+    else await botLogEvent(ctx, `Etiqueta "${nome}" adicionada pela resposta escolhida`);
+  } catch (e) {
+    console.warn("[bot] etiqueta da opção:", e);
+  }
+}
+
 async function aplicarCurso(ctx: Ctx, opt: BotOption, vars: Record<string, any>) {
   try {
     const curso = cursoDaOpcao(CURSOS, opt);
@@ -921,6 +947,7 @@ export async function maybeRunBot(
         }
         vars[node.var] = opt.value ?? opt.title;
         if (ehPerguntaDeCurso(node)) await aplicarCurso(ctx, opt, vars);
+        else if (opt.tag?.trim()) await aplicarEtiquetaDaOpcao(ctx, opt.tag.trim());
         /*
          * Nó marcado como desfecho (`registraDesfecho`) → a escolha vira a linha
          * permanente do relatório diário. É o análogo do nó `score`: em cada
