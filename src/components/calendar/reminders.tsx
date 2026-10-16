@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { conversationActions } from "@/lib/data/repos/db/conversations";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { CalendarClock, CheckSquare, Clock, Target, User, X } from "lucide-react";
@@ -96,6 +99,23 @@ export function Reminders() {
         ? due.appointment.contactId ?? null
         : null;
   const { contact: dueContact } = useDbContact(dueContactId);
+  const router = useRouter();
+  const [abrindo, setAbrindo] = useState(false);
+
+  // Abre a conversa do contato vinculado: sem isso o atendente caçava o nome
+  // na caixa — e nome comum ("José") devolve dezenas de conversas. Reusa a
+  // conversa existente (openForContact), mesma ação do card do funil.
+  const abrirConversa = async (contactId: string) => {
+    setAbrindo(true);
+    const res = await conversationActions.openForContact(contactId);
+    setAbrindo(false);
+    if (!res.id) {
+      toast.error(res.error ?? "Não foi possível abrir a conversa");
+      return;
+    }
+    dismiss();
+    router.push(`/conversas?c=${res.id}`);
+  };
 
   // Varredura + recarga periódica. Um efeito só: os dois timers vivem e morrem
   // juntos com o componente.
@@ -223,6 +243,17 @@ export function Reminders() {
             Lembrar em 5 min
           </Button>
           <span className="flex items-center gap-1.5">
+            {task.contactId && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-[11px]"
+                disabled={abrindo}
+                onClick={() => void abrirConversa(task.contactId!)}
+              >
+                Abrir conversa
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -305,6 +336,17 @@ export function Reminders() {
           Lembrar em 5 min
         </Button>
         <span className="flex items-center gap-1.5">
+            {appointment.contactId && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-[11px]"
+                disabled={abrindo}
+                onClick={() => void abrirConversa(appointment.contactId!)}
+              >
+                Abrir conversa
+              </Button>
+            )}
           <Link href="/calendarios" onClick={dismiss}>
             <Button variant="outline" size="sm" className="h-7 text-[11px]">
               Abrir agenda
