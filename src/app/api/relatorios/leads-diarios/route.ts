@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { noRecorte } from "@/lib/reports/quadro-leads";
 import { paginarRpc } from "@/lib/supabase/paginar-rpc";
+import { cursoDasEtiquetas } from "@/lib/bot/curso";
 import { canAccess } from "@/lib/auth/module-access";
 import {
   PERIODO_MAX_DIAS,
@@ -266,6 +267,25 @@ export async function GET(request: Request) {
     contato: (r.contato as string | null) ?? null,
     telefone: (r.telefone as string | null) ?? null,
   }));
+
+  /*
+   * Lead sem curso no card mas com a etiqueta "INTERESSADO …" no contato: o
+   * curso sai da etiqueta. O card pode ter ficado sem `course` (criado depois da
+   * resposta do bot, ou o curso foi marcado só na conversa), e o relatório dizia
+   * "sem curso marcado" para quem a equipe já tinha marcado.
+   */
+  const semCursoIds = [...new Set(leads.filter((l) => !l.curso && l.contatoId).map((l) => l.contatoId!))];
+  const tagsPorContato = new Map<string, string[]>();
+  for (let i = 0; i < semCursoIds.length; i += 200) {
+    const { data: cs } = await supabase
+      .from("contacts")
+      .select("id, tags")
+      .in("id", semCursoIds.slice(i, i + 200));
+    for (const c of cs ?? []) tagsPorContato.set(c.id as string, (c.tags as string[]) ?? []);
+  }
+  for (const l of leads) {
+    if (!l.curso && l.contatoId) l.curso = cursoDasEtiquetas(tagsPorContato.get(l.contatoId));
+  }
 
   /*
    * ⚠️ Os baldes nascem TODOS antes de somar: dia sem lead nenhum e hora sem
