@@ -146,3 +146,33 @@ export function comEtiquetas(
   }
   return mudou ? atual : null;
 }
+
+/**
+ * Nome de curso para o RELATÓRIO, a partir das etiquetas do contato.
+ *
+ * Rede para o lead cujo card ficou sem `course` (card criado depois da resposta,
+ * marcado à mão na conversa, triagem anterior a 14/10) mas que TEM a etiqueta
+ * "INTERESSADO …". Os nomes saem iguais aos que o bot grava no card
+ * ("Mecânico", "Piloto"…), senão a mesma formação viraria duas linhas.
+ * PP e PC viram "Piloto" (é o que o bot grava). Sem etiqueta de curso → null.
+ */
+const CURSO_DA_SIGLA: Record<string, string> = {
+  mma: "Mecânico",
+  pp: "Piloto",
+  pc: "Piloto",
+  "pos engenheiro": "Pós de Engenheiros",
+  comissario: "Comissário",
+};
+
+export function cursoDasEtiquetas(tags: readonly string[] | null | undefined): string | null {
+  for (const t of tags ?? []) {
+    const p = palavras(t);
+    if (p[0] !== PREFIXO || p.length < 2) continue;
+    const resto = p.slice(1).join(" ");
+    if (CURSO_DA_SIGLA[resto]) return CURSO_DA_SIGLA[resto];
+    if (resto.startsWith("masterclas")) return "Masterclass";
+    // Grafia do próprio catálogo, sem o prefixo.
+    return t.trim().replace(/^interessad[oa]s?\s+/i, "");
+  }
+  return null;
+}
