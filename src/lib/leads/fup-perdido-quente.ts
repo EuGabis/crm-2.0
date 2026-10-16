@@ -243,7 +243,34 @@ async function moverParaPerdidoQuente(db: any, conv: any, cache: Map<string, any
     body: `Lead movido para ${FUNIL} → ${FASE} · 48h sem resposta do cliente`,
   });
   await encerrarQualificadoDaEntrada(db, conv, card.id);
+  await etiquetarPerdidoQuente(db, conv);
   return true;
+}
+
+const ETIQUETA = "PERDIDO QUENTE";
+
+/**
+ * Etiqueta "PERDIDO QUENTE" no contato (pedido de 2026-10-16): o selo
+ * QUENTE/FRIO da caixa sai do desfecho da triagem, e o lead que caiu no FUP
+ * precisava ser reconhecível na lista e filtrável pelas etiquetas. A etiqueta
+ * entra no catálogo (senão a tela a esconde, ver `etiquetasVisiveis`).
+ * Best-effort: o card já foi movido, e falhar aqui não desfaz nada.
+ */
+async function etiquetarPerdidoQuente(db: any, conv: any) {
+  try {
+    const { data: cat } = await db.from("contact_tags").select("name")
+      .eq("location_id", conv.location_id).ilike("name", ETIQUETA).limit(1);
+    if (!cat?.length) {
+      await db.from("contact_tags").insert({ location_id: conv.location_id, name: ETIQUETA, position: 950 });
+    }
+    const { data: c } = await db.from("contacts").select("tags").eq("id", conv.contact_id).maybeSingle();
+    const tags: string[] = c?.tags ?? [];
+    if (tags.some((t) => t.toLowerCase() === ETIQUETA.toLowerCase())) return;
+    const { error } = await db.from("contacts").update({ tags: [...tags, ETIQUETA] }).eq("id", conv.contact_id);
+    if (error) console.warn(`[fup] etiqueta não gravada em ${conv.contact_id}: ${error.message}`);
+  } catch (e) {
+    console.warn("[fup] etiqueta PERDIDO QUENTE:", e);
+  }
 }
 
 const FUNIL_ENTRADA = "Controle de Leads";
