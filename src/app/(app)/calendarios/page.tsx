@@ -598,14 +598,26 @@ function AppointmentDialog({
                   editado. O clique comum também abre em nova guia, pelo mesmo
                   motivo — sair daqui descartaria o que ainda não foi salvo.
                 */}
-                <Link
+                {/*
+                  ⚠️ `<a>` + `window.open` explícito, e não `<Link target>`: dentro do
+                  diálogo (Base UI) o clique no Link não abria nada (relato de
+                  2026-10-19). O `stopPropagation` impede o diálogo de tratar o
+                  clique como interação dele.
+                */}
+                <a
                   href={`/contatos/${contactId}`}
                   target="_blank"
                   rel="noopener"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    window.open(`/contatos/${contactId}`, "_blank", "noopener");
+                  }}
                   className="inline-flex items-center gap-1 text-[10px] font-semibold text-indigo-600 hover:underline"
                 >
                   <ExternalLink className="size-3" /> Abrir contato
-                </Link>
+                </a>
                 <button
                   type="button"
                   className="text-[10px] text-slate-400 underline hover:text-slate-600"

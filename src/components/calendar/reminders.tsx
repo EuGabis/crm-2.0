@@ -10,6 +10,7 @@ import { ptBR } from "date-fns/locale";
 import { CalendarClock, CheckSquare, Clock, Target, User, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { contactName } from "@/lib/data/repos/contacts";
+import { useArrastavel } from "@/components/calendar/use-arrastavel";
 import { useApptStore, useDbAppointments } from "@/lib/data/repos/db/appointments";
 import { ehParaMim } from "@/lib/notifications/para-mim";
 import { useDbContact, useDbStore } from "@/lib/data/repos/db/contacts";
@@ -100,6 +101,7 @@ export function Reminders() {
         : null;
   const { contact: dueContact } = useDbContact(dueContactId);
   const router = useRouter();
+  const { style: posicao, alca } = useArrastavel();
   const [abrindo, setAbrindo] = useState(false);
 
   // Abre a conversa do contato vinculado: sem isso o atendente caçava o nome
@@ -204,9 +206,11 @@ export function Reminders() {
     return (
       <div
         role="alert"
+        data-arrastavel
+        style={posicao}
         className="fixed right-4 top-16 z-50 w-80 animate-in slide-in-from-top-2 fade-in rounded-xl border border-indigo-200 bg-white p-3 shadow-lg"
       >
-        <div className="mb-2 flex items-start justify-between gap-2">
+        <div {...alca} className={`mb-2 flex items-start justify-between gap-2 ${alca.className}`}>
           <p className="flex items-center gap-1.5 text-xs font-bold text-indigo-700">
             <CheckSquare className="size-3.5" />
             {minutesLeft > 0
@@ -289,9 +293,11 @@ export function Reminders() {
     // no meio de uma conversa.
     <div
       role="alert"
+        data-arrastavel
+        style={posicao}
       className="fixed right-4 top-16 z-50 w-80 animate-in slide-in-from-top-2 fade-in rounded-xl border border-indigo-200 bg-white p-3 shadow-lg"
     >
-      <div className="mb-2 flex items-start justify-between gap-2">
+      <div {...alca} className={`mb-2 flex items-start justify-between gap-2 ${alca.className}`}>
         <p className="flex items-center gap-1.5 text-xs font-bold text-indigo-700">
           <CalendarClock className="size-3.5" />
           {minutesLeft > 0
