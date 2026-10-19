@@ -44,7 +44,7 @@ begin
 end;
 $$;
 
-revoke all on function public.funil_oportunidades(uuid) from public, anon;
+revoke execute on function public.funil_oportunidades(uuid) from public, anon;
 grant execute on function public.funil_oportunidades(uuid) to authenticated;
 
 notify pgrst, 'reload schema';
