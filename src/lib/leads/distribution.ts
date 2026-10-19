@@ -939,7 +939,16 @@ export async function distributeOne(
    * ⚠️ Vale SÓ com `rodizio_offline` ligado (Vendas). Na Secretaria o ausente
    * continua fora: lá o problema que originou o rodízio foi aluno esperando.
    */
-  const list = semExcluidos(alwaysAll ? pool : online);
+  /*
+   * 🔴 Revisto em 2026-10-19 (Gabriel): **offline ≠ ausente.** Offline (CRM
+   * fechado ou inativo) recebe e o lead vai para Pendentes; AUSENTE declarou que
+   * não quer lead e NÃO recebe. A regra de 13/10 entregava ao ausente também —
+   * o Rogério, ausente, recebeu 60 leads num dia.
+   * E a fatia do ausente não fica reservada (denominador = elegíveis): foi o
+   * que prendeu 271 leads na fila em 13/10.
+   */
+  const list = semExcluidos(alwaysAll ? elegiveis : online);
+  const baseCota = alwaysAll ? elegiveis : pool;
 
   /*
    * 🔴 **PLANTÃO tem prioridade sobre a distribuição normal** (itens 6 e 7).
@@ -1043,7 +1052,7 @@ export async function distributeOne(
       cargasTemp = await recebidosNoDiaPorTemperatura(db, args.locationId, channelIds, pool);
     }
     const mapaTemp = tempLead ? cargasTemp?.get(tempLead) : undefined;
-    user = escolherPorCarga(list, cargas, pool, args.filaRestante ?? 1, cursor, pool, mapaTemp);
+    user = escolherPorCarga(list, cargas, baseCota, args.filaRestante ?? 1, cursor, baseCota, mapaTemp);
     if (!user) return null;
     // O mapa acompanha a atribuição: o próximo lead do MESMO tique já vê a carga
     // nova e vai para outra pessoa. Sem isso, dez leads seguidos iriam todos
@@ -1199,7 +1208,10 @@ export async function distributeDepartment(
   const elegiveis = await elegiveisOrdered(db, locationId, pool);
   // Mesma regra de `distributeOne`: com `rodizio_offline`, o ausente também
   // recebe (vai para Pendentes) — a fatia dele não fica presa na fila.
-  const list = dep?.rodizio_offline === true ? pool : online;
+  // Mesma regra de `distributeOne` (revista em 19/10): offline recebe (vai para
+  // Pendentes), AUSENTE não recebe e a fatia dele não fica reservada.
+  const list = dep?.rodizio_offline === true ? elegiveis : online;
+  const baseCota = dep?.rodizio_offline === true ? elegiveis : pool;
   if (!list.length) return { atribuidas: 0, retidas: convs.length };
 
   /*
@@ -1278,7 +1290,7 @@ export async function distributeDepartment(
       // Mesmo denominador do outro caminho: o TIME. Ver `poolParaCota`.
       const t = tempsDosLeads.get(conv.id);
       const mapaTemp = t ? cargasTemp?.get(t) : undefined;
-      user = escolherPorCarga(list, cargas, pool, convs.length - feitas, cursor + feitas, pool, mapaTemp);
+      user = escolherPorCarga(list, cargas, baseCota, convs.length - feitas, cursor + feitas, baseCota, mapaTemp);
       // Ninguém abaixo da cota: o RESTO FICA NA FILA, visível a todos, em vez de
       // ser empurrado para quem já está cheio. "Todos" pode não levar todos.
       if (!user) break;

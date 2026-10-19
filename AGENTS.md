@@ -9693,3 +9693,18 @@ O diálogo do compromisso mostrava o contato vinculado sem caminho até o cadast
 Ganhou **"Abrir contato"** ao lado de "Desvincular contato", e o nome do contato
 na Lista de compromissos virou link. ⚠️ No diálogo o link abre em NOVA GUIA
 mesmo no clique comum: navegar descartaria o compromisso que ainda não foi salvo.
+
+## Vendas: OFFLINE recebe em Pendentes, AUSENTE não recebe (2026-10-19)
+
+🔴 Revê a regra de 13/10. O Rogério marcou "Ausente" e recebeu 60 leads num dia
+— a de 13/10 tratava ausente como offline. Regra do Gabriel: "offline e ausente
+é diferente. Ausente ele não quer receber leads. Offline, ele estava online e
+depois ficou inativo, ou fechou o CRM".
+
+- Com `rodizio_offline` (Vendas), a lista do rodízio são os ELEGÍVEIS (pool
+  menos ausentes): offline recebe com `assigned_offline` → Pendentes; ausente
+  fica fora. Nos três caminhos (`distributeOne` = bot e varredura;
+  `distributeDepartment` = botão do Relatório).
+- ⚠️ O denominador da cota também são os elegíveis: reservar a fatia do ausente
+  foi o que prendeu 271 leads na fila em 13/10. Na Secretaria (sem
+  `rodizio_offline`) nada muda.
