@@ -198,6 +198,8 @@ const mapConversation = (r: any): Conversation => ({
   botPaused: r.bot_paused ?? false,
   awaitingDistribution: r.awaiting_distribution ?? false,
   assignedOffline: r.assigned_offline ?? false,
+  devolvidaEm: r.devolvida_em ?? null,
+  atribuidaEm: r.atribuida_em ?? null,
   /*
    * Carimbo de qualquer alteração da conversa (202609151100). É o cursor da
    * varredura: atribuição, finalização e arquivamento NÃO mexem em
