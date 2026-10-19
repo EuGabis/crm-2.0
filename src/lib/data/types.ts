@@ -163,6 +163,10 @@ export interface Conversation {
   awaitingDistribution?: boolean;
   /** Lead distribuído a este atendente enquanto TODOS estavam offline (0060). */
   assignedOffline?: boolean;
+  /** Quando o rodízio tirou a conversa de quem não respondeu (devolução). */
+  devolvidaEm?: string | null;
+  /** Quando o responsável atual recebeu a conversa. */
+  atribuidaEm?: string | null;
   /** Nome/telefone do contato EMBUTIDOS na consulta — para a lista mostrar o nome
    *  sem depender do store inteiro de contatos (não escala com 50 mil). */
   contactFirstName?: string;

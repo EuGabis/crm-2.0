@@ -102,6 +102,26 @@ const STATUS_VIEWS: InboxStatusView[] = ["abertas", "finalizadas", "arquivadas",
  * lead bom. Todas com remapeamento de dark em `globals.css` (conferido:
  * `bg-emerald-50`, `text-emerald-700`, `border-emerald-200` e as irmãs em sky).
  */
+/**
+ * Selo vermelho "Veio do rodízio" (pedido de 2026-10-19): a conversa foi tirada
+ * de outro vendedor por falta de resposta e caiu com o responsável atual. Vale
+ * enquanto a atribuição ATUAL for a da devolução (`atribuida_em` ≥
+ * `devolvida_em`); transferência feita por pessoa limpa `devolvida_em` no
+ * gatilho, e o selo some. Vermelho + texto: é o cliente que já esperou.
+ */
+function SeloRodizio({ conv }: { conv: { assignedTo?: string | null; devolvidaEm?: string | null; atribuidaEm?: string | null } }) {
+  if (!conv.assignedTo || !conv.devolvidaEm || !conv.atribuidaEm) return null;
+  if (new Date(conv.atribuidaEm) < new Date(conv.devolvidaEm)) return null;
+  return (
+    <span
+      title="Este lead estava com outro vendedor, ficou sem resposta e caiu no rodízio — o cliente já esperou"
+      className="shrink-0 rounded border border-red-200 bg-red-50 px-1 text-[9px] font-semibold uppercase tracking-wide text-red-700"
+    >
+      Veio do rodízio
+    </span>
+  );
+}
+
 function SeloTemperatura({ t }: { t: Temperatura }) {
   if (!t) return null;
   const frio = t === "frio";
@@ -874,6 +894,7 @@ export function ConversationList({
                       {contactName(contact)}
                     </span>
                     <SeloTemperatura t={temperaturaDe(desfechos.get(conv.id))} />
+                    <SeloRodizio conv={conv} />
                   </span>
                   <span className="flex shrink-0 items-center gap-1">
                     <SlaBadge days={conv.slaDays} />

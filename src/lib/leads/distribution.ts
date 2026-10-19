@@ -1760,7 +1760,25 @@ export async function devolverInativas(
         donoAnterior: anterior,
         channelIds,
       });
-      if (novo) redistribuidas++;
+      if (novo) {
+        redistribuidas++;
+        /*
+         * Pedido de 2026-10-19: o lead que caiu de outro vendedor vai para o
+         * TOPO da caixa de quem recebeu, como não lido, e a linha ganha o selo
+         * vermelho "Veio do rodízio" (lido de `devolvida_em`). Sem isto ele
+         * entrava no meio da lista, ordenado pela última mensagem de horas
+         * atrás — e o cliente, que já esperou 20 min, esperava mais.
+         */
+        const { data: atual } = await db
+          .from("conversations").select("unread_count").eq("id", conv.id).maybeSingle();
+        await db
+          .from("conversations")
+          .update({
+            last_message_at: new Date().toISOString(),
+            unread_count: Math.max(Number(atual?.unread_count ?? 0), 1),
+          })
+          .eq("id", conv.id);
+      }
     }
   }
 
