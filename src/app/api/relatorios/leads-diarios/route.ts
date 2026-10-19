@@ -276,12 +276,16 @@ export async function GET(request: Request) {
    */
   const semCursoIds = [...new Set(leads.filter((l) => !l.curso && l.contatoId).map((l) => l.contatoId!))];
   const tagsPorContato = new Map<string, string[]>();
-  for (let i = 0; i < semCursoIds.length; i += 200) {
-    const { data: cs } = await supabase
-      .from("contacts")
-      .select("id, tags")
-      .in("id", semCursoIds.slice(i, i + 200));
-    for (const c of cs ?? []) tagsPorContato.set(c.id as string, (c.tags as string[]) ?? []);
+  // Lotes de 200 ids (URL), 8 em paralelo: em série eram 51 idas e voltas
+  // num mês de Comercial + Vendas (10 mil leads sem curso no card).
+  const lotes: string[][] = [];
+  for (let i = 0; i < semCursoIds.length; i += 200) lotes.push(semCursoIds.slice(i, i + 200));
+  for (let i = 0; i < lotes.length; i += 8) {
+    const res = await Promise.all(
+      lotes.slice(i, i + 8).map((ids) => supabase.from("contacts").select("id, tags").in("id", ids)),
+    );
+    for (const { data: cs } of res)
+      for (const c of cs ?? []) tagsPorContato.set(c.id as string, (c.tags as string[]) ?? []);
   }
   for (const l of leads) {
     if (!l.curso && l.contatoId) l.curso = cursoDasEtiquetas(tagsPorContato.get(l.contatoId));

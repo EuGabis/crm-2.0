@@ -706,20 +706,20 @@ function LeadsDoDiaReport() {
    * que `lib/periodo.ts` documenta — e ele é silencioso: a tela mostraria o dia
    * vizinho sem nada acusar.
    */
-  const [periodo, setPeriodo] = useState<Periodo>(() => resolvePreset("30d"));
+  const [periodo, setPeriodo] = useState<Periodo>(() => resolvePreset("hoje"));
   const [fluxoKey, setFluxoKey] = useState(FLUXOS[0].key);
   const fluxo = FLUXOS.find((f) => f.key === fluxoKey) ?? FLUXOS[0];
 
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-bold text-slate-900">Leads do dia</h1>
-          <p className="text-xs text-slate-500">
-            Entrada e desfecho pela {fluxo.nome} — {fluxo.regua}.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+      {/*
+        Título e controles numa linha só, descrição EMBAIXO em linha própria: com
+        a descrição ao lado, o tamanho diferente do texto de cada fluxo mudava o
+        ponto de quebra e o seletor pulava de lugar ao trocar de aba.
+      */}
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-lg font-bold text-slate-900">Leads do dia</h1>
+        <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
           {/*
             Seletor de fluxo em botões e não num `Select`: são dois (três com o
             financeiro, um dia), a troca é comparativa e um menu esconderia que a
@@ -746,6 +746,9 @@ function LeadsDoDiaReport() {
           <PeriodoPicker periodo={periodo} onChange={setPeriodo} />
         </div>
       </div>
+      <p className="mb-4 text-xs text-slate-500">
+        Entrada e desfecho pela {fluxo.nome} — {fluxo.regua}.
+      </p>
       {/*
         ⚠️ Remontado por `key` ao trocar período OU fluxo, e não limpando o
         estado dentro do efeito: `setState` síncrono no corpo de um `useEffect`
