@@ -72,6 +72,40 @@ const PAGINA = 1000;
  * funil, que é exatamente o defeito que isto conserta.
  */
 async function fetchAllOpportunities(supabase: ReturnType<typeof createClient>) {
+  /*
+   * Caminho rápido: public.funil_oportunidades (202610191500). A policy de
+   * opportunities roda pipeline_visible() LINHA A LINHA, e cada página custava
+   * 4–7 s (medido em 19/10, 20 mil cards); a função decide os funis visíveis
+   * uma vez: 20 ms (vendedor) e 138 ms (admin) para o conjunto inteiro, mesmos
+   * cards. RPC também é cortada em 1000 linhas — por isso paginada.
+   * Sem a função (migração não aplicada), cai na consulta antiga.
+   */
+  await useDbStore.getState().ensureSession();
+  const loc = useDbStore.getState().locationId;
+  if (loc) {
+    const viaFuncao: any[] = [];
+    let falhou = false;
+    // Páginas em lotes paralelos de 5: a ordem (created_at desc, id) é estável,
+    // então páginas buscadas juntas não repetem nem pulam linha.
+    const LOTE = 5;
+    for (let base = 0; !falhou; base += LOTE) {
+      const res = await Promise.all(
+        Array.from({ length: LOTE }, (_, i) => {
+          const de = (base + i) * PAGINA;
+          return supabase.rpc("funil_oportunidades", { p_location: loc }).range(de, de + PAGINA - 1);
+        }),
+      );
+      let acabou = false;
+      for (const { data, error } of res) {
+        if (error) { falhou = true; break; }
+        viaFuncao.push(...(data ?? []));
+        if ((data?.length ?? 0) < PAGINA) { acabou = true; break; }
+      }
+      if (acabou) break;
+    }
+    if (!falhou) return { data: viaFuncao, error: null };
+  }
+
   const linhas: any[] = [];
   for (let de = 0; ; de += PAGINA) {
     const { data, error } = await supabase
