@@ -130,6 +130,24 @@ function ConversasPageInner() {
   const [selectedId, setSelectedId] = useState<string | null>(
     () => searchParams.get("c")
   );
+  /*
+   * 🔴 `?c=` que MUDA com a tela já aberta (relato de 2026-10-20): o "Abrir
+   * conversa" do lembrete de compromisso/tarefa faz `router.push` para
+   * `/conversas?c=<id>`, e quem recebe o lembrete quase sempre JÁ está em
+   * Conversas. A página só lia o `c` no inicializador do `useState`, então a URL
+   * trocava e nada acontecia. Agora a troca do parâmetro seleciona a conversa.
+   * Ajuste durante a renderização (comparando com o último `c` visto), e não
+   * num efeito: `setState` em efeito causa renderização em cascata.
+   */
+  const cDaUrl = searchParams.get("c");
+  const [ultimoC, setUltimoC] = useState(cDaUrl);
+  if (cDaUrl !== ultimoC) {
+    setUltimoC(cDaUrl);
+    if (cDaUrl) {
+      setSelectedId(cDaUrl);
+      setTab("Conversas");
+    }
+  }
   const [newOpen, setNewOpen] = useState(false);
   const selectedConversation = useConversation(selectedId);
 
