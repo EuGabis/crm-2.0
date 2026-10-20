@@ -707,10 +707,30 @@ export function cursorDeConversas(convs: Conversation[]): string | null {
   return max;
 }
 
+/*
+ * 🔴 Cursor PRÓPRIO da varredura (relato de 2026-10-20: conversa transferida às
+ * 11:49 só apareceu para o novo dono duas horas depois).
+ *
+ * O cursor era o MAIOR `updated_at` da store — e a store também é alimentada
+ * pelo Realtime de OUTRAS conversas. Transferência às 11:49:00 + qualquer
+ * atualização de outra conversa às 11:49:30 entregue ao vivo = a varredura
+ * seguinte pedia "depois de 11:49:30" e a transferida (que não era visível antes
+ * e por isso não veio pelo Realtime) ficava para trás para sempre.
+ *
+ * Agora o cursor só avança com o que a PRÓPRIA varredura leu, e cada consulta
+ * volta 2 min (transação que comitou depois com `updated_at` do início dela).
+ * As repetidas são inofensivas: a linha é substituída pela mesma.
+ */
+let cursorResync: string | null = null;
+const SOBREPOSICAO_RESYNC_MS = 2 * 60_000;
+
 export async function resyncConversations(): Promise<void> {
   const supabase = createClient();
   const s = useConvStore.getState();
-  const cursor = cursorDeConversas(s.conversations);
+  const base = cursorResync ?? cursorDeConversas(s.conversations);
+  const cursor = base
+    ? new Date(new Date(base).getTime() - SOBREPOSICAO_RESYNC_MS).toISOString()
+    : null;
 
   let linhas: any[] | null = null;
   if (cursor) {
@@ -730,6 +750,11 @@ export async function resyncConversations(): Promise<void> {
     if (error || !data) return;
     linhas = data;
   }
+  for (const r of linhas) {
+    const u = r.updated_at as string | null;
+    if (u && (!cursorResync || u > cursorResync)) cursorResync = u;
+  }
+  if (!cursorResync && base) cursorResync = base;
   if (linhas.length === 0) return;
 
   const cur = useConvStore.getState();
@@ -2176,7 +2201,9 @@ export function useInboxLiveSync(intervalMs = 15000) {
         // sem mensagem nova (ex.: lead distribuído/transferido pra este atendente)
         // E as que mudaram de estado sem mensagem nova (atribuída, finalizada,
         // arquivada), que é o que o `syncInboxDelta` nunca enxerga.
-        if (ticks % 4 === 0) await resyncConversations();
+        // A cada varredura (15 s): a consulta por `updated_at` custa ~9 ms
+        // (medido 2026-10-20) e transferência não pode esperar um minuto.
+        await resyncConversations();
         ticks++;
       } finally {
         running = false;
