@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { ExternalLink, Plus, Trash2 } from "lucide-react";
+import { CheckSquare, ExternalLink, Plus, Square, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { SubNav } from "@/components/layout/subnav";
 import { WeekCalendar } from "@/components/modules/week-calendar";
@@ -33,6 +33,7 @@ import { useContactsByIds } from "@/lib/data/repos/db/contacts-search";
 import { useDbOpportunities, useDbPipelines } from "@/lib/data/repos/db/pipeline";
 import { useDbTeam } from "@/lib/data/repos/db/contacts";
 import { useMyMembership } from "@/lib/data/repos/db/team";
+import { taskActions, useContactsModule } from "@/lib/data/repos/db/contacts-module";
 import { contactName } from "@/lib/data/repos/contacts";
 import type { Appointment, Opportunity } from "@/lib/data/types";
 import { cn } from "@/lib/utils";
@@ -56,13 +57,22 @@ function ListaCompromissos({
   const confirm = useConfirm();
   const { appointments } = useDbAppointments();
   /*
+   * Tarefas com prazo entram na mesma lista (pedido de 2026-10-19): a tela só
+   * mostrava compromissos, e a tarefa agendada só aparecia no lembrete.
+   */
+  const { tasks } = useContactsModule();
+  const [tipo, setTipo] = useState<"Todos" | "Compromissos" | "Tarefas">("Todos");
+  /*
    * ⚠️ **Era `useDbContacts()` — os 41.583 contatos da empresa baixados para
    * escrever o nome em ~59 linhas.** É o mesmo defeito que a 0078 corrigiu na
    * tela de Contatos, e o `AGENTS.md` já listava Calendários como pendência
    * dele. `useContactsByIds` busca só os contatos que os compromissos citam,
    * em lotes de 200.
    */
-  const contatosPorId = useContactsByIds(appointments.map((a) => a.contactId));
+  const contatosPorId = useContactsByIds([
+    ...appointments.map((a) => a.contactId),
+    ...tasks.map((t) => t.contactId),
+  ]);
   const opportunities = useDbOpportunities();
   const team = useDbTeam();
   const { isAdmin } = useMyMembership();
@@ -80,8 +90,28 @@ function ListaCompromissos({
 
   const rows = useMemo(() => {
     const now = Date.now();
-    return appointments
+    const nomeContato = (id: string | null) => {
+      if (!id) return "—";
+      const c = contatosPorId.get(id);
+      return c ? contactName(c) : "Carregando...";
+    };
+    const tarefas = tasks
+      .filter((t) => t.dueAt)
+      .map((t) => ({
+        kind: "tarefa" as const,
+        id: `task-${t.id}`,
+        task: t,
+        title: t.title,
+        startDate: new Date(t.dueAt!),
+        contactId: t.contactId,
+        contato: nomeContato(t.contactId),
+        lead: "—",
+        ownerId: t.assigneeId,
+        agenda: t.assigneeId ? team.find((u) => u.id === t.assigneeId)?.name ?? "—" : "Empresa",
+      }));
+    const compromissos = appointments
       .map((a) => ({
+        kind: "compromisso" as const,
         ...a,
         startDate: new Date(a.start),
         contato: (() => {
@@ -98,7 +128,12 @@ function ListaCompromissos({
         agenda: a.ownerId
           ? team.find((u) => u.id === a.ownerId)?.name ?? "—"
           : "Empresa",
-      }))
+      }));
+    const todas = [
+      ...(tipo === "Tarefas" ? [] : compromissos),
+      ...(tipo === "Compromissos" ? [] : tarefas),
+    ];
+    return todas
       .filter((a) => (owner === ALL ? true : owner === SHARED ? !a.ownerId : a.ownerId === owner))
       .filter((a) => (filtro === "Futuro" ? a.startDate.getTime() >= now : a.startDate.getTime() < now))
       .sort((a, b) =>
@@ -106,7 +141,7 @@ function ListaCompromissos({
           ? a.startDate.getTime() - b.startDate.getTime()
           : b.startDate.getTime() - a.startDate.getTime()
       );
-  }, [appointments, contatosPorId, opportunities, team, filtro, owner]);
+  }, [appointments, tasks, tipo, contatosPorId, opportunities, team, filtro, owner]);
 
   return (
     <>
@@ -114,7 +149,7 @@ function ListaCompromissos({
         <div>
           <h1 className="text-lg font-bold text-slate-900">Lista de compromissos</h1>
           <p className="text-xs text-slate-500">
-            Todos os agendamentos sincronizados, em formato de lista
+            Compromissos e tarefas com prazo, em formato de lista
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -144,6 +179,20 @@ function ListaCompromissos({
               </SelectContent>
             </Select>
           )}
+          <div className="flex gap-1">
+            {(["Todos", "Compromissos", "Tarefas"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTipo(t)}
+                className={cn(
+                  "rounded-full px-3 py-1 text-[11px] font-medium",
+                  tipo === t ? "bg-indigo-100 text-indigo-700" : "text-slate-500 hover:bg-slate-100"
+                )}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
           <div className="flex gap-1">
             {(["Futuro", "Passado"] as const).map((f) => (
               <button
@@ -178,7 +227,45 @@ function ListaCompromissos({
             </tr>
           </thead>
           <tbody>
-            {rows.map((a) => (
+            {rows.map((a) =>
+              a.kind === "tarefa" ? (
+                <tr key={a.id} className="border-b last:border-0 hover:bg-slate-50">
+                  <td className={cn("whitespace-nowrap px-4 py-2.5 font-medium", a.task.status === "done" ? "text-slate-400 line-through" : "text-slate-800")}>
+                    {a.title}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">
+                    {format(a.startDate, "EEE, dd 'de' MMM · HH:mm", { locale: ptBR })}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">—</td>
+                  <td className="whitespace-nowrap px-4 py-2.5">
+                    <Badge variant="secondary" className="bg-amber-100 text-amber-700">
+                      Tarefa
+                    </Badge>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">
+                    {a.contactId ? (
+                      <Link href={`/contatos/${a.contactId}`} className="text-indigo-600 hover:underline">
+                        {a.contato}
+                      </Link>
+                    ) : (
+                      a.contato
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">{a.lead}</td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">{a.agenda}</td>
+                  <td className="px-4 py-2.5">
+                    <button
+                      onClick={async () => {
+                        if (!(await taskActions.toggle(a.task.id))) toast.error("Não foi possível atualizar a tarefa");
+                      }}
+                      className="text-slate-400 hover:text-emerald-600"
+                      title={a.task.status === "done" ? "Reabrir tarefa" : "Concluir tarefa"}
+                    >
+                      {a.task.status === "done" ? <CheckSquare className="size-3.5" /> : <Square className="size-3.5" />}
+                    </button>
+                  </td>
+                </tr>
+              ) : (
               <tr
                 key={a.id}
                 onClick={() => onEdit(a)}
@@ -234,11 +321,12 @@ function ListaCompromissos({
                   </button>
                 </td>
               </tr>
-            ))}
+              )
+            )}
             {rows.length === 0 && (
               <tr>
                 <td colSpan={8} className="py-10 text-center text-sm text-slate-500">
-                  Nenhum compromisso {filtro === "Futuro" ? "futuro" : "passado"}
+                  Nada {filtro === "Futuro" ? "futuro" : "passado"} neste filtro
                 </td>
               </tr>
             )}
