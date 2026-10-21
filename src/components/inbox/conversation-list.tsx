@@ -736,6 +736,7 @@ export function ConversationList({
           Etiquetas
         </span>
         <TagPicker
+          permiteCriar={false}
           value={tagFilter}
           onChange={setTagFilter}
           placeholder="Todas"

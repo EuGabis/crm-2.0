@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, Search, Tag as TagIcon } from "lucide-react";
+import { ChevronDown, Plus, Search, Tag as TagIcon } from "lucide-react";
+import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { useContactTags } from "@/lib/data/repos/db/tags";
+import { tagActions, useContactTags } from "@/lib/data/repos/db/tags";
 import { cn } from "@/lib/utils";
 
 /**
@@ -30,12 +31,15 @@ export function TagPicker({
   placeholder = "Etiquetas",
   className,
   align = "start",
+  permiteCriar = true,
 }: {
   value: string[];
   onChange: (tags: string[]) => void;
   placeholder?: string;
   className?: string;
   align?: "start" | "end";
+  /** Desligado no FILTRO da caixa: filtrar por etiqueta inexistente não acha nada. */
+  permiteCriar?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [term, setTerm] = useState("");
@@ -43,6 +47,23 @@ export function TagPicker({
 
   const busca = term.trim().toLowerCase();
   const visiveis = busca ? tags.filter((t) => t.name.toLowerCase().includes(busca)) : tags;
+  /*
+   * "+ Criar" aparece quando a busca não acha a etiqueta EXATA (pedido de
+   * 2026-10-21: vendedores criam). Exata e sem diferenciar maiúsculas — o
+   * catálogo é único por lower(name). Criada, já fica marcada.
+   */
+  const [criando, setCriando] = useState(false);
+  const podeCriar = permiteCriar && !!busca && loaded && !tags.some((t) => t.name.trim().toLowerCase() === busca);
+  const criar = async () => {
+    const nome = term.trim();
+    setCriando(true);
+    const r = await tagActions.create(nome);
+    setCriando(false);
+    if (!r.ok) return toast.error(r.erro ?? "Não foi possível criar a etiqueta");
+    toast.success(`Etiqueta "${nome}" criada`);
+    setTerm("");
+    onChange([...value, nome]);
+  };
 
   /*
    * ⚠️ Tudo aqui compara SEM diferenciar maiúsculas, porque o catálogo é único
@@ -112,6 +133,17 @@ export function TagPicker({
           </div>
         </div>
 
+        {podeCriar && (
+          <button
+            type="button"
+            disabled={criando}
+            onClick={() => void criar()}
+            className="flex w-full items-center gap-1.5 border-b px-3 py-2 text-left text-xs font-medium text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"
+          >
+            <Plus className="size-3.5 shrink-0" />
+            <span className="truncate">Criar etiqueta &quot;{term.trim()}&quot;</span>
+          </button>
+        )}
         {/* Altura limitada + rolagem: são 21 etiquetas hoje e a lista cresce. */}
         <div className="max-h-64 overflow-y-auto p-1 [scrollbar-width:thin]">
           {!loaded ? (
@@ -121,7 +153,7 @@ export function TagPicker({
                dois levam a ações diferentes (pedir ao admin × limpar a busca). */
             <p className="px-2 py-3 text-xs text-slate-400">
               {tags.length === 0
-                ? "Nenhuma etiqueta cadastrada. Um administrador cria em Configurações → Etiquetas."
+                ? "Nenhuma etiqueta cadastrada. Digite o nome acima para criar."
                 : `Nada encontrado para "${term.trim()}".`}
             </p>
           ) : (

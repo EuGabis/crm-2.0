@@ -61,11 +61,11 @@ export default function EtiquetasPage() {
     <div className="max-w-2xl">
       <h1 className="text-lg font-bold text-slate-900">Etiquetas</h1>
       <p className="mt-1 text-xs text-slate-500">
-        A lista que a equipe usa para marcar contatos e filtrar a caixa de entrada. Marcar é
-        de todos; criar e editar, só de administradores.
+        A lista que a equipe usa para marcar contatos e filtrar a caixa de entrada. Marcar e criar
+        é de todos; renomear e excluir, só de administradores.
       </p>
 
-      {isAdmin && (
+      {(
         <div className="mt-4 flex gap-1.5">
           <Input
             value={novo}
@@ -91,7 +91,7 @@ export default function EtiquetasPage() {
         ) : tags.length === 0 ? (
           <p className="p-4 text-xs text-slate-400">
             Nenhuma etiqueta ainda.{" "}
-            {isAdmin ? "Crie a primeira acima." : "Peça a um administrador para criar."}
+            Crie a primeira acima.
           </p>
         ) : (
           <ul className="divide-y">

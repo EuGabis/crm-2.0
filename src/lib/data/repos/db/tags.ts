@@ -164,7 +164,7 @@ export const tagActions = {
     if (error) {
       return {
         ok: false,
-        erro: error.code === "42501" ? "Só administradores criam etiquetas." : error.message,
+        erro: error.code === "23505" ? `A etiqueta "${nome}" já existe.` : error.message,
       };
     }
     await useTagStore.getState().reload();
