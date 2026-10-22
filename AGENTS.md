@@ -9708,3 +9708,29 @@ depois ficou inativo, ou fechou o CRM".
 - ⚠️ O denominador da cota também são os elegíveis: reservar a fatia do ausente
   foi o que prendeu 271 leads na fila em 13/10. Na Secretaria (sem
   `rodizio_offline`) nada muda.
+
+## Origem dos leads (migração 202610221000)
+
+Lead chega pelo WhatsApp por dois caminhos, e os dois agora deixam origem em
+`lead_origens` (uma linha por conversa), mostrada no cadastro do contato:
+
+- **Anúncio da Meta com botão de WhatsApp:** a Cloud API manda `referral` (id do
+  anúncio, título, link, `ctwa_clid`) na 1ª mensagem; o webhook grava
+  (`lib/origem/registrar.ts`).
+- **Botão de WhatsApp no site (Google Ads e outros):** o WhatsApp não carrega
+  gclid/UTM. O script `/api/whatsapp/rastreio.js` (colar no site) guarda
+  gclid/UTMs da chegada, e no clique do link wa.me grava o clique
+  (`/api/whatsapp/clique` → `lead_cliques`) e acrescenta "(cód. XXXXXX)" à
+  mensagem pronta. O webhook acha o código e liga o lead ao clique.
+- ⚠️ A empresa do clique sai do NÚMERO do link (`whatsapp_channels.phone_e164`,
+  últimos 10 dígitos), nunca de um id vindo do site. As rotas ficam em
+  `api/whatsapp` porque essa pasta já está fora do matcher do proxy.
+- ⚠️ Código só é reconhecido COM rótulo ("cód.", "cod", "ref") e alfabeto sem
+  0/O/1/I/L: palavra solta de 6 letras ("BRASIL") ligaria o lead a um clique
+  aleatório. `npm run test:origem`.
+- ⏳ Nomes de campanha/conjunto/anúncio: hoje vêm da UTM (site) ou do título do
+  anúncio (Meta). Resolver pelo gclid exige o Google Ads conectado (click_view,
+  só 90 dias); pelo id do anúncio da Meta exige a Marketing API.
+
+Google Ads: `redirectUri()` passou a usar `appBaseUrl()` — com
+`NEXT_PUBLIC_APP_URL` no domínio aposentado, o OAuth dava redirect_uri_mismatch.

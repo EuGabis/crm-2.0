@@ -1,3 +1,4 @@
+import { appBaseUrl } from "@/lib/config/app-url";
 import crypto from "crypto";
 
 /** Assina/valida o `state` do OAuth (anti-CSRF). HMAC com o client secret do OAuth. */
@@ -30,6 +31,8 @@ export function verifyState(state: string | null): boolean {
 }
 
 export function redirectUri(): string {
-  const base = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  // `appBaseUrl` ignora o domínio aposentado (lito-crm.vercel.app): com a env
+  // antiga, o Google recusava com redirect_uri_mismatch (2026-10-22).
+  const base = appBaseUrl();
   return `${base.replace(/\/$/, "")}/api/google-ads/oauth/callback`;
 }

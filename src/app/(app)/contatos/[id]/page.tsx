@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { ChannelIcon } from "@/components/shared/channel-icon";
 import { ContactActivity } from "@/components/contacts/contact-activity";
 import { ContactConversations } from "@/components/contacts/contact-conversations";
+import { LeadOrigem } from "@/components/contacts/lead-origem";
 import { CustomFieldsInputs } from "@/components/contacts/custom-fields-inputs";
 import { TagBadges } from "@/components/contacts/tag-badges";
 import { contactName } from "@/lib/data/repos/contacts";
@@ -443,6 +444,7 @@ export default function ContactDetailPage({ params }: { params: Promise<{ id: st
       </div>
 
       <div className="mt-4">
+        <LeadOrigem contactId={contact.id} />
         <ContactConversations contactId={contact.id} contatoNome={contactName(contact)} />
       </div>
 
