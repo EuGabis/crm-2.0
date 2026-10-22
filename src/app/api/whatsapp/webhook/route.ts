@@ -1,3 +1,4 @@
+import { registrarOrigem } from "@/lib/origem/registrar";
 import crypto from "crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isAdvance } from "@/lib/whatsapp/status-rank";
@@ -660,6 +661,15 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
     if ((insErr as any).code !== "23505") throw insErr;
     return;
   }
+
+  // De onde veio o lead: anúncio da Meta (`referral`) ou código do botão do site.
+  await registrarOrigem(db, {
+    locationId: channel.location_id,
+    contactId: contact.id,
+    conversationId: conv.id,
+    referral: m.referral ?? null,
+    texto: body,
+  });
 
   /*
    * ⚠️ **Resposta automática agendada vem ANTES de tudo.** Se viesse depois, um
