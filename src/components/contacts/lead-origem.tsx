@@ -33,7 +33,12 @@ type Origem = {
 
 const NOME: Record<string, string> = { meta: "Meta (Instagram/Facebook)", google: "Google Ads", site: "Site" };
 
-export function LeadOrigem({ contactId }: { contactId: string }) {
+/**
+ * `compacto`: para a barra lateral das Conversas e o detalhe do lead (~300 px).
+ * Mostra só a origem mais recente, sem a moldura do card, e só os campos que o
+ * vendedor usa (de onde veio e qual anúncio). O cadastro do contato mostra tudo.
+ */
+export function LeadOrigem({ contactId, compacto = false }: { contactId: string; compacto?: boolean }) {
   const [linhas, setLinhas] = useState<Origem[] | null>(null);
 
   useEffect(() => {
@@ -51,6 +56,48 @@ export function LeadOrigem({ contactId }: { contactId: string }) {
       vivo = false;
     };
   }, [contactId]);
+
+  if (compacto) {
+    if (linhas === null) return <p className="text-[11px] text-slate-400">Carregando...</p>;
+    const o = linhas[0];
+    if (!o) return <p className="text-[11px] text-slate-500">Origem não registrada.</p>;
+    const anuncio = o.anuncio ?? o.meta_headline ?? o.utm_content;
+    const campanha = o.campanha ?? o.utm_campaign;
+    return (
+      <div className="space-y-0.5 text-[11px]">
+        <p className="font-semibold text-slate-800">
+          {NOME[o.plataforma] ?? o.plataforma}
+          <span className="font-normal text-slate-500">
+            {" · "}
+            {format(new Date(o.created_at), "dd/MM HH:mm", { locale: ptBR })}
+          </span>
+        </p>
+        {campanha && (
+          <p className="truncate text-slate-600" title={campanha}>
+            <span className="text-slate-400">Campanha:</span> {campanha}
+          </p>
+        )}
+        {anuncio && (
+          <p className="truncate text-slate-600" title={anuncio}>
+            <span className="text-slate-400">Anúncio:</span> {anuncio}
+          </p>
+        )}
+        {(o.meta_source_url ?? o.pagina) && (
+          <a
+            href={(o.meta_source_url ?? o.pagina)!}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block truncate text-indigo-600 hover:underline"
+          >
+            {o.via === "anuncio_whatsapp" ? "Ver o anúncio" : "Ver a página"}
+          </a>
+        )}
+        {linhas.length > 1 && (
+          <p className="text-slate-400">+{linhas.length - 1} entrada(s) anterior(es) no cadastro</p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-xl border bg-white p-4">

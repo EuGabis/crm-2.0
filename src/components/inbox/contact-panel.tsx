@@ -1,5 +1,6 @@
 "use client";
 
+import { LeadOrigem } from "@/components/contacts/lead-origem";
 import { useState } from "react";
 import Link from "next/link";
 import {
@@ -441,6 +442,17 @@ export function ContactPanel({
                           <p className="truncate text-xs text-slate-700">{v}</p>
                         </div>
                       ))}
+                    </AccordionContent>
+                  </AccordionItem>
+
+                  {/* Origem do lead (anúncio da Meta / botão do site). Monta só
+                      com a seção aberta, como "Resumo pagamentos". */}
+                  <AccordionItem value="origem">
+                    <AccordionTrigger className="py-2 text-xs font-bold">
+                      Origem do lead
+                    </AccordionTrigger>
+                    <AccordionContent>
+                      {sections.includes("origem") && <LeadOrigem contactId={contactId} compacto />}
                     </AccordionContent>
                   </AccordionItem>
 
