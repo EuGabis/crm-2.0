@@ -18,6 +18,7 @@ import {
 } from "recharts";
 import { SubNav } from "@/components/layout/subnav";
 import { PeriodoPicker } from "@/components/shared/period-picker";
+import { OrigemAnunciosReport } from "@/components/reports/origem-anuncios";
 import { TOOLTIP_STYLE } from "@/components/dashboard/opportunity-widgets";
 import { GoogleAdsReport } from "@/components/reports/google-ads-report";
 import { ServiceSlaReport } from "@/components/reports/service-sla-report";
@@ -1454,7 +1455,12 @@ function RelatoriosPageInner() {
         {activeTab === "Conversas do setor" && isSupervisor && <SectorReport />}
         {activeTab === "Agentes" && isAdmin && <AgentesReport />}
         {activeTab === "Log do bot" && isAdmin && <LogDoBot />}
-        {activeTab === "Atribuição" && <AtribuicaoReport />}
+        {activeTab === "Atribuição" && (
+          <>
+            <AtribuicaoReport />
+            <OrigemAnunciosReport />
+          </>
+        )}
         {activeTab === "Google Ads" && <GoogleAdsReport />}
       </div>
     </div>

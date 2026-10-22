@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ContactActivity } from "@/components/contacts/contact-activity";
 import { ContactConversations } from "@/components/contacts/contact-conversations";
+import { LeadOrigem } from "@/components/contacts/lead-origem";
 import { PaymentsProfileView } from "@/components/payments/lead-payments-panel";
 import { contactName } from "@/lib/data/repos/contacts";
 import { useDbContact, useDbTeam } from "@/lib/data/repos/db/contacts";
@@ -298,6 +299,13 @@ function LeadDetailBody({
                     value={fmtDate(contact.lastActivityAt, true)}
                   />
                 </dl>
+                {/* De onde veio (anúncio da Meta / botão do site). */}
+                <div className="mt-2 border-t pt-2">
+                  <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">
+                    Origem do lead
+                  </p>
+                  <LeadOrigem contactId={contact.id} compacto />
+                </div>
                 {contact.tags.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1">
                     {contact.tags.map((t) => (
