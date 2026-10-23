@@ -5,6 +5,7 @@ import { devolverInativasDeTodas, distribuirFilaDeTodas } from "@/lib/leads/dist
 import { fupPerdidoQuente } from "@/lib/leads/fup-perdido-quente";
 import { continuarPerguntasSemResposta } from "@/lib/bot/engine";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { resolverNomesMeta } from "@/lib/origem/nomes-meta";
 
 /** Nunca cachear: a rota é o batimento do motor. */
 export const dynamic = "force-dynamic";
@@ -45,7 +46,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "não autorizado" }, { status: 401 });
   }
 
-  const [automations, scheduled, transcricoes, devolucoes, fila, fup, semResposta] = await Promise.allSettled([
+  const [automations, scheduled, transcricoes, devolucoes, fila, fup, semResposta, nomesMeta] = await Promise.allSettled([
     processDueRuns(),
     dispatchScheduledMessages(),
     processarFilaDeTranscricao(),
@@ -66,7 +67,12 @@ export async function POST(request: Request) {
     fupPerdidoQuente(),
     // Pergunta do bot com prazo (`semRespostaMin`): segue sem resposta (2026-10-23).
     continuarPerguntasSemResposta(createAdminClient()),
+    // Nomes de campanha/conjunto/anúncio da Meta pelo id do anúncio (META_ADS_TOKEN).
+    resolverNomesMeta(),
   ]);
+  if (nomesMeta.status === "rejected") {
+    console.error("[origem] falha ao resolver nomes da Meta:", nomesMeta.reason);
+  }
   if (semResposta.status === "rejected") {
     console.error("[bot] falha ao seguir perguntas sem resposta:", semResposta.reason);
   }
