@@ -72,6 +72,16 @@ export type BotNode =
        * card. Sem a marca, vale para a pergunta de lista com `var: "curso"`.
        */
       marcaCurso?: boolean;
+      /**
+       * Prazo (min) para seguir SEM resposta para `next` (pedido 2026-10-23).
+       * "Você vai ser direcionado para nosso consultor. Como prefere o
+       * contato?" esperava a resposta para distribuir: 204 leads quentes
+       * ficaram sem dono porque o cliente não respondeu. Ver
+       * `continuarPerguntasSemResposta` (tick de minuto).
+       */
+      semRespostaMin?: number;
+      /** Texto do lembrete enviado no 1º prazo sem resposta (a pergunta vai junto). */
+      lembreteSemResposta?: string;
       next: string | null;
     }
   // Grava a resposta num campo do contato (ex.: first_name a partir de "name").
