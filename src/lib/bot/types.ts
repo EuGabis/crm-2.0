@@ -80,6 +80,8 @@ export type BotNode =
        * `continuarPerguntasSemResposta` (tick de minuto).
        */
       semRespostaMin?: number;
+      /** Texto do lembrete enviado no 1º prazo sem resposta (a pergunta vai junto). */
+      lembreteSemResposta?: string;
       next: string | null;
     }
   // Grava a resposta num campo do contato (ex.: first_name a partir de "name").

@@ -1139,8 +1139,45 @@ export async function continuarPerguntasSemResposta(db: any): Promise<{ seguiram
         conversationId: conv.id,
         flowKey: flow.key,
       };
-      await botLogEvent(ctx, `Cliente não respondeu em ${prazo} min — o bot seguiu para o próximo passo`);
-      await advance(ctx, flow, node.next, s.vars ?? {});
+      const vars = (s.vars ?? {}) as Record<string, any>;
+      /*
+       * 1ª vez sem resposta: o bot CHAMA o cliente de novo (pedido 2026-10-23) e
+       * espera outro prazo. Só na 2ª segue para o `next`.
+       * ⚠️ Só dentro da janela de 24h da última mensagem do cliente: fora dela a
+       * Meta recusa texto livre (#131047), e o acumulado antigo (dias parado)
+       * segue direto para o consultor em vez de receber um lembrete que não sai.
+       */
+      if (vars._lembrete !== s.node_id) {
+        const { data: ultimaIn } = await db
+          .from("messages")
+          .select("created_at")
+          .eq("conversation_id", conv.id)
+          .eq("direction", "in")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const dentroDaJanela =
+          !!ultimaIn && Date.now() - new Date(ultimaIn.created_at).getTime() < 23 * 3600_000;
+        if (dentroDaJanela) {
+          const lembrete =
+            typeof node.lembreteSemResposta === "string" && node.lembreteSemResposta.trim()
+              ? node.lembreteSemResposta
+              : "Oi! Ainda está por aí? 🙂 Só preciso dessa resposta para te passar ao consultor:";
+          await botSend(ctx, render(lembrete, vars));
+          await botSendList(ctx, render(node.text, vars), node.listButton, node.options ?? []);
+          await saveSession(ctx, s.node_id, "aguardando", { ...vars, _lembrete: s.node_id });
+          await botLogEvent(ctx, `Cliente não respondeu em ${prazo} min — o bot chamou de novo`);
+          seguiram++;
+          continue;
+        }
+      }
+      await botLogEvent(
+        ctx,
+        vars._lembrete === s.node_id
+          ? `Cliente não respondeu ao lembrete — o bot seguiu para o próximo passo`
+          : `Cliente não respondeu em ${prazo} min — o bot seguiu para o próximo passo`,
+      );
+      await advance(ctx, flow, node.next, vars);
       seguiram++;
     } catch (e) {
       console.warn("[bot] sem resposta: falhou em", s.conversation_id, e);
