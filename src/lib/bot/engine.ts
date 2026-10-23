@@ -1075,3 +1075,76 @@ export async function maybeRunBot(
   await advance(ctx, flow, startNode, vars);
   return true;
 }
+
+/**
+ * Pergunta com prazo (`semRespostaMin`): passado o prazo sem resposta, o bot
+ * segue sozinho para `next` (pedido 2026-10-23).
+ *
+ * Caso real: "Você vai ser direcionado para nosso consultor. Como prefere o
+ * contato?" só distribuía DEPOIS da resposta — quem não respondeu (204 leads
+ * quentes em 30 dias) ficou sem dono e fora da fila, ouvindo "vai ser
+ * direcionado". Roda no tick de minuto.
+ *
+ * ⚠️ Mesma trava de corrida do `maybeRunBot` (aguardando → ativo condicional no
+ * mesmo nó): se o cliente responder no mesmo instante, só um processa.
+ * ⚠️ Não mexe em conversa com dono, com bot pausado, finalizada ou arquivada.
+ */
+export async function continuarPerguntasSemResposta(db: any): Promise<{ seguiram: number }> {
+  const desde = new Date(Date.now() - 7 * 864e5).toISOString();
+  const { data: sessoes } = await db
+    .from("bot_sessions")
+    .select("conversation_id, flow_key, node_id, vars, updated_at")
+    .eq("status", "aguardando")
+    .gte("updated_at", desde)
+    .lte("updated_at", new Date(Date.now() - 60_000).toISOString())
+    .limit(500);
+  let seguiram = 0;
+  const flows = new Map<string, BotFlow | undefined>();
+  for (const s of sessoes ?? []) {
+    if (seguiram >= 30) break; // teto por tique: o acumulado sai em poucos minutos
+    try {
+      const { data: conv } = await db
+        .from("conversations")
+        .select("id, location_id, channel_id, contact_id, assigned_to, bot_paused, closed_at, archived_at")
+        .eq("id", s.conversation_id)
+        .maybeSingle();
+      if (!conv || conv.assigned_to || conv.bot_paused || conv.closed_at || conv.archived_at) continue;
+      const chave = `${conv.location_id}|${s.flow_key}`;
+      if (!flows.has(chave)) flows.set(chave, await getFlow(db, conv.location_id, s.flow_key));
+      const flow = flows.get(chave);
+      const node = flow?.nodes[s.node_id ?? ""] as any;
+      const prazo = Number(node?.semRespostaMin ?? 0);
+      if (!flow || node?.type !== "ask" || !prazo || !node.next) continue;
+      if (Date.now() - new Date(s.updated_at).getTime() < prazo * 60_000) continue;
+
+      const { data: claimed } = await db
+        .from("bot_sessions")
+        .update({ status: "ativo", updated_at: new Date().toISOString() })
+        .eq("conversation_id", s.conversation_id)
+        .eq("status", "aguardando")
+        .eq("node_id", s.node_id)
+        .select("conversation_id")
+        .maybeSingle();
+      if (!claimed) continue;
+
+      const [{ data: ch }, { data: ct }] = await Promise.all([
+        db.from("whatsapp_channels").select("id, phone_number_id, location_id").eq("id", conv.channel_id).maybeSingle(),
+        db.from("contacts").select("id, phone").eq("id", conv.contact_id).maybeSingle(),
+      ]);
+      if (!ch || !ct) continue;
+      const ctx: Ctx = {
+        db,
+        channel: ch,
+        contact: { id: ct.id, phone: ct.phone ?? "" },
+        conversationId: conv.id,
+        flowKey: flow.key,
+      };
+      await botLogEvent(ctx, `Cliente não respondeu em ${prazo} min — o bot seguiu para o próximo passo`);
+      await advance(ctx, flow, node.next, s.vars ?? {});
+      seguiram++;
+    } catch (e) {
+      console.warn("[bot] sem resposta: falhou em", s.conversation_id, e);
+    }
+  }
+  return { seguiram };
+}
