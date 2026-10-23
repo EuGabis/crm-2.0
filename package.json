@@ -28,7 +28,8 @@
     "test:cursos": "node --import ./scripts/lib/alias-register.mjs scripts/test-cursos.mjs",
     "test:fup": "node --import ./scripts/lib/alias-register.mjs scripts/test-fup.mjs",
     "test:form": "node --import ./scripts/lib/alias-register.mjs scripts/test-form-campos.mjs",
-    "test:email-falhas": "node scripts/test-email-falhas.mjs"
+    "test:email-falhas": "node scripts/test-email-falhas.mjs",
+    "test:tarefas": "node --import ./scripts/lib/alias-register.mjs scripts/test-tarefas.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
