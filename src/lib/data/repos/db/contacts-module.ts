@@ -92,6 +92,29 @@ const mapLog = (r: any): BulkLog => ({
   createdAt: r.created_at,
 });
 
+/**
+ * Todas as tarefas que a RLS entrega, paginadas. O PostgREST corta no "Max
+ * rows" (1000) sem erro e sem aviso, e já são 551 (502 de uma pessoa só).
+ * Ordem desempatada por `id`: tarefa criada em lote sai com o mesmo carimbo, e
+ * ordem instável entre páginas repete umas e pula outras.
+ */
+async function fetchAllTasks(supabase: ReturnType<typeof createClient>) {
+  const PAGINA = 1000;
+  const rows: any[] = [];
+  for (let de = 0; de < 20 * PAGINA; de += PAGINA) {
+    const { data, error } = await supabase
+      .from("tasks")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(de, de + PAGINA - 1);
+    if (error) return { data: null, error };
+    rows.push(...(data ?? []));
+    if ((data ?? []).length < PAGINA) break;
+  }
+  return { data: rows, error: null };
+}
+
 export const useModuleStore = create<ModuleState>((set, get) => ({
   loaded: false,
   loading: false,
@@ -107,7 +130,7 @@ export const useModuleStore = create<ModuleState>((set, get) => ({
     const supabase = createClient();
     const [lists, tasks, fields, logs] = await Promise.all([
       supabase.from("smart_lists").select("*").order("created_at"),
-      supabase.from("tasks").select("*").order("created_at", { ascending: false }),
+      fetchAllTasks(supabase),
       supabase.from("contact_fields").select("*").order("position").order("created_at"),
       supabase.from("bulk_logs").select("*").order("created_at", { ascending: false }).limit(50),
     ]);
@@ -130,7 +153,7 @@ export const useModuleStore = create<ModuleState>((set, get) => ({
     const supabase = createClient();
     const [lists, tasks, fields, logs] = await Promise.all([
       supabase.from("smart_lists").select("*").order("created_at"),
-      supabase.from("tasks").select("*").order("created_at", { ascending: false }),
+      fetchAllTasks(supabase),
       supabase.from("contact_fields").select("*").order("position").order("created_at"),
       supabase.from("bulk_logs").select("*").order("created_at", { ascending: false }).limit(50),
     ]);
@@ -209,7 +232,18 @@ export const smartListActions = {
   },
 };
 
+export type ResultadoTarefa =
+  | { ok: true; visivel: boolean }
+  | { ok: false; erro: string };
+
 export const taskActions = {
+  /**
+   * Cria a tarefa. ⚠️ Não pede a linha de volta: tarefa criada PARA um colega
+   * não passa na policy de SELECT de quem não vê tudo (202610231400), e um
+   * `.select()` faria o insert inteiro cair em 42501. O id nasce aqui e a
+   * linha é relida — `visivel: false` quer dizer "criada, mas é de outra
+   * pessoa e você não a enxerga".
+   */
   async add(input: {
     title: string;
     contactId: string | null;
@@ -217,25 +251,66 @@ export const taskActions = {
     dueAt: string | null;
     reminderMinutes?: number | null;
   }): Promise<boolean> {
+    const r = await taskActions.criar(input);
+    return r.ok;
+  },
+  async criar(input: {
+    title: string;
+    contactId: string | null;
+    assigneeId: string | null;
+    dueAt: string | null;
+    reminderMinutes?: number | null;
+  }): Promise<ResultadoTarefa> {
     const loc = locationId();
-    if (!loc) return false;
+    if (!loc) return { ok: false, erro: "sessão não carregada" };
+    const supabase = createClient();
+    const id = crypto.randomUUID();
+    const { error } = await supabase.from("tasks").insert({
+      id,
+      location_id: loc,
+      title: input.title,
+      contact_id: input.contactId,
+      assignee_id: input.assigneeId,
+      due_at: input.dueAt,
+      reminder_minutes: input.reminderMinutes ?? null,
+    });
+    if (error) return { ok: false, erro: `${error.code ?? ""} ${error.message}`.trim() };
+    const { data } = await supabase.from("tasks").select("*").eq("id", id).maybeSingle();
+    if (!data) return { ok: true, visivel: false };
+    const s = useModuleStore.getState();
+    s.set({ tasks: [mapTask(data), ...s.tasks] });
+    return { ok: true, visivel: true };
+  },
+  /**
+   * Edita título, contato, responsável e prazo. Confere as LINHAS devolvidas:
+   * UPDATE recusado pela RLS não vem com erro. Passar a tarefa para um colega
+   * pode tirá-la da vista de quem passou — aí ela sai da lista.
+   */
+  async update(
+    id: string,
+    patch: { title: string; contactId: string | null; assigneeId: string | null; dueAt: string | null },
+  ): Promise<ResultadoTarefa> {
     const supabase = createClient();
     const { data, error } = await supabase
       .from("tasks")
-      .insert({
-        location_id: loc,
-        title: input.title,
-        contact_id: input.contactId,
-        assignee_id: input.assigneeId,
-        due_at: input.dueAt,
-        reminder_minutes: input.reminderMinutes ?? null,
+      .update({
+        title: patch.title,
+        contact_id: patch.contactId,
+        assignee_id: patch.assigneeId,
+        due_at: patch.dueAt,
       })
-      .select()
-      .single();
-    if (error || !data) return false;
+      .eq("id", id)
+      .select("id");
+    if (error) return { ok: false, erro: `${error.code ?? ""} ${error.message}`.trim() };
+    if (!data || data.length === 0) return { ok: false, erro: "sem permissão para editar esta tarefa" };
+    const { data: linha } = await supabase.from("tasks").select("*").eq("id", id).maybeSingle();
     const s = useModuleStore.getState();
-    s.set({ tasks: [mapTask(data), ...s.tasks] });
-    return true;
+    s.set({
+      tasks: linha
+        ? s.tasks.map((t) => (t.id === id ? mapTask(linha) : t))
+        : s.tasks.filter((t) => t.id !== id),
+    });
+    return { ok: true, visivel: !!linha };
   },
   async toggle(id: string): Promise<boolean> {
     const s = useModuleStore.getState();
@@ -243,15 +318,16 @@ export const taskActions = {
     if (!task) return false;
     const status = task.status === "done" ? "pending" : "done";
     const supabase = createClient();
-    const { error } = await supabase.from("tasks").update({ status }).eq("id", id);
-    if (error) return false;
+    const { data, error } = await supabase.from("tasks").update({ status }).eq("id", id).select("id");
+    if (error || !data || data.length === 0) return false;
     s.set({ tasks: s.tasks.map((t) => (t.id === id ? { ...t, status } : t)) });
     return true;
   },
   async remove(id: string): Promise<boolean> {
     const supabase = createClient();
-    const { error } = await supabase.from("tasks").delete().eq("id", id);
-    if (error) return false;
+    // DELETE recusado pela RLS não vem com erro: conferir as linhas.
+    const { data, error } = await supabase.from("tasks").delete().eq("id", id).select("id");
+    if (error || !data || data.length === 0) return false;
     const s = useModuleStore.getState();
     s.set({ tasks: s.tasks.filter((t) => t.id !== id) });
     return true;

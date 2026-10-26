@@ -9734,3 +9734,29 @@ Lead chega pelo WhatsApp por dois caminhos, e os dois agora deixam origem em
 
 Google Ads: `redirectUri()` passou a usar `appBaseUrl()` — com
 `NEXT_PUBLIC_APP_URL` no domínio aposentado, o OAuth dava redirect_uri_mismatch.
+
+## Tarefas segmentadas por responsável + tela nova (202610231400)
+
+Relato (2026-10-23): na aba Contatos → Tarefas os vendedores viam as tarefas de
+todo mundo. As quatro policies de `tasks` (laço da 0002) só conferiam a EMPRESA
+— qualquer membro lia, concluía e excluía tarefa de colega (551 tarefas, 502 do
+Alberto, todas visíveis a todos).
+
+- Regra nova = a de `opportunities` (0004): `private.sees_all` (admin e quem não
+  tem `only_assigned`) vê tudo; o resto vê as DELE e as sem responsável. Vale
+  para SELECT, UPDATE e DELETE. INSERT segue só por empresa: criar tarefa para
+  um colega é legítimo.
+- ⚠️ Por isso `taskActions.criar` NÃO usa `.insert().select()`: o RETURNING de
+  uma tarefa de outra pessoa bateria na policy de SELECT e o insert inteiro
+  cairia em 42501. O id nasce no cliente e a linha é relida; `visivel: false`
+  = criada, mas some da sua lista (a tela avisa).
+- `toggle`/`remove`/`update` conferem as LINHAS devolvidas (RLS recusa calada).
+- A lista é paginada (`fetchAllTasks`): estava a 551 do corte de 1000.
+- Tela (`components/contacts/tasks-tab.tsx`): KPIs clicáveis (atrasadas, hoje,
+  7 dias, concluídas), recortes com contagem (Pendentes é o padrão), ordem de
+  trabalho (vencidas primeiro), selo de atraso, busca, filtro por responsável,
+  editar, ações em massa (concluir/excluir). A situação do prazo é dia em São
+  Paulo (`lib/tasks/prazo.ts`, `npm run test:tarefas`).
+- ⚠️ Os outros lugares que leem `tasks` (barra das Conversas, detalhe do lead,
+  lembretes, sino) passam a ver só o que a RLS entrega — um vendedor não vê mais
+  a tarefa de colega da Secretaria no mesmo contato.

@@ -7,16 +7,13 @@ import { Check, ListChecks, Plus, Trash2, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable, type Column } from "@/components/shared/data-table";
 import { EmptyState } from "@/components/shared/empty-state";
-import { ContactPicker } from "@/components/contacts/contact-picker";
 import type { FilterCondition } from "@/components/shared/filter-drawer";
 import {
   countMatching,
   useContactCompanies,
-  useContactsByIds,
 } from "@/lib/data/repos/db/contacts-search";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -40,9 +37,7 @@ import {
   FIELD_TYPE_LABEL,
   fieldActions,
   smartListActions,
-  taskActions,
   useContactsModule,
-  type DbTask,
   type FieldType,
   type SmartList,
 } from "@/lib/data/repos/db/contacts-module";
@@ -346,213 +341,10 @@ export function BulkLogTab() {
   );
 }
 
-/* ============ Tarefas (reais) ============ */
+/* ============ Tarefas ============ */
 
-export function TasksTab() {
-  const confirm = useConfirm();
-  const { tasks, loaded } = useContactsModule();
-  const team = useDbTeam();
-  // Só os contatos que as tarefas citam — não os 41 mil.
-  const contactsById = useContactsByIds(tasks.map((t) => t.contactId));
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [title, setTitle] = useState("");
-  const [contactId, setContactId] = useState<string>("");
-  const [assigneeId, setAssigneeId] = useState<string>("");
-  const [dueAt, setDueAt] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const create = async () => {
-    if (!title.trim()) {
-      toast.error("Dê um título para a tarefa");
-      return;
-    }
-    setSaving(true);
-    const ok = await taskActions.add({
-      title: title.trim(),
-      contactId: contactId || null,
-      assigneeId: assigneeId || null,
-      dueAt: dueAt ? `${dueAt}T12:00:00-03:00` : null,
-    });
-    setSaving(false);
-    if (!ok) {
-      toast.error("Não foi possível criar a tarefa");
-      return;
-    }
-    toast.success("Tarefa criada");
-    setTitle("");
-    setContactId("");
-    setAssigneeId("");
-    setDueAt("");
-    setDialogOpen(false);
-  };
-
-  const columns: Column<DbTask>[] = [
-    {
-      key: "done",
-      header: "",
-      render: (t) => (
-        <Checkbox
-          checked={t.status === "done"}
-          onCheckedChange={() => void taskActions.toggle(t.id)}
-        />
-      ),
-    },
-    {
-      key: "titulo",
-      header: "Título",
-      sortable: true,
-      sortValue: (t) => t.title,
-      render: (t) => (
-        <span
-          className={
-            t.status === "done" ? "text-slate-400 line-through" : "font-medium text-slate-800"
-          }
-        >
-          {t.title}
-        </span>
-      ),
-    },
-    {
-      key: "contato",
-      header: "Contato vinculado",
-      render: (t) => {
-        const c = t.contactId ? contactsById.get(t.contactId) : null;
-        return <span className="text-slate-600">{c ? contactName(c) : "—"}</span>;
-      },
-    },
-    {
-      key: "resp",
-      header: "Responsável",
-      render: (t) => team.find((u) => u.id === t.assigneeId)?.name ?? "—",
-    },
-    {
-      key: "prazo",
-      header: "Prazo",
-      sortable: true,
-      sortValue: (t) => t.dueAt ?? "",
-      render: (t) =>
-        t.dueAt ? (
-          <span className="text-slate-500">
-            {format(new Date(t.dueAt), "d MMM yyyy", { locale: ptBR })}
-          </span>
-        ) : (
-          "—"
-        ),
-    },
-    {
-      key: "acao",
-      header: "",
-      render: (t) => (
-        <button
-          onClick={async () => {
-            if (!(await confirm({ title: "Excluir esta tarefa?", confirmLabel: "Excluir", destructive: true }))) return;
-            (await taskActions.remove(t.id))
-              ? toast.success("Tarefa excluída")
-              : toast.error("Não foi possível excluir");
-          }}
-          className="text-slate-300 hover:text-red-500"
-        >
-          <Trash2 className="size-3.5" />
-        </button>
-      ),
-    },
-  ];
-
-  const pending = tasks.filter((t) => t.status === "pending").length;
-
-  return (
-    <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <h1 className="text-lg font-bold text-slate-900">Tarefas</h1>
-          <Badge variant="secondary">{pending} pendente{pending === 1 ? "" : "s"}</Badge>
-        </div>
-        <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setDialogOpen(true)}>
-          <Plus className="size-3.5" /> Nova tarefa
-        </Button>
-      </div>
-      {loaded && tasks.length === 0 ? (
-        <EmptyState
-          icon={Check}
-          title="Nenhuma tarefa ainda"
-          description="Crie a primeira tarefa e vincule a um contato para não perder o follow-up."
-          cta={
-            <Button size="sm" className="text-xs" onClick={() => setDialogOpen(true)}>
-              <Plus className="size-3.5" /> Nova tarefa
-            </Button>
-          }
-        />
-      ) : (
-        <DataTable data={tasks} columns={columns} pageSize={10} />
-      )}
-
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Nova tarefa</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <Label className="text-xs">Título</Label>
-              <Input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Ex.: Ligar para apresentar proposta"
-                className="h-8"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Contato (opcional)</Label>
-              <ContactPicker
-                value={contactId}
-                onChange={setContactId}
-                placeholder="Sem contato vinculado"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <Label className="text-xs">Responsável</Label>
-                <Select value={assigneeId} onValueChange={(v) => setAssigneeId(v ?? "")}>
-                  <SelectTrigger className="h-8 w-full text-xs">
-                    <SelectValue>
-                      {assigneeId
-                        ? team.find((u) => u.id === assigneeId)?.name
-                        : "Selecionar"}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {team.map((u) => (
-                      <SelectItem key={u.id} value={u.id} className="text-xs">
-                        {u.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Prazo</Label>
-                <Input
-                  type="date"
-                  value={dueAt}
-                  onChange={(e) => setDueAt(e.target.value)}
-                  className="h-8"
-                />
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setDialogOpen(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={create} disabled={saving}>
-              {saving ? "Salvando..." : "Criar tarefa"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
+// Mora em tasks-tab.tsx; reexportada para os imports existentes.
+export { TasksTab } from "./tasks-tab";
 
 /* ============ Empresas (derivado dos contatos reais) ============ */
 
