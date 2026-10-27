@@ -5,6 +5,8 @@ import { create } from "zustand";
 import { createClient } from "@/lib/supabase/client";
 import type { Audience, Campaign, Recipient } from "@/lib/marketing/types";
 import { useDbStore } from "./contacts";
+import { anexosDe, type AnexoEmail } from "@/lib/email/anexos";
+import { normalizarDesign, type DesignEmail } from "@/lib/email/design";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -18,6 +20,8 @@ const mapCampaign = (r: any): Campaign => ({
   bodyText: r.body_text ?? "",
   audience: (r.audience ?? { type: "all", value: null }) as Audience,
   accentColor: r.accent_color ?? null,
+  attachments: anexosDe(r.attachments),
+  design: normalizarDesign(r.design, r.accent_color),
   status: r.status,
   scheduledAt: r.scheduled_at,
   total: r.total ?? 0,
@@ -138,6 +142,26 @@ export interface CampaignInput {
   bodyText: string;
   audience: Audience;
   accentColor?: string | null;
+  /** Colunas da 202610271000 — ver `semColunasNovas`. */
+  attachments?: AnexoEmail[];
+  design?: DesignEmail;
+}
+
+/**
+ * ⚠️ O código chega à produção ANTES da migração, e mandar uma coluna que não
+ * existe faz o PostgREST recusar o salvamento INTEIRO (PGRST204/42703). Nesse
+ * caso o repo grava de novo sem `attachments`/`design` — a campanha salva, só
+ * a parte nova espera a migração — e avisa no console.
+ */
+function colunaInexistente(error: { code?: string } | null): boolean {
+  return !!error && (error.code === "PGRST204" || error.code === "42703");
+}
+function semColunasNovas(row: Record<string, unknown>) {
+  const { attachments: _a, design: _d, ...resto } = row;
+  void _a;
+  void _d;
+  console.warn("[campanhas] migração 202610271000 pendente: design/anexos não foram gravados");
+  return resto;
 }
 
 export const campaignActions = {
@@ -145,21 +169,23 @@ export const campaignActions = {
     const locationId = useDbStore.getState().locationId;
     if (!locationId) return null;
     const supabase = createClient();
-    const { data, error } = await supabase
-      .from("email_campaigns")
-      .insert({
-        location_id: locationId,
-        name: input.name,
-        subject: input.subject,
-        ...(input.fromEmail ? { from_email: input.fromEmail } : {}),
-        reply_to: input.replyTo ?? null,
-        body_html: input.bodyHtml,
-        body_text: input.bodyText,
-        audience: input.audience,
-        accent_color: input.accentColor ?? null,
-      })
-      .select()
-      .single();
+    const linha: Record<string, unknown> = {
+      location_id: locationId,
+      name: input.name,
+      subject: input.subject,
+      ...(input.fromEmail ? { from_email: input.fromEmail } : {}),
+      reply_to: input.replyTo ?? null,
+      body_html: input.bodyHtml,
+      body_text: input.bodyText,
+      audience: input.audience,
+      accent_color: input.accentColor ?? null,
+      ...(input.attachments ? { attachments: input.attachments } : {}),
+      ...(input.design ? { design: input.design } : {}),
+    };
+    const inserir = (r: Record<string, unknown>) =>
+      supabase.from("email_campaigns").insert(r).select().single();
+    let { data, error } = await inserir(linha);
+    if (colunaInexistente(error)) ({ data, error } = await inserir(semColunasNovas(linha)));
     if (error || !data) return null;
     useCampaignStore.getState().upsert(mapCampaign(data));
     return data.id;
@@ -176,12 +202,12 @@ export const campaignActions = {
     if (patch.bodyText !== undefined) row.body_text = patch.bodyText;
     if (patch.audience !== undefined) row.audience = patch.audience;
     if (patch.accentColor !== undefined) row.accent_color = patch.accentColor;
-    const { data, error } = await supabase
-      .from("email_campaigns")
-      .update(row)
-      .eq("id", id)
-      .select()
-      .single();
+    if (patch.attachments !== undefined) row.attachments = patch.attachments;
+    if (patch.design !== undefined) row.design = patch.design;
+    const gravar = (r: Record<string, unknown>) =>
+      supabase.from("email_campaigns").update(r).eq("id", id).select().single();
+    let { data, error } = await gravar(row);
+    if (colunaInexistente(error)) ({ data, error } = await gravar(semColunasNovas(row)));
     if (error || !data) return false;
     useCampaignStore.getState().upsert(mapCampaign(data));
     return true;

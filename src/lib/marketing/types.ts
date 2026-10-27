@@ -1,3 +1,6 @@
+import type { AnexoEmail } from "@/lib/email/anexos";
+import type { DesignEmail } from "@/lib/email/design";
+
 export type CampaignStatus =
   | "draft"
   | "scheduled"
@@ -38,6 +41,10 @@ export interface Campaign {
   bodyText: string;
   audience: Audience;
   accentColor: string | null;
+  /** Arquivos enviados como link de download (202610271000). */
+  attachments: AnexoEmail[];
+  /** Aparência do e-mail, já normalizada (`lib/email/design.ts`). */
+  design: DesignEmail;
   status: CampaignStatus;
   scheduledAt: string | null;
   total: number;
