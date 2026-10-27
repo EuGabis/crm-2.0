@@ -2,7 +2,19 @@
 
 import { useMemo, useRef, useState } from "react";
 import type { Editor } from "@tiptap/react";
-import { ArrowLeft, Eye, Send, TestTube2, Timer } from "lucide-react";
+import {
+  ArrowLeft,
+  Eye,
+  Loader2,
+  Monitor,
+  Paperclip,
+  PenLine,
+  Send,
+  Smartphone,
+  TestTube2,
+  Timer,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +38,11 @@ import { useContactsModule } from "@/lib/data/repos/db/contacts-module";
 import { useBrandBoards } from "@/lib/data/repos/db/brand-boards";
 import { campaignActions, useDbCampaign } from "@/lib/data/repos/db/campaigns";
 import { renderCampaignEmail } from "@/lib/email/marketing-template";
+import { DESIGN_PADRAO, type DesignEmail } from "@/lib/email/design";
+import { MAX_ANEXOS, formatarTamanho, type AnexoEmail } from "@/lib/email/anexos";
+import { enviarMidiaDeEmail } from "@/lib/data/repos/db/email-midia";
+import { useAccount } from "@/lib/data/repos/db/account";
+import { PainelDesign } from "./painel-design";
 import { matchesConditions } from "@/components/contacts/module-tabs";
 import { RichTextEditor } from "./rich-text-editor";
 import { CAMPAIGN_TEMPLATES } from "./campaign-templates";
@@ -74,7 +91,14 @@ export function CampaignComposer({
   const [bodyHtml, setBodyHtml] = useState(existing?.bodyHtml ?? "<p>Escreva aqui…</p>");
   const [audience, setAudience] = useState<Audience>(existing?.audience ?? { type: "all", value: null });
   const [brandId, setBrandId] = useState("");
-  const [accentColor, setAccentColor] = useState<string | null>(existing?.accentColor ?? null);
+  const [design, setDesign] = useState<DesignEmail>(existing?.design ?? DESIGN_PADRAO);
+  const [anexos, setAnexos] = useState<AnexoEmail[]>(existing?.attachments ?? []);
+  const [subindo, setSubindo] = useState(0);
+  const [aba, setAba] = useState<"escrever" | "ver">("escrever");
+  const [tela, setTela] = useState<"pc" | "celular">("pc");
+  const anexoRef = useRef<HTMLInputElement>(null);
+  const { company } = useAccount();
+  const paleta = boards.find((b) => b.id === brandId)?.palette ?? [];
   const [saving, setSaving] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -123,9 +147,24 @@ export function CampaignComposer({
       subject: fillTemplate(subject, vars),
       bodyHtml: fillTemplate(bodyHtml, vars),
       unsubscribeUrl: "#",
-      accent: accentColor ?? undefined,
+      design,
+      anexos,
     });
-  }, [subject, bodyHtml, audienceContacts, contacts, accentColor]);
+  }, [subject, bodyHtml, audienceContacts, contacts, design, anexos]);
+
+  /** Anexos sobem em série; o que falha diz por quê e não trava os outros. */
+  async function adicionarAnexos(files: File[]) {
+    const vagas = MAX_ANEXOS - anexos.length;
+    if (files.length > vagas) toast.error(`No máximo ${MAX_ANEXOS} arquivos por campanha`);
+    const lote = files.slice(0, Math.max(0, vagas));
+    setSubindo((n) => n + lote.length);
+    for (const f of lote) {
+      const r = await enviarMidiaDeEmail(f, "anexo");
+      setSubindo((n) => n - 1);
+      if (r.ok) setAnexos((a) => [...a, r.arquivo]);
+      else toast.error(`${f.name}: ${r.erro}`);
+    }
+  }
 
   async function ensureSaved(): Promise<string | null> {
     setSaving(true);
@@ -137,7 +176,11 @@ export function CampaignComposer({
         bodyHtml,
         bodyText: "",
         audience,
-        accentColor,
+        // `accent_color` acompanha o design: campanha lida por código antigo
+        // (ou com a migração atrasada) ainda sai com a cor de destaque certa.
+        accentColor: design.corDestaque,
+        design,
+        attachments: anexos,
       };
       if (id) {
         const ok = await campaignActions.update(id, payload);
@@ -263,7 +306,139 @@ export function CampaignComposer({
             ))}
           </div>
 
-          <RichTextEditor value={bodyHtml} onChange={setBodyHtml} onEditorReady={(e) => (editorRef.current = e)} />
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex rounded-lg border bg-white p-0.5">
+              {(
+                [
+                  ["escrever", PenLine, "Escrever"],
+                  ["ver", Eye, "Ver como fica"],
+                ] as const
+              ).map(([k, Icon, l]) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setAba(k)}
+                  className={cn(
+                    "flex h-7 items-center gap-1.5 rounded-md px-3 text-xs font-medium",
+                    aba === k ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-50",
+                  )}
+                >
+                  <Icon className="size-3.5" /> {l}
+                </button>
+              ))}
+            </div>
+            {aba === "ver" && (
+              <div className="flex rounded-lg border bg-white p-0.5">
+                {(
+                  [
+                    ["pc", Monitor, "Computador"],
+                    ["celular", Smartphone, "Celular"],
+                  ] as const
+                ).map(([k, Icon, l]) => (
+                  <button
+                    key={k}
+                    type="button"
+                    title={l}
+                    onClick={() => setTela(k)}
+                    className={cn(
+                      "flex size-7 items-center justify-center rounded-md",
+                      tela === k ? "bg-slate-100 text-slate-900" : "text-slate-400 hover:text-slate-700",
+                    )}
+                  >
+                    <Icon className="size-3.5" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* O editor fica MONTADO na aba de prévia (só escondido): desmontar
+              perderia o histórico de desfazer e a seleção. */}
+          <div className={cn(aba !== "escrever" && "hidden")}>
+            <RichTextEditor
+              value={bodyHtml}
+              onChange={setBodyHtml}
+              onEditorReady={(e) => (editorRef.current = e)}
+              design={design}
+              sugestoesCor={paleta}
+            />
+          </div>
+          {aba === "ver" && (
+            <div className="rounded-lg border bg-slate-100 p-3">
+              <iframe
+                title="Prévia do e-mail"
+                srcDoc={preview.html}
+                className="mx-auto block h-[70vh] rounded-md border bg-white transition-all"
+                style={{ width: tela === "pc" ? "100%" : 390 }}
+              />
+            </div>
+          )}
+
+          <div className="rounded-xl border bg-white p-4">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
+                <Paperclip className="size-3.5" /> Anexos
+                {anexos.length > 0 && <span className="font-normal text-slate-400">({anexos.length})</span>}
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1 text-xs"
+                disabled={anexos.length >= MAX_ANEXOS}
+                onClick={() => anexoRef.current?.click()}
+              >
+                {subindo > 0 ? <Loader2 className="size-3.5 animate-spin" /> : <Paperclip className="size-3.5" />}
+                Adicionar arquivo
+              </Button>
+              <input
+                ref={anexoRef}
+                type="file"
+                multiple
+                hidden
+                onChange={(e) => {
+                  void adicionarAnexos(Array.from(e.target.files ?? []));
+                  e.target.value = "";
+                }}
+              />
+            </div>
+            {anexos.length > 0 ? (
+              <ul className="space-y-1.5">
+                {anexos.map((a, i) => (
+                  <li key={a.url} className="flex items-center gap-2 rounded-lg border bg-slate-50 px-2.5 py-1.5 text-xs">
+                    <Paperclip className="size-3.5 shrink-0 text-slate-400" />
+                    <a href={a.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-slate-700 hover:underline">
+                      {a.name}
+                    </a>
+                    <span className="shrink-0 text-slate-400">{formatarTamanho(a.size)}</span>
+                    <button
+                      type="button"
+                      onClick={() => setAnexos((xs) => xs.filter((_, j) => j !== i))}
+                      className="text-slate-400 hover:text-red-500"
+                      aria-label={`Remover ${a.name}`}
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  void adicionarAnexos(Array.from(e.dataTransfer.files));
+                }}
+                className="rounded-lg border-2 border-dashed border-slate-200 p-4 text-center text-[11px] text-slate-400"
+              >
+                Arraste arquivos aqui (PDF, planilha, apresentação… até 20 MB cada)
+              </p>
+            )}
+            <p className="mt-2 text-[10px] leading-snug text-slate-400">
+              Os arquivos aparecem no fim do e-mail como botões de download. O envio em massa não
+              aceita anexo direto no e-mail — e anexo pesado em campanha é um dos maiores motivos de
+              cair no spam.
+            </p>
+          </div>
         </div>
 
         {/* Coluna lateral */}
@@ -289,38 +464,49 @@ export function CampaignComposer({
             </div>
           </div>
 
-          <div className="rounded-xl border bg-white p-4">
-            <p className="mb-2 text-xs font-semibold text-slate-800">Marca (cores)</p>
-            <Select
-              value={brandId || "__default__"}
-              onValueChange={(v) => {
-                if (!v || v === "__default__") {
-                  setBrandId("");
-                  setAccentColor(null);
-                  return;
-                }
-                setBrandId(v);
-                setAccentColor(boards.find((b) => b.id === v)?.palette[0] ?? null);
-              }}
-            >
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue>{boards.find((b) => b.id === brandId)?.name ?? "Padrão (Lito)"}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__default__" className="text-xs">Padrão (Lito)</SelectItem>
-                {boards.map((b) => (
-                  <SelectItem key={b.id} value={b.id} className="text-xs">{b.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <div className="mt-2 flex items-center gap-2">
-              <span className="inline-block size-5 rounded border" style={{ backgroundColor: accentColor ?? "#6366f1" }} />
-              <span className="text-[11px] text-slate-500">{accentColor ?? "#6366f1 (padrão)"}</span>
+          {boards.length > 0 && (
+            <div className="rounded-xl border bg-white p-4">
+              <p className="mb-2 text-xs font-semibold text-slate-800">Marca</p>
+              <Select
+                value={brandId || "__default__"}
+                onValueChange={(v) => {
+                  if (!v || v === "__default__") return setBrandId("");
+                  setBrandId(v);
+                  const pal = boards.find((b) => b.id === v)?.palette ?? [];
+                  // A marca sugere as cores; tudo continua editável no painel abaixo.
+                  setDesign((d) => ({
+                    ...d,
+                    ...(pal[0] ? { corDestaque: pal[0] } : {}),
+                    ...(pal[1] ? { corCabecalho: pal[1], corTitulo: pal[1] } : {}),
+                  }));
+                }}
+              >
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue>{boards.find((b) => b.id === brandId)?.name ?? "Nenhuma"}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__default__" className="text-xs">Nenhuma</SelectItem>
+                  {boards.map((b) => (
+                    <SelectItem key={b.id} value={b.id} className="text-xs">{b.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {paleta.length > 0 && (
+                <div className="mt-2 flex gap-1">
+                  {paleta.map((c) => (
+                    <span key={c} className="size-5 rounded border" style={{ backgroundColor: c }} title={c} />
+                  ))}
+                </div>
+              )}
             </div>
-            {boards.length === 0 && (
-              <p className="mt-1 text-[11px] text-slate-400">Crie marcas em Marketing → Brand Boards.</p>
-            )}
-          </div>
+          )}
+
+          <PainelDesign
+            design={design}
+            onChange={setDesign}
+            sugestoesCor={paleta}
+            logoEmpresa={company?.logoUrl || null}
+          />
 
           <div className="rounded-xl border bg-white p-4">
             <p className="mb-2 text-xs font-semibold text-slate-800">Público</p>

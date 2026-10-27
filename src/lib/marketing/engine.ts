@@ -2,6 +2,7 @@ import { Resend } from "resend";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { renderTemplate } from "@/lib/automations/actions";
 import { renderCampaignEmail } from "@/lib/email/marketing-template";
+import { anexosDe } from "@/lib/email/anexos";
 import { unsubscribeUrl } from "@/lib/marketing/unsubscribe";
 import { falhaDeCota, falhaPassageira, motivoFalhaEmail } from "@/lib/marketing/falhas";
 
@@ -122,6 +123,8 @@ export async function processDueCampaigns(): Promise<{
           bodyHtml,
           unsubscribeUrl: unsub,
           accent: camp.accent_color ?? undefined,
+          anexos: anexosDe(camp.attachments),
+          design: camp.design,
         });
         return {
           from: camp.from_email,

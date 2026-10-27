@@ -9760,3 +9760,37 @@ Alberto, todas visíveis a todos).
 - ⚠️ Os outros lugares que leem `tasks` (barra das Conversas, detalhe do lead,
   lembretes, sino) passam a ver só o que a RLS entrega — um vendedor não vê mais
   a tarefa de colega da Secretaria no mesmo contato.
+
+## E-mail marketing: imagem do computador, anexos e design (202610271000)
+
+Queixa (2026-10-27): no composer de campanha só dava para pôr imagem por URL,
+não havia anexo, a cor de destaque não era editável (só vinha de um Brand
+Board) e o formato do e-mail era fixo.
+
+- **Imagem**: botão, colar (Ctrl+V) ou arrastar no texto → bucket PÚBLICO
+  `email-midia` (`{location_id}/{uuid}-{nome}`, policies por pasta como o
+  `branding` da 0034). Público porque o Gmail baixa a imagem sem sessão.
+  ⚠️ Colar não pode virar base64 no HTML: o Gmail corta e o Outlook bloqueia.
+  Imagem tem tamanho (pequena/média/total) e alinhamento (`ImagemEmail`).
+- 🔴 **Anexo é LINK DE DOWNLOAD, não anexo MIME**: o envio em lote do Resend
+  não aceita `attachments` ("not supported yet", conferido na doc), e mandar um
+  a um levaria horas numa base de 20 mil. `email_campaigns.attachments`, até 10
+  arquivos de 20 MB, viram um bloco "Anexos" no fim do e-mail.
+- **Design** (`email_campaigns.design`, `lib/email/design.ts`): temas prontos,
+  7 cores editáveis (seletor nativo + hex + paleta da marca), cabeçalho com nome
+  /logo/nenhum, fonte (só fontes seguras em e-mail), tamanho, largura, margem,
+  arredondamento, texto de rodapé. ⚠️ `normalizarDesign` é a ÚNICA porta: cor só
+  hex, número preso na faixa, logo só https — o valor vai para `style` de um HTML
+  enviado a milhares. `DESIGN_PADRAO` reproduz o visual antigo, então campanha
+  antiga e o e-mail das automações não mudam. `accent_color` segue gravado
+  (= corDestaque).
+- **Editor**: títulos, tamanho, sublinhado/tachado, cor e marca-texto,
+  alinhamento, listas, citação, divisória, desfazer, e o nó **Botão**
+  (`BotaoEmail`, CTA com cor/cantos/largura — atômico, porque `<a>` estilizado à
+  mão não sobrevive ao Outlook). A área de escrita usa fonte e cores do design.
+- ⚠️ O template só aplica a cor de link em `<a>` SEM `style`: senão o botão
+  ganhava um segundo `style` e o navegador usa o primeiro (o de link).
+- ⚠️ O descadastro do rodapé não tem opção de esconder (LGPD/Resend).
+- O repo de campanhas grava de novo SEM `attachments`/`design` se a coluna não
+  existir (PGRST204/42703): o código vai ao ar antes da migração.
+- `npm run test:email-design` (30 asserções).

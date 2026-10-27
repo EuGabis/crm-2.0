@@ -2,6 +2,7 @@ import { Resend } from "resend";
 import { createClient } from "@/lib/supabase/server";
 import { renderTemplate } from "@/lib/automations/actions";
 import { renderCampaignEmail } from "@/lib/email/marketing-template";
+import { anexosDe } from "@/lib/email/anexos";
 import { unsubscribeUrl } from "@/lib/marketing/unsubscribe";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -53,6 +54,8 @@ export async function POST(
     bodyHtml: renderTemplate((camp as any).body_html ?? "", vars),
     unsubscribeUrl: unsub,
     accent: (camp as any).accent_color ?? undefined,
+    anexos: anexosDe((camp as any).attachments),
+    design: (camp as any).design,
   });
 
   const resend = new Resend(apiKey);
