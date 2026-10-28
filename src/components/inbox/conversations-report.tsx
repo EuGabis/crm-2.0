@@ -208,8 +208,17 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
           toast.error(
             `${nome ?? "Essa pessoa"} não está no rodízio de nenhum setor com fila — nada distribuído`,
           );
+        } else if ((json.emTriagem ?? 0) > 0) {
+          /* ⚠️ "Ninguém online" era a frase para QUALQUER zero, e mandava o
+             admin procurar presença quando o motivo era outro: o lead está na
+             fila com a triagem do bot ainda em andamento. */
+          toast.info(
+            `${json.emTriagem} lead(s) ainda estão no meio da triagem do bot — o rodízio só pega quem terminou. Nada distribuído.`,
+          );
+        } else if ((json.retidas ?? 0) > 0) {
+          toast.info(`A cota do dia segurou ${json.retidas} lead(s) — todos no rodízio já receberam a sua parte.`);
         } else {
-          toast.info("Ninguém online no pool agora — nada distribuído");
+          toast.info("Ninguém disponível no rodízio agora — nada distribuído");
         }
       } else {
         toast.error(json.error ?? "Não foi possível distribuir");
