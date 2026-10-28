@@ -56,6 +56,9 @@ export async function POST(request: Request) {
    * a cota está segurando o resto para quem ainda vai logar.
    */
   let retidasPelaCota = 0;
+  // Na fila mas com a triagem do bot em andamento (ou sem ter passado pelo bot):
+  // o rodízio não pega — distribuir calaria o bot no meio da conversa.
+  let emTriagem = 0;
   for (const dep of deps ?? []) {
     const { data: dcs } = await db
       .from("department_channels")
@@ -78,7 +81,8 @@ export async function POST(request: Request) {
      * O teto é alto de propósito (o do tique é 25): aqui é uma ação DELIBERADA
      * do admin, que quer justamente esvaziar o acumulado de uma vez.
      */
-    const { prontas } = await filaProntaDoSetor(db, locationId, channelIds, 1000);
+    const { prontas, retidas: naTriagem } = await filaProntaDoSetor(db, locationId, channelIds, 1000);
+    emTriagem += naTriagem;
     if (!prontas.length) continue;
 
     const r = await distributeDepartment(
@@ -104,6 +108,7 @@ export async function POST(request: Request) {
   return Response.json({
     distributed,
     retidas: retidasPelaCota,
+    emTriagem,
     alvoForaDoPool: !!paraUsuario && distributed === 0,
   });
 }
