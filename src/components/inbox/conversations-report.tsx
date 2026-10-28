@@ -171,7 +171,13 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
   };
 
   const awaitingCount = useMemo(
-    () => conversations.filter((c) => c.awaitingDistribution).length,
+    // ⚠️ Mesmo recorte de `filaProntaDoSetor` (sem dono, aberta, não arquivada).
+    // Só a marca contava também conversa já atribuída ou finalizada que ficou
+    // com a flag para trás: o aviso dizia 69 com 1 lead de fato na fila.
+    () =>
+      conversations.filter(
+        (c) => c.awaitingDistribution && !c.assignedTo && !c.closedAt && !c.archivedAt,
+      ).length,
     [conversations],
   );
 
