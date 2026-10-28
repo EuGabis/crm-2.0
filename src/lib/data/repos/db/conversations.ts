@@ -1,5 +1,6 @@
 "use client";
 
+import { uploadComSessao } from "@/lib/supabase/upload-com-sessao";
 import { useEffect, useMemo, useState } from "react";
 import { create } from "zustand";
 import type { RealtimeChannel } from "@supabase/supabase-js";
@@ -1423,10 +1424,11 @@ export const conversationActions = {
       (file.name.includes(".") ? file.name.split(".").pop() : file.type.split("/")[1]) || "bin";
     const path = `${location}/${conversationId}/${crypto.randomUUID()}.${ext.toLowerCase()}`;
 
-    const { error: upErr } = await supabase.storage
-      .from(MEDIA_BUCKET)
-      .upload(path, file, { contentType: file.type || undefined, upsert: false });
-    if (upErr) return { ok: false, error: `Falha no upload: ${upErr.message}` };
+    const { error: upErr } = await uploadComSessao(supabase, MEDIA_BUCKET, path, file, {
+      contentType: file.type || undefined,
+      upsert: false,
+    });
+    if (upErr) return { ok: false, error: `Falha no upload: ${upErr}` };
 
     const body = kind === "audio" ? duration ?? "" : kind === "file" ? file.name : "";
     const { data, error } = await supabase
