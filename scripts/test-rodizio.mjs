@@ -813,9 +813,9 @@ eq(
   "paulo",
 );
 eq(
-  "[real] paulo ja com 30 e sozinho -> NINGUEM recebe, a fila segura",
+  "[28/10] paulo ja com 30 e sozinho -> recebe mesmo assim (a cota nao segura)",
   escolherPorCarga(["paulo"], cargasDe(30, 0, 0), POOL, 60, 0),
-  null,
+  "paulo",
 );
 eq(
   "[real] paulo com 29 -> ainda cabe um",
@@ -828,9 +828,9 @@ eq(
   "alberto",
 );
 eq(
-  "[real] alberto tambem chega em 30 -> segura de novo (faltam os 30 do rogerio)",
-  escolherPorCarga(["paulo", "alberto"], cargasDe(30, 30, 0), POOL, 30, 0),
-  null,
+  "[28/10] alberto tambem em 30 -> um dos dois recebe, a fila nao segura",
+  ["paulo", "alberto"].includes(escolherPorCarga(["paulo", "alberto"], cargasDe(30, 30, 0), POOL, 30, 0)),
+  true,
 );
 eq(
   "[real] rogerio loga -> leva os que sobraram",
@@ -947,11 +947,11 @@ const filaDe = (n) =>
   st.location_members[1].last_seen_at = offline;
   const db = fakeDb(st);
   const r = await distributeDepartment(db, "loc1", "dep1", filaDe(6), 1, null, ["ch1"]);
-  eq("[real] 1 online, 6 na fila, pool 2 -> a cota segura metade", r, {
-    atribuidas: 3,
-    retidas: 3,
+  eq("[28/10] 1 online, 6 na fila -> leva as 6 (a cota nao segura)", r, {
+    atribuidas: 6,
+    retidas: 0,
   });
-  eq("e as 3 foram todas para quem esta online", new Set(db.atribuicoes().map((e) => e.patch.assigned_to)), new Set(["ana"]));
+  eq("e as 6 foram todas para quem esta online", new Set(db.atribuicoes().map((e) => e.patch.assigned_to)), new Set(["ana"]));
 }
 
 {
@@ -1028,9 +1028,9 @@ eq(
   "paulo",
 );
 eq(
-  "quem ja recebeu a cota do dia nao recebe mais",
+  "[28/10] acima da cota e sozinho disponivel -> recebe mesmo assim",
   escolherPorCarga(["alberto"], doDia(0, 20, 15), POOL3, 10, 0),
-  null,
+  "alberto",
 );
 eq(
   "manha com 90 na fila e todos zerados -> a cota e 30, a regra original",
@@ -1104,11 +1104,11 @@ const contarPorPessoa = (db) => {
   const por = contarPorPessoa(db);
   eq("[incidente 17/09] o ausente nao recebe", por.rogerio ?? 0, 0);
   eq(
-    "[incidente 17/09] os dois presentes levam 30 cada, NAO 45",
+    "[28/10] os dois presentes dividem tudo por igual (45 cada)",
     Object.values(por).sort((a, b) => b - a),
-    [30, 30],
+    [45, 45],
   );
-  eq("[incidente 17/09] os 30 do ausente FICAM na fila", r.retidas, 30);
+  eq("[28/10] nada fica preso na fila", r.retidas, 0);
 }
 
 {
@@ -1128,22 +1128,22 @@ const contarPorPessoa = (db) => {
      "o Alberto recebeu todos os leads ao logar hoje". */
   const db = fakeDb(timeDeVendas(["alberto"]));
   const r = await distributeDepartment(db, "loc1", "dep1", filaDe(100), 1, null, ["ch1"]);
-  eq("[real] so o Alberto online -> ele leva 34, e 66 esperam", r, {
-    atribuidas: 34,
-    retidas: 66,
+  eq("[28/10] so o Alberto online -> ele leva os 100 (nada preso)", r, {
+    atribuidas: 100,
+    retidas: 0,
   });
-  eq("[real] e todas as 34 foram para ele", contarPorPessoa(db), { alberto: 34 });
+  eq("[28/10] e todos foram para ele", contarPorPessoa(db), { alberto: 100 });
 }
 
 {
   // Dois online: cada um pega a sua fatia; a do ausente do dia continua guardada.
   const db = fakeDb(timeDeVendas(["alberto", "rogerio"]));
   const r = await distributeDepartment(db, "loc1", "dep1", filaDe(99), 1, null, ["ch1"]);
-  eq("2 de 3 online, 99 na fila -> 33 cada, 33 guardados", r, {
-    atribuidas: 66,
-    retidas: 33,
+  eq("[28/10] 2 de 3 online, 99 na fila -> todos entregues", r, {
+    atribuidas: 99,
+    retidas: 0,
   });
-  eq("e os dois receberam igual", Object.values(contarPorPessoa(db)).sort(), [33, 33]);
+  eq("[28/10] e os dois dividiram por igual (49/50)", Object.values(contarPorPessoa(db)).sort(), [49, 50]);
 }
 
 {

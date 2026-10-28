@@ -455,8 +455,15 @@ export function escolherPorCarga(
   const carga = (u: string) => cargas.get(u) ?? 0;
   const base = poolParaCota?.length ? poolParaCota : poolInteiro;
   const cota = cotaPorAtendente(base.map(carga), filaRestante, base.length);
-  const cabem = disponiveis.filter((u) => carga(u) < cota);
-  if (!cabem.length) return null;
+  /*
+   * 🔴 **A cota ESCOLHE, não SEGURA** (Gabriel, 2026-10-28: "a cota não deve
+   * segurar o lead"). Com todos acima dela — fila acumulada, um vendedor
+   * ausente, o time incompleto —, o lead vai para quem recebeu MENOS hoje entre
+   * os disponíveis, em vez de ficar na fila sem resposta. Antes ela devolvia
+   * null e o lead esperava: foi o "69 aguardando" com vendedor online.
+   */
+  const dentro = disponiveis.filter((u) => carga(u) < cota);
+  const cabem = dentro.length ? dentro : disponiveis;
   const temp = (u: string) => cargaMesmaTemperatura?.get(u) ?? 0;
   const menorTemp = Math.min(...cabem.map(temp));
   const naTemperatura = cabem.filter((u) => temp(u) === menorTemp);
