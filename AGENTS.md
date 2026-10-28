@@ -9794,3 +9794,19 @@ Board) e o formato do e-mail era fixo.
 - O repo de campanhas grava de novo SEM `attachments`/`design` se a coluna não
   existir (PGRST204/42703): o código vai ao ar antes da migração.
 - `npm run test:email-design` (30 asserções).
+
+## A cota ESCOLHE, não SEGURA (2026-10-28)
+
+Regra do Gabriel: "a cota não deve segurar o lead". Até aqui, com todos os
+disponíveis acima da cota do dia, `escolherPorCarga` devolvia null e o lead
+ficava na fila do setor sem resposta. Agora, sem ninguém abaixo da cota, ele vai
+para quem recebeu MENOS hoje entre os disponíveis. Equilíbrio continua (quem tem
+menos recebe primeiro), mas nenhum lead espera por causa da conta.
+
+- Vale nos três caminhos (bot, varredura, botão do Relatório), porque os três
+  passam por `escolherPorCarga`.
+- 🔴 Revoga a parte "a fatia do ausente fica na fila" (17/09) e a "cota segura o
+  resto para quem ainda vai logar" (10/09). Consequência assumida: quem está
+  sozinho online recebe tudo o que chegar — o equilíbrio volta quando os outros
+  entram, porque passam a ser escolhidos primeiro.
+- Os 10 testes que afirmavam a retenção foram reescritos para a regra nova.
