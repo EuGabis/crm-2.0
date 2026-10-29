@@ -850,7 +850,18 @@ eq(
 eq("empate com cursor 0 -> paulo", escolherPorCarga(POOL, cargasDe(0, 0, 0), POOL, 3, 0), "paulo");
 eq("empate com cursor 1 -> alberto", escolherPorCarga(POOL, cargasDe(0, 0, 0), POOL, 3, 1), "alberto");
 eq("empate com cursor 2 -> rogerio", escolherPorCarga(POOL, cargasDe(0, 0, 0), POOL, 3, 2), "rogerio");
-eq("cursor da volta", escolherPorCarga(POOL, cargasDe(0, 0, 0), POOL, 3, 3), "paulo");
+/* Regra de 29/10: a ordem muda a cada rodada — a 2a comeca no 2o do pool. */
+eq("rodada 2 comeca uma casa a frente", escolherPorCarga(POOL, cargasDe(0, 0, 0), POOL, 3, 3), "alberto");
+eq(
+  "rodada 2: ordem alberto -> rogerio -> paulo",
+  [3, 4, 5].map((c) => escolherPorCarga(POOL, cargasDe(0, 0, 0), POOL, 3, c)),
+  ["alberto", "rogerio", "paulo"],
+);
+eq(
+  "rodada 3: ordem rogerio -> paulo -> alberto",
+  [6, 7, 8].map((c) => escolherPorCarga(POOL, cargasDe(0, 0, 0), POOL, 3, c)),
+  ["rogerio", "paulo", "alberto"],
+);
 eq(
   "cursor aponta pra quem NAO esta disponivel -> vai pro proximo empatado",
   escolherPorCarga(["alberto", "rogerio"], cargasDe(0, 0, 0), POOL, 3, 0),
@@ -1219,23 +1230,35 @@ function comFila(st, convs) {
 }
 
 {
-  /* O exemplo literal do pedido: "Se Alberto estiver offline -> Lead -> Alberto
-     -> Pendentes". Com 2 leads e os dois elegíveis, um vai para cada. */
+  /* Regra de 29/10: havendo alguem ONLINE, so os online recebem. O offline
+     so recebe (em Pendentes) quando o setor inteiro esta offline. */
   const st = vendasRegraNova({ paulo: "online", alberto: "offline" });
   comFila(st, [naFila("k1"), naFila("k2")]);
   const db = fakeDb(st);
   const r = await distribuirFilaDoSetor(db, "loc1");
   const por = contarPorPessoa(db);
-  eq("[regra] offline RECEBE: os 2 saem", r.distribuidas, 2);
-  eq("[regra] um para cada, o offline inclusive", Object.keys(por).sort(), ["alberto", "paulo"]);
-  const doAlberto = db.atribuicoes().find((e) => e.patch.assigned_to === "alberto");
+  eq("[regra 29/10] os 2 saem", r.distribuidas, 2);
+  eq("[regra 29/10] com alguem online, o offline NAO recebe", por, { paulo: 2 });
   eq(
-    "[regra] o lead do offline vai para PENDENTES (assigned_offline)",
-    doAlberto.patch.assigned_offline,
+    "[regra 29/10] o do online nao e pendente",
+    db.atribuicoes().every((e) => e.patch.assigned_offline === false),
     true,
   );
-  const doPaulo = db.atribuicoes().find((e) => e.patch.assigned_to === "paulo");
-  eq("[regra] o do online nao e pendente", doPaulo.patch.assigned_offline, false);
+}
+
+{
+  // Todos offline: dividem por igual, em Pendentes.
+  const st = vendasRegraNova({ paulo: "offline", alberto: "offline", rogerio: "offline" });
+  comFila(st, [naFila("k1"), naFila("k2"), naFila("k3"), naFila("k4"), naFila("k5"), naFila("k6")]);
+  const db = fakeDb(st);
+  await distribuirFilaDoSetor(db, "loc1");
+  const por = contarPorPessoa(db);
+  eq("[regra 29/10] todos offline: 2 para cada", [por.paulo, por.alberto, por.rogerio], [2, 2, 2]);
+  eq(
+    "[regra 29/10] todos offline: tudo em Pendentes",
+    db.atribuicoes().every((e) => e.patch.assigned_offline === true),
+    true,
+  );
 }
 
 {

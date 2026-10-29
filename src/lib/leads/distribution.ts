@@ -474,8 +474,16 @@ export function escolherPorCarga(
    * Roda o pool a partir do cursor e pega o primeiro empatado que aparecer —
    * assim duas chamadas seguidas com todos zerados escolhem pessoas diferentes.
    */
+  /*
+   * 🔴 **A ordem muda a cada rodada** (Gabriel, 2026-10-29): rodada 1
+   * Paulo → Rogério → Alberto, rodada 2 Rogério → Alberto → Paulo, rodada 3
+   * Alberto → Paulo → Rogério. O início desloca uma casa por rodada completa —
+   * sem isso, com cargas empatadas no começo de cada rodada, o mesmo vendedor
+   * abriria todas elas.
+   */
   const n = poolInteiro.length;
-  const inicio = ((cursor % n) + n) % n;
+  const c = Math.max(0, Math.trunc(cursor));
+  const inicio = (c + Math.floor(c / n)) % n;
   for (let i = 0; i < n; i++) {
     const u = poolInteiro[(inicio + i) % n];
     if (empatados.includes(u)) return u;
@@ -954,7 +962,12 @@ export async function distributeOne(
    * E a fatia do ausente não fica reservada (denominador = elegíveis): foi o
    * que prendeu 271 leads na fila em 13/10.
    */
-  const list = semExcluidos(alwaysAll ? elegiveis : online);
+  /*
+   * 🔴 Regra do Gabriel (2026-10-29): **havendo alguém ONLINE, só os online
+   * recebem.** Offline só recebe (em Pendentes) quando o setor inteiro está
+   * offline — e, assim que um entra, os leads novos passam a ir só para ele.
+   */
+  const list = semExcluidos(alwaysAll && online.length === 0 ? elegiveis : online);
   const baseCota = alwaysAll ? elegiveis : pool;
 
   /*
@@ -1217,7 +1230,9 @@ export async function distributeDepartment(
   // recebe (vai para Pendentes) — a fatia dele não fica presa na fila.
   // Mesma regra de `distributeOne` (revista em 19/10): offline recebe (vai para
   // Pendentes), AUSENTE não recebe e a fatia dele não fica reservada.
-  const list = dep?.rodizio_offline === true ? elegiveis : online;
+  // Regra de 29/10: havendo alguém online, só os online recebem; offline só
+  // quando o setor inteiro está offline (mesma regra de `distributeOne`).
+  const list = dep?.rodizio_offline === true && online.length === 0 ? elegiveis : online;
   const baseCota = dep?.rodizio_offline === true ? elegiveis : pool;
   if (!list.length) return { atribuidas: 0, retidas: convs.length };
 
