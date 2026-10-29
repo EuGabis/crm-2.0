@@ -9810,3 +9810,18 @@ menos recebe primeiro), mas nenhum lead espera por causa da conta.
   sozinho online recebe tudo o que chegar — o equilíbrio volta quando os outros
   entram, porque passam a ser escolhidos primeiro.
 - Os 10 testes que afirmavam a retenção foram reescritos para a regra nova.
+
+## Rodízio de Vendas: só os ONLINE, e a ordem gira por rodada (2026-10-29)
+
+Regra do Gabriel para Paulo, Rogério e Alberto:
+- **Havendo alguém online, só os online recebem**, por igual. 🔴 Revê a de 19/10
+  (offline recebia em Pendentes mesmo com colega online).
+- **Todos offline:** os três recebem por igual, em Pendentes. Assim que um entra,
+  os leads NOVOS vão só para ele.
+- Ausente continua sem receber.
+- **A ordem muda a cada rodada:** P→R→A, depois R→A→P, depois A→P→R. Em
+  `escolherPorCarga` o início do desempate desloca uma casa por rodada
+  (`cursor + floor(cursor/n)`); sem isso o mesmo vendedor abriria toda rodada.
+- Vale nos três caminhos (bot e varredura por `distributeOne`, botão do
+  Relatório por `distributeDepartment`). `npm run test:rodizio` — 170 asserções.
+- Devolução (20 min sem a primeira resposta) não mudou.
