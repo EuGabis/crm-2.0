@@ -213,6 +213,31 @@ export const campaignActions = {
     return true;
   },
 
+  /**
+   * Reenviar = nova campanha em RASCUNHO com o mesmo conteúdo e público. Não
+   * reaproveita a original: os destinatários dela (status, aberturas, motivo
+   * de falha) são o histórico daquele envio, e reabrir a mesma campanha
+   * misturaria dois envios nos mesmos números. Nada sai sem passar pelo
+   * composer — o público é recalculado ao enviar, então quem se descadastrou
+   * no envio anterior fica de fora.
+   */
+  async duplicate(id: string): Promise<string | null> {
+    const origem = useCampaignStore.getState().campaigns.find((c) => c.id === id);
+    if (!origem) return null;
+    return campaignActions.create({
+      name: `${origem.name} (reenvio)`,
+      subject: origem.subject,
+      fromEmail: origem.fromEmail ?? undefined,
+      replyTo: origem.replyTo,
+      bodyHtml: origem.bodyHtml,
+      bodyText: origem.bodyText,
+      audience: origem.audience,
+      accentColor: origem.accentColor,
+      attachments: origem.attachments,
+      design: origem.design,
+    });
+  },
+
   async remove(id: string): Promise<boolean> {
     const supabase = createClient();
     const { error } = await supabase.from("email_campaigns").delete().eq("id", id);
