@@ -40,7 +40,13 @@ export function CampaignsTab() {
     );
   }
   if (view.kind === "detail") {
-    return <CampaignDetail campaignId={view.id} onBack={() => setView({ kind: "list" })} />;
+    return (
+      <CampaignDetail
+        campaignId={view.id}
+        onBack={() => setView({ kind: "list" })}
+        onEdit={(id) => setView({ kind: "composer", id })}
+      />
+    );
   }
 
   return (

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowLeft, Ban, Pause, Play } from "lucide-react";
+import { ArrowLeft, Ban, Pause, Play, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import { motivoParaTela } from "@/lib/marketing/falhas";
 import { Button } from "@/components/ui/button";
@@ -39,10 +39,14 @@ function fmt(iso: string | null): string {
 export function CampaignDetail({
   campaignId,
   onBack,
+  onEdit,
 }: {
   campaignId: string;
   onBack: () => void;
+  /** Abre o composer da campanha nova criada pelo "Reenviar". */
+  onEdit?: (id: string) => void;
 }) {
+  const [duplicando, setDuplicando] = useState(false);
   const campaign = useDbCampaign(campaignId);
   // Auto-refresh: a cada 8s recarrega contadores + destinatários enquanto a tela está
   // aberta, para as métricas de abertura/clique (que chegam pelo webhook) subirem sozinhas.
@@ -79,6 +83,29 @@ export function CampaignDetail({
             {campaign.status}
           </Badge>
         </div>
+        <div className="flex items-center gap-2">
+        {campaign.status !== "draft" && onEdit && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            disabled={duplicando}
+            title="Cria uma cópia em rascunho com o mesmo conteúdo e público, para revisar e enviar"
+            onClick={async () => {
+              setDuplicando(true);
+              const novo = await campaignActions.duplicate(campaign.id);
+              setDuplicando(false);
+              if (!novo) {
+                toast.error("Não foi possível criar o reenvio");
+                return;
+              }
+              toast.success("Cópia criada em rascunho — revise e envie");
+              onEdit(novo);
+            }}
+          >
+            <RotateCw className="size-3.5" /> {duplicando ? "Criando…" : "Reenviar"}
+          </Button>
+        )}
         {campaign.status === "sending" && (
           <Button
             variant="outline"
@@ -122,6 +149,7 @@ export function CampaignDetail({
             <Ban className="size-3.5" /> Cancelar agendamento
           </Button>
         )}
+        </div>
       </div>
 
       <div className="mb-4 grid gap-3 md:grid-cols-3 lg:grid-cols-6">
