@@ -195,7 +195,7 @@ export function PainelDesign({
                 <input
                   value={design.textoCabecalho}
                   onChange={(e) => set({ textoCabecalho: e.target.value })}
-                  placeholder="Lito CRM"
+                  placeholder="Lito Academy"
                   className="h-8 w-full rounded-md border px-2 text-xs"
                 />
               </Campo>
