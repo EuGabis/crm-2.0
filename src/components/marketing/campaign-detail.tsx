@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowLeft, Ban, Pause, Play, RotateCw } from "lucide-react";
+import { ArrowLeft, Ban, Pause, Play, Repeat, RotateCw } from "lucide-react";
+import { useConfirm } from "@/components/shared/confirm";
 import { toast } from "sonner";
 import { motivoParaTela } from "@/lib/marketing/falhas";
 import { Button } from "@/components/ui/button";
@@ -47,6 +48,8 @@ export function CampaignDetail({
   onEdit?: (id: string) => void;
 }) {
   const [duplicando, setDuplicando] = useState(false);
+  const [reenviando, setReenviando] = useState(false);
+  const confirm = useConfirm();
   const campaign = useDbCampaign(campaignId);
   // Auto-refresh: a cada 8s recarrega contadores + destinatários enquanto a tela está
   // aberta, para as métricas de abertura/clique (que chegam pelo webhook) subirem sozinhas.
@@ -104,6 +107,36 @@ export function CampaignDetail({
             }}
           >
             <RotateCw className="size-3.5" /> {duplicando ? "Criando…" : "Reenviar"}
+          </Button>
+        )}
+        {(campaign.status === "sent" || campaign.status === "paused") && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            disabled={reenviando}
+            title="Dispara esta mesma campanha de novo para todos os destinatários, sem criar outra campanha"
+            onClick={async () => {
+              const ok = await confirm({
+                title: `Reenviar "${campaign.name}" para todos os destinatários?`,
+                description: `Os ${campaign.total} destinatários voltam para a fila e recebem o e-mail de novo. Quem se descadastrou fica de fora. Os números desta campanha passam a contar o reenvio.`,
+                confirmLabel: "Reenviar para todos",
+                destructive: true,
+              });
+              if (!ok) return;
+              setReenviando(true);
+              const res = await fetch(`/api/marketing/campaigns/${campaign.id}/requeue`, { method: "POST" });
+              const j = await res.json().catch(() => ({}));
+              setReenviando(false);
+              if (!res.ok) {
+                toast.error(j.error ?? "Não foi possível reenviar");
+                return;
+              }
+              toast.success(`Reenvio iniciado: ${j.reenviando} e-mails na fila${j.descadastrados ? ` · ${j.descadastrados} descadastrados ficaram de fora` : ""}`);
+              void campaignActions.refresh(campaign.id);
+            }}
+          >
+            <Repeat className="size-3.5" /> {reenviando ? "Reenviando…" : "Reenviar para todos"}
           </Button>
         )}
         {campaign.status === "sending" && (
