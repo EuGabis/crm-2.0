@@ -1,5 +1,5 @@
 // FUP de perdido quente: a regra de tempo e a contagem de variáveis do template.
-import { elegivelParaFup, variaveisDoCorpo } from "../src/lib/leads/fup-perdido-quente.ts";
+import { elegivelParaFup, variaveisDoCorpo, fupSuspenso } from "../src/lib/leads/fup-perdido-quente.ts";
 
 let ok = 0, falhas = 0;
 const eq = (nome, a, b) => {
