@@ -30,7 +30,8 @@
     "test:form": "node --import ./scripts/lib/alias-register.mjs scripts/test-form-campos.mjs",
     "test:email-falhas": "node scripts/test-email-falhas.mjs",
     "test:tarefas": "node --import ./scripts/lib/alias-register.mjs scripts/test-tarefas.mjs",
-    "test:email-design": "node --import ./scripts/lib/alias-register.mjs scripts/test-email-design.mjs"
+    "test:email-design": "node --import ./scripts/lib/alias-register.mjs scripts/test-email-design.mjs",
+    "test:colar": "node --import ./scripts/lib/alias-register.mjs scripts/test-colar-formatado.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
