@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { fecharFluxoOgg, inspecionarAudio, resumoDaInspecao } from "@/lib/whatsapp/audio";
+import { htmlParaWhatsapp, temFormatacaoRelevante } from "@/lib/whatsapp/colar-formatado";
 import OpusMediaRecorder from "opus-media-recorder";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -299,6 +300,7 @@ export function Composer({ conversationId }: { conversationId: string }) {
   // texto do seletor muda.
   const [templateForced, setTemplateForced] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
   // opus-media-recorder não tem types próprios (módulo declarado como `any`
   // em src/types/opus-media-recorder.d.ts) — a API é compatível com MediaRecorder.
   const recorderRef = useRef<InstanceType<typeof OpusMediaRecorder> | null>(null);
@@ -1168,6 +1170,7 @@ export function Composer({ conversationId }: { conversationId: string }) {
         </div>
       )}
       <Textarea
+        ref={bodyRef}
         value={body}
         disabled={blocked || blockedClosed}
         onChange={(e) => setBody(e.target.value)}
@@ -1181,19 +1184,47 @@ export function Composer({ conversationId }: { conversationId: string }) {
           // Colar um print (Ctrl+V) manda como imagem no WhatsApp. Só intercepta
           // se o clipboard tiver imagem e não estiver em nota interna; texto cola
           // normal. Envio de mídia não vale para nota interna nem conversa fechada.
-          if (internal || blockedClosed) return;
-          const items = Array.from(e.clipboardData?.items ?? []);
-          const imgItem = items.find((it) => it.type.startsWith("image/"));
-          if (!imgItem) return;
-          const blob = imgItem.getAsFile();
-          if (!blob) return;
+          if (!internal && !blockedClosed) {
+            const items = Array.from(e.clipboardData?.items ?? []);
+            const imgItem = items.find((it) => it.type.startsWith("image/"));
+            if (imgItem) {
+              const blob = imgItem.getAsFile();
+              if (blob) {
+                e.preventDefault();
+                const ext = (imgItem.type.split("/")[1] || "png").replace("jpeg", "jpg");
+                const file = new File([blob], `print.${ext}`, { type: imgItem.type });
+                // Não envia direto: entra na fila e espera o Enviar. Colar duas vezes
+                // agora ACUMULA, em vez de a segunda imagem substituir a primeira em
+                // silêncio — que era o comportamento com um arquivo só.
+                enfileirar([file]);
+                return;
+              }
+            }
+          }
+          // Texto copiado de fora (Word, Docs, uma página) chega aqui com
+          // negrito/itálico/lista em HTML — um <textarea> só guarda texto
+          // puro, então o paste padrão do navegador jogaria essa formatação
+          // fora. Convertida para a sintaxe do WhatsApp (*negrito* etc.), ela
+          // sobrevive. Texto SEM formatação (cópia de outro balão, de um
+          // bloco de notas) segue o paste nativo — ele já preserva quebra de
+          // linha sozinho, sem precisar passar pelo conversor.
+          const html = e.clipboardData?.getData("text/html");
+          if (!html || !temFormatacaoRelevante(html)) return;
+          const convertido = htmlParaWhatsapp(html);
+          if (!convertido) return;
           e.preventDefault();
-          const ext = (imgItem.type.split("/")[1] || "png").replace("jpeg", "jpg");
-          const file = new File([blob], `print.${ext}`, { type: imgItem.type });
-          // Não envia direto: entra na fila e espera o Enviar. Colar duas vezes
-          // agora ACUMULA, em vez de a segunda imagem substituir a primeira em
-          // silêncio — que era o comportamento com um arquivo só.
-          enfileirar([file]);
+          const ta = bodyRef.current;
+          const ini = ta?.selectionStart ?? body.length;
+          const fim = ta?.selectionEnd ?? body.length;
+          setBody(body.slice(0, ini) + convertido + body.slice(fim));
+          // Devolve o cursor para logo depois do texto colado — sem isto ele
+          // voltaria para o INÍCIO do campo (comportamento padrão do React ao
+          // trocar `value` por fora de uma digitação).
+          requestAnimationFrame(() => {
+            const pos = ini + convertido.length;
+            ta?.setSelectionRange(pos, pos);
+            ta?.focus();
+          });
         }}
         placeholder={
           blockedClosed
