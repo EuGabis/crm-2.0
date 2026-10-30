@@ -30,6 +30,23 @@ const POR_TIQUE = 20;
 const ORCAMENTO_MS = 20_000;
 
 /**
+ * Pedido do Gabriel (2026-10-30): suspender o FUP por 30 dias. Data-gate em
+ * código, não `status` de automação nem coluna no banco — é um pedido
+ * verbal, com prazo já combinado, e esta chave se AUTO-REATIVA sozinha no
+ * fim da janela, sem exigir lembrar de reverter nem um segundo deploy.
+ *
+ * ⚠️ Pausa o FLUXO INTEIRO (mover o card para Perdido Quente E mandar o
+ * template), não só o envio: mover o card sem avisar o cliente classificaria
+ * o lead como perdido em silêncio, o que é pior do que não suspender nada —
+ * ninguém pediu para mexer na classificação, só no disparo.
+ */
+const SUSPENSO_EM = Date.parse("2026-10-30T00:00:00-03:00");
+const SUSPENSO_POR_DIAS = 30;
+export function fupSuspenso(agora = Date.now()): boolean {
+  return agora < SUSPENSO_EM + SUSPENSO_POR_DIAS * 24 * 60 * 60 * 1000;
+}
+
+/**
  * A regra de tempo, pura para ter teste.
  *
  * ⚠️ "O vendedor mandou mensagem" = a última SAÍDA HUMANA é posterior à última
@@ -68,9 +85,11 @@ export function variaveisDoCorpo(components: unknown[]): number {
 type Resultado = { enviados: number; falhas: number; movidos: number };
 
 export async function fupPerdidoQuente(): Promise<Resultado> {
+  const res: Resultado = { enviados: 0, falhas: 0, movidos: 0 };
+  if (fupSuspenso()) return res;
+
   const db = createAdminClient();
   const inicio = Date.now();
-  const res: Resultado = { enviados: 0, falhas: 0, movidos: 0 };
 
   /*
    * 1) Leads quentes. `bot_desfechos` é append-only e a conversa reaberta passa
