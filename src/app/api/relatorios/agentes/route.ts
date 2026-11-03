@@ -143,8 +143,23 @@ export async function GET(request: Request) {
    * informação. Quem não tem medida nenhuma (a migração não rodou) recebe
    * `null`, e a tela escreve "—" em vez de um zero que acusaria a pessoa.
    */
+  /*
+   * ⚠️ **A coluna segue o PERÍODO do seletor.** `tempo_online` recebe `p_dias`
+   * (sempre os últimos 30), então com "29/10" escolhido a coluna mostrava 500h
+   * — trinta dias somados sob um filtro de um dia. Com o detalhe por dia
+   * disponível, o total é a soma dele, que é exatamente o período escolhido.
+   */
+  const totalNoPeriodo = new Map<string, number>();
+  for (const r of (onlinePorDia ?? []) as any[]) {
+    const u = r.usuario as string;
+    totalNoPeriodo.set(u, (totalNoPeriodo.get(u) ?? 0) + Number(r.minutos ?? 0));
+  }
   const minutosDe = (id: string): number | null =>
-    porUsuario ? porUsuario.get(id)?.minutos ?? 0 : null;
+    onlinePorDia
+      ? totalNoPeriodo.get(id) ?? 0
+      : porUsuario
+        ? porUsuario.get(id)?.minutos ?? 0
+        : null;
 
   const agentes = (data ?? [])
     .map((r: any) => ({
