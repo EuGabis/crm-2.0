@@ -76,7 +76,7 @@ export async function GET(request: Request) {
    * engolido e a coluna some — em vez de a tela inteira parar por causa de um
    * campo novo.
    */
-  const [{ data, error }, online, onlinePorDia] = await Promise.all([
+  const [{ data, error }, online, onlinePorDia, ausentePorDia] = await Promise.all([
     supabase.rpc("agentes_desempenho", {
       p_location: membership.location_id,
       p_dias: dias,
@@ -94,6 +94,14 @@ export async function GET(request: Request) {
      */
     supabase
       .rpc("tempo_online_por_dia", {
+        p_location: membership.location_id,
+        p_de: periodo.de,
+        p_ate: periodo.ate,
+      })
+      .then((r) => (r.error ? null : (r.data as any[]))),
+    // Tempo AUSENTE no período (202611031200). Sem a migração, a coluna some.
+    supabase
+      .rpc("tempo_ausente_por_dia", {
         p_location: membership.location_id,
         p_de: periodo.de,
         p_ate: periodo.ate,
@@ -187,6 +195,12 @@ export async function GET(request: Request) {
       minutos_online: minutosDe(r.user_id),
       /** Desde quando há medida para esta pessoa (ISO), ou null. */
       online_desde: porUsuario?.get(r.user_id)?.desde ?? null,
+      /** Minutos AUSENTE no período; null = sem medida (migração não aplicada). */
+      minutos_ausente: ausentePorDia
+        ? (ausentePorDia as any[])
+            .filter((a) => a.usuario === r.user_id)
+            .reduce((s: number, a) => s + Number(a.minutos ?? 0), 0)
+        : null,
     }))
     // Mais ativo primeiro.
     .sort((a: any, b: any) => b.conversas_atribuidas - a.conversas_atribuidas);

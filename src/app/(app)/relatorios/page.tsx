@@ -237,6 +237,7 @@ interface AgenteRow {
    * 202609161400, porque antes o CRM guardava apenas o estado atual.
    */
   minutos_online?: number | null;
+  minutos_ausente?: number | null;
   /** Desde quando há medida para esta pessoa (ISO). */
   online_desde?: string | null;
   templates_enviados_30d: number;
@@ -380,6 +381,7 @@ function AgentesReport() {
                   "Sem resposta",
                   "Templates (30d)",
                   "Tempo online",
+                  "Tempo ausente",
                   "Ganhos",
                   "Perdidos",
                   "Receita ganha",
@@ -435,6 +437,14 @@ function AgentesReport() {
                     ) : (
                       fmtDuracao(a.minutos_online)
                     )}
+                  </td>
+                  {/* Tempo marcado como "Ausente" com o CRM aberto, no período.
+                      "—" = ainda sem medida (começa na 202611031200). */}
+                  <td
+                    className="whitespace-nowrap px-4 py-2.5 text-amber-700"
+                    title='Tempo com o status "Ausente" e o CRM aberto, no período escolhido'
+                  >
+                    {a.minutos_ausente == null ? "—" : fmtDuracao(a.minutos_ausente)}
                   </td>
                   <td className="px-4 py-2.5 text-emerald-600">{a.ganhos}</td>
                   <td className="px-4 py-2.5 text-slate-500">{a.perdidos}</td>
