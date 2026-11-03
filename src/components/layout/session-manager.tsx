@@ -68,6 +68,20 @@ export function SessionManager() {
      * e a devolução por espera cobre o lead que caia nela. Fechar essa sobra
      * direito pede coluna PRÓPRIA (`logged_out_at`), não reciclar o NULL.
      */
+    /*
+     * Histórico de status: o OFFLINE por inatividade vai ANTES do signOut. Não é
+     * o clear_presence de antes: só acrescenta um evento, não mexe em
+     * last_seen_at. ⚠️ "expired" (navegador reaberto) NÃO grava: a pessoa saiu
+     * quando fechou o navegador, não agora — esse offline o touch_presence
+     * registra com o horário do último sinal.
+     */
+    if (reason === "idle") {
+      try {
+        await createClient().rpc("registrar_offline", { p_origem: "inatividade" });
+      } catch {
+        // best-effort
+      }
+    }
     try {
       // scope "local": só esta sessão/dispositivo — não derruba o mesmo usuário
       // logado no celular/outro navegador.
