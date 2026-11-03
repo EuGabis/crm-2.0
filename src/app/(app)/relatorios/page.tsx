@@ -238,6 +238,8 @@ interface AgenteRow {
    */
   minutos_online?: number | null;
   minutos_ausente?: number | null;
+  /** Dias do período sem medida (sessão inflada descartada), "AAAA-MM-DD". */
+  dias_sem_medida?: string[];
   /** Desde quando há medida para esta pessoa (ISO). */
   online_desde?: string | null;
   templates_enviados_30d: number;
@@ -259,6 +261,17 @@ function fmtDuracao(min: number): string {
 }
 
 /**
+ * Texto da coluna "Tempo online". ⚠️ 0h num período que tem dia SEM MEDIDA vira
+ * "sem medida": o zero viria da sessão descartada, não de a pessoa não ter
+ * usado o CRM (caso do Alberto em 02/11).
+ */
+function textoOnline(a: AgenteRow): string {
+  const min = a.minutos_online ?? 0;
+  if (min === 0 && (a.dias_sem_medida?.length ?? 0) > 0) return "sem medida";
+  return fmtDuracao(min);
+}
+
+/**
  * Tempo online dia a dia, para UMA pessoa.
  *
  * ⚠️ **Dia sem medida aparece com "—", não com "0min".** Zero afirma que ela não
@@ -268,9 +281,12 @@ function fmtDuracao(min: number): string {
 function DetalheOnline({
   dias,
   periodo,
+  semMedida = [],
 }: {
   dias: Record<string, number>;
   periodo: Periodo;
+  /** Dias cobertos por sessão descartada: o tempo real não foi gravado. */
+  semMedida?: string[];
 }) {
   const lista: { dia: string; min: number | null }[] = [];
   for (let d = periodo.de; d <= periodo.ate; d = somaDias(d, 1)) {
@@ -294,6 +310,13 @@ function DetalheOnline({
           <span className="tabular-nums text-slate-700">
             {l.min == null ? "—" : fmtDuracao(l.min)}
           </span>
+          {/* ⚠️ O que aparece aqui é só a parte medida: o resto do dia caiu numa
+              sessão descartada. 0h nesse dia acusaria a pessoa sem motivo. */}
+          {semMedida.includes(l.dia) && (
+            <span className="text-amber-700" title="Parte do dia estava numa sessão inflada pelo defeito do status Ausente, que foi descartada">
+              sem medida{l.min ? " (incompleto)" : ""}
+            </span>
+          )}
         </li>
       ))}
     </ul>
@@ -432,11 +455,21 @@ function AgentesReport() {
                         onClick={() => setAberto(aberto === a.userId ? null : a.userId)}
                         className="rounded px-1 underline decoration-dotted underline-offset-2 hover:bg-indigo-50 hover:text-indigo-700"
                       >
-                        {fmtDuracao(a.minutos_online)}
+                        {textoOnline(a)}
                       </button>
                     ) : (
-                      fmtDuracao(a.minutos_online)
+                      textoOnline(a)
                     )}
+                    {/* Total medido + aviso dos dias que não puderam ser medidos:
+                        sem o aviso, o total parece completo e não é. */}
+                    {a.minutos_online != null &&
+                      a.minutos_online > 0 &&
+                      (a.dias_sem_medida?.length ?? 0) > 0 && (
+                        <span className="ml-1 text-[10px] text-amber-700">
+                          · {a.dias_sem_medida!.length} dia
+                          {a.dias_sem_medida!.length > 1 ? "s" : ""} sem medida
+                        </span>
+                      )}
                   </td>
                   {/* Tempo marcado como "Ausente" com o CRM aberto, no período.
                       "—" = ainda sem medida (começa na 202611031200). */}
@@ -456,7 +489,11 @@ function AgentesReport() {
                       <p className="mb-2 text-[11px] font-semibold text-slate-600">
                         Tempo online por dia · {a.nome}
                       </p>
-                      <DetalheOnline dias={porDia[a.userId] ?? {}} periodo={periodo} />
+                      <DetalheOnline
+                        dias={porDia[a.userId] ?? {}}
+                        periodo={periodo}
+                        semMedida={a.dias_sem_medida}
+                      />
                     </td>
                   </tr>
                 )}
