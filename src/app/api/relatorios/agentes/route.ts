@@ -211,6 +211,18 @@ export async function GET(request: Request) {
         .filter((x) => x.usuario === r.user_id)
         .map((x) => String(x.dia))
         .sort(),
+      /*
+       * Estimativa pela ATIVIDADE nesses dias (202611031500): primeira e última
+       * mensagem enviada. Não é tempo online — é o que dá para afirmar.
+       */
+      atividade_sem_medida: ((semMedida ?? []) as any[])
+        .filter((x) => x.usuario === r.user_id && x.primeira_msg)
+        .map((x) => ({
+          dia: String(x.dia),
+          primeira: x.primeira_msg as string,
+          ultima: x.ultima_msg as string,
+          mensagens: Number(x.mensagens ?? 0),
+        })),
       /** Minutos AUSENTE no período; null = sem medida (migração não aplicada). */
       minutos_ausente: ausentePorDia
         ? (ausentePorDia as any[])

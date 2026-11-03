@@ -240,6 +240,8 @@ interface AgenteRow {
   minutos_ausente?: number | null;
   /** Dias do período sem medida (sessão inflada descartada), "AAAA-MM-DD". */
   dias_sem_medida?: string[];
+  /** Nos dias sem medida: primeira/última mensagem enviada (estimativa). */
+  atividade_sem_medida?: Atividade[];
   /** Desde quando há medida para esta pessoa (ISO). */
   online_desde?: string | null;
   templates_enviados_30d: number;
@@ -265,9 +267,31 @@ function fmtDuracao(min: number): string {
  * "sem medida": o zero viria da sessão descartada, não de a pessoa não ter
  * usado o CRM (caso do Alberto em 02/11).
  */
+interface Atividade {
+  dia: string;
+  primeira: string;
+  ultima: string;
+  mensagens: number;
+}
+
+/** "11:05–20:26 · 167 msgs", no horário de São Paulo. */
+function textoAtividade(x: Atividade): string {
+  const h = (iso: string) =>
+    new Date(iso).toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "America/Sao_Paulo",
+    });
+  return `atividade ${h(x.primeira)}–${h(x.ultima)} · ${x.mensagens} msgs`;
+}
+
 function textoOnline(a: AgenteRow): string {
   const min = a.minutos_online ?? 0;
-  if (min === 0 && (a.dias_sem_medida?.length ?? 0) > 0) return "sem medida";
+  if (min === 0 && (a.dias_sem_medida?.length ?? 0) > 0) {
+    // Um dia só com atividade conhecida: mostra a estimativa ali mesmo.
+    const at = a.atividade_sem_medida ?? [];
+    return at.length === 1 ? `sem medida · ${textoAtividade(at[0])}` : "sem medida";
+  }
   return fmtDuracao(min);
 }
 
@@ -282,11 +306,13 @@ function DetalheOnline({
   dias,
   periodo,
   semMedida = [],
+  atividade = [],
 }: {
   dias: Record<string, number>;
   periodo: Periodo;
   /** Dias cobertos por sessão descartada: o tempo real não foi gravado. */
   semMedida?: string[];
+  atividade?: Atividade[];
 }) {
   const lista: { dia: string; min: number | null }[] = [];
   for (let d = periodo.de; d <= periodo.ate; d = somaDias(d, 1)) {
@@ -315,6 +341,10 @@ function DetalheOnline({
           {semMedida.includes(l.dia) && (
             <span className="text-amber-700" title="Parte do dia estava numa sessão inflada pelo defeito do status Ausente, que foi descartada">
               sem medida{l.min ? " (incompleto)" : ""}
+              {(() => {
+                const x = atividade.find((y) => y.dia === l.dia);
+                return x ? ` · ${textoAtividade(x)}` : "";
+              })()}
             </span>
           )}
         </li>
@@ -493,6 +523,7 @@ function AgentesReport() {
                         dias={porDia[a.userId] ?? {}}
                         periodo={periodo}
                         semMedida={a.dias_sem_medida}
+                        atividade={a.atividade_sem_medida}
                       />
                     </td>
                   </tr>

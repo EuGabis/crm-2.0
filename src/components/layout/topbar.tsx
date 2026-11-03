@@ -44,6 +44,13 @@ export function Topbar() {
     // de uma chamada de rede que poderia falhar e travar o logout. O try/catch garante
     // que, mesmo se algo der errado, ainda saímos para o /login.
     try {
+      // Histórico de status: registra o OFFLINE antes do signOut (depois não há
+      // sessão e a função não sabe quem é). Best-effort.
+      await supabase.rpc("registrar_offline", { p_origem: "logout" });
+    } catch {
+      // segue o logout
+    }
+    try {
       await supabase.auth.signOut({ scope: "local" });
     } catch {
       // ignora — segue para o login de qualquer forma

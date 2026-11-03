@@ -142,6 +142,18 @@ export default function LoginPage() {
         );
         return;
       }
+      /*
+       * ⚠️ Todo login começa ONLINE. O status "Ausente" ficava gravado entre um
+       * acesso e outro: quem marcava Ausente no fim do expediente e era deslogado
+       * voltava no dia seguinte ainda ausente — sem receber lead e sem contar
+       * tempo online, sem perceber (Karina, 03/11). Ausente vale para o acesso em
+       * que foi marcado. Best-effort: falhar aqui não pode impedir o login.
+       */
+      try {
+        await supabase.rpc("definir_disponibilidade", { p_valor: "online" });
+      } catch {
+        // segue o login; a pessoa ainda pode trocar o status na barra superior
+      }
       markBrowserSession();
       router.push("/dashboard");
       router.refresh();
