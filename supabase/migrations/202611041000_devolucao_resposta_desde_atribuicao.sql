@@ -11,6 +11,11 @@
 -- A regra de 202609092030 ("uma vez que o vendedor mandou mensagem, fica com
 -- ele") continua valendo — só passa a olhar a mensagem DESTE atendimento.
 --
+-- Também: a função passa a olhar só conversa COM dono, recente e dentro do
+-- teto — antes levava 10 s (estourava os 8 s do authenticator) e devolvia 3.130
+-- linhas, cortadas em 1.000 pelo PostgREST: os leads frescos de Vendas nunca
+-- chegavam ao código. Era a causa real de o lead não voltar ao rodízio.
+--
 -- Mesma assinatura e mesmo retorno: `create or replace`, sem drop. Pode ser
 -- aplicada antes ou depois do merge (nenhum código muda).
 
@@ -55,6 +60,17 @@ begin
      where c.location_id = p_location
        and c.closed_at is null
        and c.archived_at is null
+       /*
+        * 🔴 Só o que a devolução pode tocar: COM dono e com mensagem recente.
+        * Sem isto a função varria todas as conversas abertas da empresa (10 s,
+        * acima dos 8 s do authenticator) e devolvia 3.130 linhas — o PostgREST
+        * corta em 1.000, e como a ordem é da MAIOR espera para a menor, os
+        * leads frescos ficavam fora da resposta.
+        * 6 dias corridos cobre o teto de um dia útil (660 min) mesmo com
+        * fim de semana e feriado no meio.
+        */
+       and c.assigned_to is not null
+       and c.last_message_at > now() - interval '6 days'
   ),
   /*
    * ⚠️ Dois sinais para "passou pelo bot", unidos por OR, e nenhum sozinho
@@ -86,8 +102,8 @@ begin
                and coalesce(m.internal, false) = false
            ) as t_humano
       from public.messages m
-     where m.location_id = p_location
-       and coalesce(m.type, '') <> 'event'
+      join abertas a on a.id = m.conversation_id
+     where coalesce(m.type, '') <> 'event'
      group by m.conversation_id
   ),
   /* O estado do DONO, no momento da consulta. */
@@ -131,6 +147,10 @@ begin
       */
      and a.atribuida_em is not null
      and private.business_minutes(a.atribuida_em, now()) >= p_limite_min
+     -- Teto da devolução (DEVOLVER_TETO_MIN em distribution.ts): além de um dia
+     -- útil é backlog, e o TypeScript descarta. Cortar aqui é o que mantém a
+     -- resposta abaixo das 1.000 linhas do PostgREST.
+     and private.business_minutes(u.t_cliente, now()) <= 660
    order by private.business_minutes(u.t_cliente, now()) desc;
 end;
 $function$;
