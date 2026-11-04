@@ -1759,7 +1759,8 @@ export async function devolverInativas(
       const esperou = Math.round(
         Number(parados.find((p: any) => p.conversation_id === conv.id)?.espera_util_min ?? limite),
       );
-      await db
+      const vista = parados.find((p: any) => p.conversation_id === conv.id)?.devolvida_em ?? null;
+      let soltar = db
         .from("conversations")
         .update({
           assigned_to: null,
@@ -1780,7 +1781,19 @@ export async function devolverInativas(
           // O gatilho `log_atribuicao` escreve o evento; aqui só vai o motivo.
           assign_reason: `devolvida: cliente esperava ${esperou} min sem resposta`,
         })
-        .eq("id", conv.id);
+        /*
+         * 🔴 **Compare-and-set** (2026-11-04): tiques SOBREPOSTOS devolviam a
+         * mesma conversa várias vezes por minuto — cada execução lia
+         * `conversas_paradas` antes de a outra gravar `devolvida_em`. Medido:
+         * 78 conversas devolvidas 2 a 4 vezes em 24h sem o cliente escrever.
+         * Só solta se o dono E a memória de devolução ainda são os que esta
+         * execução viu. UPDATE que não casa volta calado — daí o `select`.
+         */
+        .eq("id", conv.id)
+        .eq("assigned_to", anterior);
+      soltar = vista ? soltar.eq("devolvida_em", vista) : soltar.is("devolvida_em", null);
+      const { data: soltou } = await soltar.select("id");
+      if (!soltou?.length) continue;
       devolvidas++;
 
       const novo = await distributeOne(db, {
