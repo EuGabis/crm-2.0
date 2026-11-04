@@ -2,7 +2,7 @@ import { Resend } from "resend";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { renderResetEmail } from "@/lib/email/reset-template";
 import { replyToAddress, senderAddress } from "@/lib/email/sender";
-import { originDaRequisicao } from "@/lib/config/app-url";
+import { appBaseUrl, originDaRequisicao } from "@/lib/config/app-url";
 
 /** Caminho da página que troca o token pela sessão e pede a nova senha. */
 export const RESET_PATH = "/login/redefinir";
@@ -63,6 +63,12 @@ export async function enviarRedefinicao(
   return { ok: true, link, emailSent: true };
 }
 
+/**
+ * ⚠️ Link de e-mail sai SEMPRE no domínio oficial (fora do localhost). O domínio
+ * da requisição pode ser um endereço *.vercel.app (antigo ou de deploy), e link
+ * enviado por e-mail não tem conserto depois.
+ */
 export function appOrigin(request: Request): string {
-  return originDaRequisicao(request);
+  const origin = originDaRequisicao(request);
+  return /\/\/(localhost|127\.0\.0\.1)(:|$)/.test(origin) ? origin : appBaseUrl();
 }
