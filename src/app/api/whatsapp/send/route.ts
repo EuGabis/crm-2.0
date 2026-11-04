@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { sendText, sendTemplate } from "@/lib/whatsapp/client";
 import { toWhatsAppNumber } from "@/lib/whatsapp/phone";
 
@@ -79,7 +80,13 @@ export async function POST(request: Request) {
   // Contato + limite diário em paralelo (ambos dependem só do que já temos).
   const [contactRes, countRes] = await Promise.all([
     supabase.from("contacts").select("phone").eq("id", conv.contact_id).maybeSingle(),
-    supabase
+    /*
+     * ⚠️ Com a service role: pela sessão, a RLS rodava por linha nas ~13 mil
+     * mensagens do dia e a contagem estourava os 8 s — `count` voltava null,
+     * lido como zero, e o limite deixava de ser conferido. A sessão já
+     * autorizou a conversa acima; aqui é só uma contagem.
+     */
+    createAdminClient()
       .from("messages")
       .select("id", { count: "exact", head: true })
       .eq("channel_id", channel.id)

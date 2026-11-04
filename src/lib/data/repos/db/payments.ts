@@ -146,6 +146,34 @@ interface PaymentsState {
   patch: (p: Partial<Pick<PaymentsState, "guru" | "subscriptions" | "realtime">>) => void;
 }
 
+/**
+ * Todas as assinaturas da empresa, paginadas.
+ *
+ * ⚠️ Armadilha nº 7: sem `.range()` o PostgREST devolvia 1000 das 2.689
+ * assinaturas, sem erro — a aba Assinaturas e os totais ficavam incompletos.
+ * Ordem desempatada por `id`: a sincronização grava em lote com o mesmo
+ * `guru_updated_at`, e ordem instável repete e PULA linhas entre páginas.
+ */
+async function fetchAllSubscriptions(
+  supabase: ReturnType<typeof createClient>,
+  locationId: string,
+): Promise<{ data: any[] | null }> {
+  const todas: any[] = [];
+  for (let de = 0; de < 50_000; de += 1000) {
+    const { data, error } = await supabase
+      .from("payment_subscriptions")
+      .select("*")
+      .eq("location_id", locationId)
+      .order("guru_updated_at", { ascending: false, nullsFirst: false })
+      .order("id")
+      .range(de, de + 999);
+    if (error) return { data: null };
+    todas.push(...(data ?? []));
+    if ((data?.length ?? 0) < 1000) break;
+  }
+  return { data: todas };
+}
+
 export const usePaymentsStore = create<PaymentsState>((set, get) => ({
   loaded: false,
   loading: false,
@@ -181,11 +209,7 @@ export const usePaymentsStore = create<PaymentsState>((set, get) => ({
         .eq("location_id", locationId)
         .eq("provider", "guru")
         .maybeSingle(),
-      supabase
-        .from("payment_subscriptions")
-        .select("*")
-        .eq("location_id", locationId)
-        .order("guru_updated_at", { ascending: false, nullsFirst: false }),
+      fetchAllSubscriptions(supabase, locationId),
       // Rede de segurança: se há venda sincronizada nesta empresa, a Guru
       // ESTÁ conectada — não importa se a view de status respondeu. Sem isto,
       // qualquer falha na view (migração não aplicada num ambiente, cache do
@@ -230,11 +254,9 @@ export const usePaymentsStore = create<PaymentsState>((set, get) => ({
     const refetch = () => {
       if (refetchTimer) clearTimeout(refetchTimer);
       refetchTimer = setTimeout(async () => {
-        const { data: freshSubs } = await supabase
-          .from("payment_subscriptions")
-          .select("*")
-          .eq("location_id", locationId)
-          .order("guru_updated_at", { ascending: false, nullsFirst: false });
+        const { data: freshSubs } = await fetchAllSubscriptions(supabase, locationId);
+        // Falhou a releitura: mantém a lista que está na tela em vez de esvaziá-la.
+        if (!freshSubs) return;
         set({ subscriptions: (freshSubs ?? []).map(mapPaymentSubscription) });
       }, 800);
     };

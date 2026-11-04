@@ -222,6 +222,24 @@ export function inicioDoDiaSP(agora: Date = new Date()): string {
  * mapa é passado adiante e incrementado a cada atribuição — sem isso, dez leads
  * no mesmo tique iriam todos para a mesma pessoa.
  */
+/**
+ * Lê TODAS as linhas de uma consulta, em páginas de 1000 ordenadas por `id`.
+ *
+ * ⚠️ Armadilha nº 7: o PostgREST corta em 1000 sem erro. Num dia cheio um setor
+ * passa de 460 atribuições por número, e a cota que conta "recebidos hoje"
+ * subcontaria em silêncio — o despejo voltaria sem ninguém mexer na regra.
+ */
+async function todasAsLinhas(consulta: () => any): Promise<{ data: any[] | null; error: any }> {
+  const todas: any[] = [];
+  for (let de = 0; de < 100_000; de += 1000) {
+    const { data, error } = await consulta().order("id").range(de, de + 999);
+    if (error) return { data: null, error };
+    todas.push(...(data ?? []));
+    if ((data?.length ?? 0) < 1000) break;
+  }
+  return { data: todas, error: null };
+}
+
 export async function recebidosNoDiaPorAtendente(
   db: any,
   locationId: string,
@@ -252,12 +270,12 @@ export async function recebidosNoDiaPorAtendente(
    * equilíbrio.
    */
   let linhas: any[] | null = null;
-  const r = await base().gte("atribuida_em", desde).is("plantao_id", null);
+  const r = await todasAsLinhas(() => base().gte("atribuida_em", desde).is("plantao_id", null));
   if (r.error) {
     // Sem `plantao_id` ainda (código no ar antes da migração): tenta só a data.
-    const semPlantao = await base().gte("atribuida_em", desde);
+    const semPlantao = await todasAsLinhas(() => base().gte("atribuida_em", desde));
     if (semPlantao.error) {
-      const antigo = await base().is("closed_at", null).is("archived_at", null);
+      const antigo = await todasAsLinhas(() => base().is("closed_at", null).is("archived_at", null));
       linhas = (antigo.data as any[]) ?? null;
     } else {
       linhas = (semPlantao.data as any[]) ?? null;
@@ -327,14 +345,16 @@ export async function recebidosNoDiaPorTemperatura(
     ["frio", zerado()],
   ]);
   if (!pool.length || !channelIds.length) return out;
-  const { data, error } = await db
-    .from("conversations")
-    .select("id, assigned_to")
-    .eq("location_id", locationId)
-    .in("channel_id", channelIds)
-    .in("assigned_to", pool)
-    .gte("atribuida_em", inicioDoDiaSP())
-    .is("plantao_id", null);
+  const { data, error } = await todasAsLinhas(() =>
+    db
+      .from("conversations")
+      .select("id, assigned_to")
+      .eq("location_id", locationId)
+      .in("channel_id", channelIds)
+      .in("assigned_to", pool)
+      .gte("atribuida_em", inicioDoDiaSP())
+      .is("plantao_id", null),
+  );
   if (error || !data?.length) return out;
   const temps = await temperaturasDasConversas(
     db,
