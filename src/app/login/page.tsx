@@ -167,6 +167,9 @@ export default function LoginPage() {
         email: form.email.trim(),
         password: form.password,
         options: {
+          // Sem isto o Supabase usa o "Site URL" do painel (que ficou no domínio
+          // antigo). Precisa estar em Auth → Redirect URLs, senão ele ignora.
+          emailRedirectTo: `${window.location.origin}/login`,
           data: {
             name: form.name.trim(),
             company: form.company.trim() || undefined,
