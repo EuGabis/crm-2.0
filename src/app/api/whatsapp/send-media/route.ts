@@ -198,12 +198,15 @@ export async function POST(request: Request) {
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
   // Com a service role: pela RLS a contagem estourava os 8 s (ver /send).
-  const { count } = await admin
+  const { count, error: limiteErr } = await admin
     .from("messages")
     .select("id", { count: "exact", head: true })
     .eq("channel_id", channel.id)
     .eq("direction", "out")
     .gte("created_at", startOfDay.toISOString());
+  // Sem conseguir contar, segue enviando (travar o atendimento por lentidão do
+  // banco é pior) — mas diz, em vez de ler o vazio como zero.
+  if (limiteErr) console.warn("[limite diario] contagem falhou, nao conferido:", limiteErr.message);
   if ((count ?? 0) >= channel.daily_limit) {
     return recusar(`Limite diário do canal atingido (${channel.daily_limit})`, 429);
   }

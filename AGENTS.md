@@ -9825,3 +9825,30 @@ Regra do Gabriel para Paulo, Rogério e Alberto:
 - Vale nos três caminhos (bot e varredura por `distributeOne`, botão do
   Relatório por `distributeDepartment`). `npm run test:rodizio` — 170 asserções.
 - Devolução (20 min sem a primeira resposta) não mudou.
+
+## Falhas silenciosas: guarda e painel (2026-11-04)
+
+Em 24h o banco cancelou **3.768 consultas** por tempo esgotado e ninguém soube:
+a consulta voltava vazia e o código lia como zero. Foi a causa real do lead que
+não voltava ao rodízio, do sino que travava para a Secretaria e do limite diário
+do número que deixava de ser conferido. Três peças fecham isso:
+
+1. **`npm run verificar`** antes de todo commit (roda `check:consultas` +
+   `db:check`). `check:consultas` reprova, no que mudou em relação à main:
+   - leitura de tabela grande sem `.range()`/`.limit()` — o PostgREST corta em
+     1000 sem avisar (armadilha nº 7). **RPC também é cortada.**
+   - `const { count } = await ...` sem `error` — ao estourar, `count` vem null e
+     vira zero. Contagem que falhou nunca pode decidir nada (a campanha de e-mail
+     era dada como concluída assim).
+   Exceção consciente: `// consulta-ok: <motivo medido>` na linha anterior.
+   `-- --todos` audita o repositório inteiro (hoje: 0 achados).
+2. **Configurações → Saúde → "Consultas que estouraram o tempo"** (migração
+   202611041300). Os três clientes do Supabase usam `criarFetchVigiado`
+   (`lib/supabase/vigiar-falhas.ts`): resposta 57014/PGRST00x é registrada em
+   `falhas_consulta`, sem mudar a resposta original. Linha nova ali = alguma tela
+   recebendo vazio no lugar do dado.
+3. **Função `security definer` para consulta que a RLS faz linha a linha** em
+   tabela grande (`caixa_usuario`, `notificacoes_nao_lidas`,
+   `conversas_paradas`). Antes de entregar, meça **como o usuário de cada setor**
+   (Secretaria e Financeiro enxergam pouco e pagam mais caro), não só como admin:
+   o sino levava 5 ms para o Paulo e 10,5 s para a Jenifer.

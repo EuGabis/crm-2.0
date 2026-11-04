@@ -81,11 +81,12 @@ export const aiAgentActions = {
     const locationId = useDbStore.getState().locationId;
     if (!locationId) return { ok: false, error: "Empresa não encontrada" };
     const supabase = createClient();
-    const { count } = await supabase
+    const { count, error: contErr } = await supabase
       .from("ai_agents")
       .select("id", { count: "exact", head: true })
       .eq("location_id", locationId);
-    const first = (count ?? 0) === 0;
+    // Contagem que falhou não pode fazer o agente novo virar o PRINCIPAL.
+    const first = !contErr && count === 0;
     const { data, error } = await supabase
       .from("ai_agents")
       .insert({ location_id: locationId, name: input.name.trim(), is_primary: first })

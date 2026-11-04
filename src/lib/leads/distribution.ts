@@ -251,6 +251,7 @@ export async function recebidosNoDiaPorAtendente(
   const desde = inicioDoDiaSP();
   const base = () =>
     db
+      // consulta-ok: sempre lida por todasAsLinhas (paginada), logo abaixo.
       .from("conversations")
       .select("assigned_to")
       .eq("location_id", locationId)

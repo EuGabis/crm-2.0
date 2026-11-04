@@ -590,6 +590,7 @@ export function usePaymentSubscriptionsForContact(email: string | null, name: st
         return;
       }
       const supabase = createClient();
+      // consulta-ok: assinaturas de UM comprador (por e-mail/nome) — poucas linhas.
       let query = supabase.from("payment_subscriptions").select("*").eq("location_id", loc);
       query = email ? query.ilike("contact_email", email) : query.ilike("contact_name", name as string);
       const { data } = await query.order("guru_updated_at", { ascending: false, nullsFirst: false });

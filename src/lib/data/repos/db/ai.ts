@@ -102,12 +102,24 @@ export function useAiUsage() {
     start.setDate(1);
     start.setHours(0, 0, 0, 0);
     const supabase = createClient();
-    void supabase
-      .from("ai_logs")
-      .select("prompt_tokens, completion_tokens")
-      .eq("location_id", locationId)
-      .gte("created_at", start.toISOString())
-      .then(({ data }) => {
+    // Paginado: o uso do mês cresce (354 chamadas no início de novembro) e o
+    // total de tokens sairia menor que o real ao passar de 1000, sem aviso.
+    void (async () => {
+      const todas: any[] = [];
+      for (let de = 0; de < 50_000; de += 1000) {
+        const { data, error } = await supabase
+          .from("ai_logs")
+          .select("prompt_tokens, completion_tokens")
+          .eq("location_id", locationId)
+          .gte("created_at", start.toISOString())
+          .order("id")
+          .range(de, de + 999);
+        if (error) break;
+        todas.push(...(data ?? []));
+        if ((data?.length ?? 0) < 1000) break;
+      }
+      return { data: todas };
+    })().then(({ data }) => {
         if (!active) return;
         const rows = data ?? [];
         const tokens = rows.reduce(

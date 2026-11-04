@@ -386,9 +386,10 @@ async function enviarFup(db: any, conv: any, cache: Map<string, any>): Promise<b
   if (canal.daily_limit) {
     const hoje = new Date();
     hoje.setHours(0, 0, 0, 0);
-    const { count } = await db.from("messages").select("id", { count: "exact", head: true })
+    const { count, error: limiteErr } = await db.from("messages").select("id", { count: "exact", head: true })
       .eq("channel_id", canal.id).eq("direction", "out").gte("created_at", hoje.toISOString());
     // Limite atingido NÃO grava falha: é transitório, e o próximo dia deve tentar.
+    if (limiteErr) console.warn("[limite diario] contagem falhou, nao conferido:", limiteErr.message);
     if ((count ?? 0) >= canal.daily_limit) return false;
   }
 

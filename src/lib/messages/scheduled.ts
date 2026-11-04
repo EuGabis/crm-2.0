@@ -132,12 +132,15 @@ async function deliver(db: any, msg: any): Promise<Delivery> {
   // Mesmo limite diário que a rota interativa respeita.
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
-  const { count } = await db
+  const { count, error: limiteErr } = await db
     .from("messages")
     .select("id", { count: "exact", head: true })
     .eq("channel_id", channel.id)
     .eq("direction", "out")
     .gte("created_at", startOfDay.toISOString());
+  // Sem conseguir contar, segue enviando (travar o atendimento por lentidão do
+  // banco é pior) — mas diz, em vez de ler o vazio como zero.
+  if (limiteErr) console.warn("[limite diario] contagem falhou, nao conferido:", limiteErr.message);
   if ((count ?? 0) >= channel.daily_limit) {
     return { ok: false, error: "Limite diário do canal atingido" };
   }
