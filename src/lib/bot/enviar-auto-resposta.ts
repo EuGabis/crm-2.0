@@ -57,12 +57,15 @@ export async function maybeAutoRespostaAgendada(
    */
   const inicioDoDia = new Date();
   inicioDoDia.setHours(0, 0, 0, 0);
-  const { count } = await db
+  const { count, error: limiteErr } = await db
     .from("messages")
     .select("id", { count: "exact", head: true })
     .eq("channel_id", args.channelId)
     .eq("direction", "out")
     .gte("created_at", inicioDoDia.toISOString());
+  // Sem conseguir contar, segue enviando (travar o atendimento por lentidão do
+  // banco é pior) — mas diz, em vez de ler o vazio como zero.
+  if (limiteErr) console.warn("[limite diario] contagem falhou, nao conferido:", limiteErr.message);
   if ((count ?? 0) >= args.dailyLimit) {
     console.warn(`[auto-resposta] limite diário do canal atingido — não respondi`);
     return false;

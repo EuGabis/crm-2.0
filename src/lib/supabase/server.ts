@@ -1,5 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { criarFetchVigiado } from "./vigiar-falhas";
+
+const fetchVigiado = criarFetchVigiado();
 
 // Cliente para Server Components / Route Handlers. Sessão vem dos cookies.
 export async function createClient() {
@@ -9,6 +12,7 @@ export async function createClient() {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
     {
+      global: { fetch: fetchVigiado },
       cookies: {
         getAll() {
           return cookieStore.getAll();

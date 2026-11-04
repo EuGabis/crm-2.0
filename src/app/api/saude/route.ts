@@ -64,7 +64,7 @@ export async function GET() {
   const supaKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
 
   const inicioBanco = Date.now();
-  const [banco, auth, resend, openai] = await Promise.all([
+  const [banco, auth, resend, openai, falhas] = await Promise.all([
     supabase.rpc("saude_sistema", { p_location: membro.location_id }).then(
       (r) => ({ ...r, ms: Date.now() - inicioBanco }),
       (e) => ({ data: null, error: { message: String(e), code: "" }, ms: Date.now() - inicioBanco })
@@ -80,6 +80,12 @@ export async function GET() {
           headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
         })
       : Promise.resolve(null),
+    // Falhas silenciosas registradas pelo próprio app (202611041300). Sem a
+    // migração, a função não existe e a checagem diz isso.
+    supabase.rpc("falhas_consulta_resumo", { p_location: membro.location_id }).then(
+      (r) => r,
+      (e) => ({ data: null, error: { message: String(e), code: "" } })
+    ),
   ]);
 
   const c: Checagem[] = [];
@@ -153,6 +159,37 @@ export async function GET() {
           : undefined,
       });
     }
+  }
+  /*
+   * Consultas que o banco cancelou por tempo (57014) ou que não alcançaram o
+   * banco. Elas não dão erro na tela — voltam vazias e o código lê como zero —,
+   * e foi assim que 3.768 passaram em um dia sem ninguém saber (2026-11-04).
+   */
+  if (falhas.error) {
+    add({
+      id: "falhas", grupo: "Banco de dados", nome: "Consultas que estouraram o tempo", status: "atencao",
+      resumo: "sem registro",
+      detalhe: falhas.error.code === "PGRST202" || /falhas_consulta/.test(falhas.error.message)
+        ? "Aplique a migração 202611041300_falhas_de_consulta.sql no SQL Editor."
+        : falhas.error.message,
+    });
+  } else {
+    const linhas: any[] = (falhas.data as any[]) ?? [];
+    const hora = linhas.reduce((t, x) => t + Number(x.ultima_hora ?? 0), 0);
+    const dia = linhas.reduce((t, x) => t + Number(x.ultimas_24h ?? 0), 0);
+    add({
+      id: "falhas", grupo: "Banco de dados", nome: "Consultas que estouraram o tempo",
+      // Um caso isolado é ruído de rede; dezenas numa hora é uma tela quebrada.
+      status: hora >= 20 ? "falha" : hora > 0 || dia >= 20 ? "atencao" : "ok",
+      resumo: dia === 0 ? "nenhuma nas últimas 24 h" : `${hora} na última hora · ${dia} em 24 h`,
+      detalhe: linhas.length
+        ? linhas
+            .slice(0, 5)
+            .map((x) => `${x.ultimas_24h}× ${x.recurso} (${x.codigo}) · ${x.pessoas} pessoa(s)`)
+            .join("\n") +
+          "\nCada linha é uma tela ou rotina que recebeu \"vazio\" no lugar do dado. Conte ao desenvolvedor o nome do recurso."
+        : undefined,
+    });
   }
   add({
     id: "auth", grupo: "Banco de dados", nome: "Login (Supabase Auth)",

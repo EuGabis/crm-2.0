@@ -176,12 +176,24 @@ export function useFormSubmissions(formId: string) {
   useEffect(() => {
     let active = true;
     const supabase = createClient();
-    void supabase
-      .from("form_submissions")
-      .select("id, payload, created_at")
-      .eq("form_id", formId)
-      .order("created_at", { ascending: false })
-      .then(({ data }) => {
+    // Paginado: formulário em campanha passa de 1000 envios, e a página cortava
+    // os mais antigos sem avisar (o contador da tela mentia junto).
+    void (async () => {
+      const todas: any[] = [];
+      for (let de = 0; de < 100_000; de += 1000) {
+        const { data, error } = await supabase
+          .from("form_submissions")
+          .select("id, payload, created_at")
+          .eq("form_id", formId)
+          .order("created_at", { ascending: false })
+          .order("id")
+          .range(de, de + 999);
+        if (error) break;
+        todas.push(...(data ?? []));
+        if ((data?.length ?? 0) < 1000) break;
+      }
+      return { data: todas };
+    })().then(({ data }) => {
         if (!active) return;
         setSubmissions(
           (data ?? []).map((r: any) => ({ id: r.id, payload: r.payload ?? {}, createdAt: r.created_at })),

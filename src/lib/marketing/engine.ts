@@ -94,12 +94,15 @@ export async function processDueCampaigns(): Promise<{
       if (!recips?.length) {
         // Nada a claimar agora. Só finaliza se NÃO sobrou nenhum pendente (evita marcar
         // 'sent' enquanto outro tick ainda está processando um lote reivindicado).
-        const { count } = await db
+        const { count, error: contErr } = await db
           .from("email_campaign_recipients")
           .select("id", { count: "exact", head: true })
           .eq("campaign_id", camp.id)
           .eq("status", "pending");
-        if ((count ?? 0) === 0) {
+        // ⚠️ Sem `error`, contagem que estourava o tempo virava ZERO e a
+        // campanha era dada como concluída no meio do envio. Na dúvida, não
+        // finaliza: o próximo tique confere de novo.
+        if (!contErr && count === 0) {
           await db
             .from("email_campaigns")
             .update({ status: "sent", updated_at: new Date().toISOString() })
@@ -223,17 +226,20 @@ export async function processDueCampaigns(): Promise<{
 /** Recalcula `sent`/`failed` da campanha a partir dos destinatários. */
 async function recontar(db: ReturnType<typeof createAdminClient>, campaignId: string) {
   const conta = async (statuses: string[]) => {
-    const { count } = await db
+    const { count, error } = await db
       .from("email_campaign_recipients")
       .select("id", { count: "exact", head: true })
       .eq("campaign_id", campaignId)
       .in("status", statuses);
-    return count ?? 0;
+    return error ? null : count ?? 0;
   };
   const [sent, failed] = await Promise.all([
     conta(["sent", "delivered", "opened", "clicked", "bounced"]),
     conta(["failed"]),
   ]);
+  // ⚠️ Contagem que falhou não pode gravar ZERO por cima dos números da
+  // campanha: mantém os atuais e o próximo tique recalcula.
+  if (sent === null || failed === null) return;
   await db
     .from("email_campaigns")
     .update({ sent, failed, updated_at: new Date().toISOString() })

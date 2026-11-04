@@ -95,6 +95,8 @@ export async function POST(request: Request) {
   ]);
   const to = toWhatsAppNumber(contactRes.data?.phone);
   if (!to) return Response.json({ error: "Contato sem telefone" }, { status: 400 });
+  // Sem conseguir contar, segue enviando — mas diz, em vez de ler o vazio como zero.
+  if (countRes.error) console.warn("[limite diario] contagem falhou, nao conferido:", countRes.error.message);
   if ((countRes.count ?? 0) >= channel.daily_limit) {
     return Response.json({ error: "Limite diário do canal atingido" }, { status: 429 });
   }

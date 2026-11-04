@@ -47,17 +47,42 @@ const mapRow = (r: any): SectorConversation => ({
   createdAt: r.created_at,
 });
 
-export function useSectorConversations() {
+/**
+ * Conversas do setor no PERÍODO (dia em São Paulo, pela data de início).
+ *
+ * ⚠️ A versão antiga, sem período, cortava em 500 — de 26.986 — sem avisar.
+ * Agora vem tudo do intervalo, paginado (o PostgREST corta em 1000). Sem a
+ * migração 202611041200 no banco, cai na versão antiga, que é a única que
+ * existe até lá.
+ */
+export function useSectorConversations(de: string, ate: string) {
   const [rows, setRows] = useState<SectorConversation[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     const supabase = createClient();
-    const { data, error } = await supabase.rpc("sector_conversations");
-    setRows(error || !data ? [] : (data as any[]).map(mapRow));
+    const todas: any[] = [];
+    let falhou = false;
+    for (let inicio = 0; inicio < 100_000; inicio += 1000) {
+      const { data, error } = await supabase
+        .rpc("sector_conversations", { p_de: de, p_ate: ate })
+        .range(inicio, inicio + 999);
+      if (error) {
+        falhou = true;
+        break;
+      }
+      todas.push(...(data ?? []));
+      if ((data?.length ?? 0) < 1000) break;
+    }
+    if (falhou) {
+      const antigo = await supabase.rpc("sector_conversations");
+      setRows(antigo.error || !antigo.data ? [] : (antigo.data as any[]).map(mapRow));
+    } else {
+      setRows(todas.map(mapRow));
+    }
     setLoading(false);
-  }, []);
+  }, [de, ate]);
 
   useEffect(() => {
     void load();

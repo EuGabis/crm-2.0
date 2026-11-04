@@ -1,4 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
+import { criarFetchVigiado } from "./vigiar-falhas";
+
+// O tique, o webhook e a sincronização também estouram o tempo (a devolução ao
+// rodízio de Vendas parou assim): registrados sem empresa, valem para todas.
+const fetchVigiado = criarFetchVigiado();
 
 /**
  * Cliente com a service role — ignora RLS.
@@ -20,5 +25,6 @@ export function createAdminClient() {
 
   return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
+    global: { fetch: fetchVigiado },
   });
 }

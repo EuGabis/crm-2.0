@@ -31,7 +31,11 @@
     "test:email-falhas": "node scripts/test-email-falhas.mjs",
     "test:tarefas": "node --import ./scripts/lib/alias-register.mjs scripts/test-tarefas.mjs",
     "test:email-design": "node --import ./scripts/lib/alias-register.mjs scripts/test-email-design.mjs",
-    "test:colar": "node --import ./scripts/lib/alias-register.mjs scripts/test-colar-formatado.mjs"
+    "test:colar": "node --import ./scripts/lib/alias-register.mjs scripts/test-colar-formatado.mjs",
+    "test:vigiar": "node scripts/test-vigiar-falhas.mjs",
+    "check:consultas": "node scripts/check-consultas.mjs",
+    "test:check-consultas": "node scripts/test-check-consultas.mjs",
+    "verificar": "npm run -s check:consultas && npm run -s db:check"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

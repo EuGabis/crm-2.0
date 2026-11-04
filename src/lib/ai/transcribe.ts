@@ -199,12 +199,14 @@ async function atualizarPreview(
   texto: string
 ): Promise<void> {
   const supabase = createAdminClient();
-  const { count } = await supabase
+  const { count, error } = await supabase
     .from("messages")
     .select("id", { count: "exact", head: true })
     .eq("conversation_id", conversationId)
     .gt("created_at", criadaEm);
-  if ((count ?? 0) > 0) return;
+  // Sem saber se chegou mensagem mais nova, não mexe na prévia: escrever o
+  // áudio por cima da última mensagem mentiria sobre a conversa.
+  if (error || (count ?? 0) > 0) return;
   await supabase
     .from("conversations")
     .update({ last_message_preview: `🎤 ${texto.slice(0, 120)}` })

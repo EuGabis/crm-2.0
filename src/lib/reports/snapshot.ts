@@ -107,7 +107,10 @@ export async function buildReportSnapshot(
     supabase.from("stages").select("id, name, pipeline_id"),
     supabase.from("locations").select("name").eq("id", locationId).maybeSingle(),
     supabase.from("appointments").select("starts_at").eq("location_id", locationId),
-    supabase.from("tasks").select("status, due_at").eq("location_id", locationId),
+    // Tarefas paginadas: já são 809 e a página cortaria em 1000 sem avisar.
+    fetchAll((from, to) =>
+      supabase.from("tasks").select("status, due_at").eq("location_id", locationId).order("id").range(from, to),
+    ).then((data) => ({ data })),
   ]);
   const [conversations, messages, opportunities] = await Promise.all([
     fetchAll((from, to) =>
