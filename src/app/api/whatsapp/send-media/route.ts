@@ -197,7 +197,8 @@ export async function POST(request: Request) {
   // limite diário
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
-  const { count } = await supabase
+  // Com a service role: pela RLS a contagem estourava os 8 s (ver /send).
+  const { count } = await admin
     .from("messages")
     .select("id", { count: "exact", head: true })
     .eq("channel_id", channel.id)

@@ -105,6 +105,7 @@ function fakeDb(estado) {
     for (const [c, v] of f.gt) linhas = linhas.filter((l) => (l[c] ?? "") > v);
     for (const [c, v] of f.neq) linhas = linhas.filter((l) => l[c] !== v);
     if (f.limite !== null) linhas = linhas.slice(0, f.limite);
+    if (f.faixa) linhas = linhas.slice(f.faixa[0], f.faixa[1] + 1);
     if (f.single) return { data: linhas[0] ?? null, error: null };
     return { data: linhas, error: null };
   }
@@ -128,6 +129,8 @@ function fakeDb(estado) {
       select: () => api,
       order: () => api,
       limit: (n) => ((f.limite = n), api),
+      // Paginação (`todasAsLinhas`): o banco de verdade corta em 1000.
+      range: (de, ate) => ((f.faixa = [de, ate]), api),
       maybeSingle: () => ((f.single = true), api),
       single: () => ((f.single = true), api),
       eq: (c, v) => ((f.filtros[c] = v), api),

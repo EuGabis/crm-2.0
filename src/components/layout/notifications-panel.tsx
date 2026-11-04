@@ -275,16 +275,29 @@ export function NotificationsPanel() {
 
     // 1) Conversas não lidas (abertas) atribuídas a mim ou a ninguém. A RLS já
     // limita ao que a pessoa VÊ, inclusive a segmentação por número da 0035.
-    const { data: convs } = await supabase
-      .from("conversations")
-      .select("id, contact_id, unread_count, last_message_at, last_message_preview, assigned_to")
-      .eq("location_id", loc)
-      .gt("unread_count", 0)
-      .is("closed_at", null)
-      .is("archived_at", null)
-      .or(me ? `assigned_to.is.null,assigned_to.eq.${me}` : "assigned_to.is.null")
-      .order("last_message_at", { ascending: false })
-      .limit(15);
+    /*
+     * ⚠️ Pela função `notificacoes_nao_lidas` (202611041100), não pela RLS: são
+     * ~10 mil conversas não lidas sem dono, e para quem enxerga pouco delas a
+     * policy rodava por linha até achar 15 — 4 a 10 s a cada minuto, a maior
+     * fonte de tempo esgotado do banco. Sem a função, cai na consulta antiga.
+     */
+    let convs: any[] | null = null;
+    const viaFuncao = await supabase.rpc("notificacoes_nao_lidas", { p_location: loc, p_limite: 15 });
+    if (!viaFuncao.error) {
+      convs = viaFuncao.data as any[];
+    } else {
+      const antigo = await supabase
+        .from("conversations")
+        .select("id, contact_id, unread_count, last_message_at, last_message_preview, assigned_to")
+        .eq("location_id", loc)
+        .gt("unread_count", 0)
+        .is("closed_at", null)
+        .is("archived_at", null)
+        .or(me ? `assigned_to.is.null,assigned_to.eq.${me}` : "assigned_to.is.null")
+        .order("last_message_at", { ascending: false })
+        .limit(15);
+      convs = antigo.data;
+    }
 
     // Nomes só dos contatos que apareceram — carregar a agenda inteira de
     // contatos aqui seria pior que o problema.
