@@ -9,6 +9,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/shared/empty-state";
+import { PeriodoPicker } from "@/components/shared/period-picker";
+import { hojeSP, somaDias, type Periodo } from "@/lib/periodo";
 import { conversationActions } from "@/lib/data/repos/db/conversations";
 import { useSectorConversations, sectorActions } from "@/lib/data/repos/db/sector";
 import { useMyMembership, useTeam } from "@/lib/data/repos/db/team";
@@ -33,7 +35,13 @@ function statusLabel(c: { closedAt: string | null; archivedAt: string | null; as
 }
 
 export function SectorReport() {
-  const { rows, loading, reload } = useSectorConversations();
+  /*
+   * Período pela data de início, padrão últimos 7 dias. A versão sem período
+   * cortava em 500 de 26 mil — e como esta tela ordena "mais paradas primeiro",
+   * o corte escondia justamente as mais paradas.
+   */
+  const [periodo, setPeriodo] = useState<Periodo>(() => ({ de: somaDias(hojeSP(), -6), ate: hojeSP() }));
+  const { rows, loading, reload } = useSectorConversations(periodo.de, periodo.ate);
   const { members } = useTeam();
   const { me } = useMyMembership();
   const [query, setQuery] = useState("");
@@ -90,6 +98,7 @@ export function SectorReport() {
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <PeriodoPicker periodo={periodo} onChange={setPeriodo} />
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-slate-400" />
             <Input

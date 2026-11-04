@@ -1,5 +1,6 @@
 "use client";
 
+import { hojeSP, somaDias } from "@/lib/periodo";
 import { useMemo, useState, type MouseEvent } from "react";
 import Link from "next/link";
 import { format } from "date-fns";
@@ -113,7 +114,17 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
   // Supervisor (setor colaborativo/admin) vê TODAS as conversas do setor — vindas
   // da função sector_conversations, que não passa pela RLS da caixa (privada).
   const isSupervisor = useIsSupervisor();
-  const { rows: sectorConvs, reload: reloadSector } = useSectorConversations();
+  /*
+   * Período pela data de início. Nasce nos últimos 7 dias, e não vazio: o
+   * supervisor vê o setor inteiro (26 mil conversas para o admin), e "sem
+   * período" era a versão que cortava em 500 sem avisar. Vazio num campo cai no
+   * padrão do lado vazio.
+   */
+  const [de, setDe] = useState(() => somaDias(hojeSP(), -6));
+  const [ate, setAte] = useState(() => hojeSP());
+  const periodoDe = de || somaDias(hojeSP(), -6);
+  const periodoAte = ate || hojeSP();
+  const { rows: sectorConvs, reload: reloadSector } = useSectorConversations(periodoDe, periodoAte);
   const [distributing, setDistributing] = useState(false);
   /*
    * Para QUEM distribuir. Vazio = rodízio entre os disponíveis (o de sempre).
@@ -238,8 +249,6 @@ export function ConversationsReport({ onOpen }: { onOpen?: (conversationId: stri
   const [canalF, setCanalF] = useState("todos");
   const [numeroF, setNumeroF] = useState("todos"); // channelId
   const [atendenteF, setAtendenteF] = useState("todos"); // userId | "sem"
-  const [de, setDe] = useState("");
-  const [ate, setAte] = useState("");
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
 
