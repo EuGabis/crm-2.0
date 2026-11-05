@@ -1502,7 +1502,13 @@ export function devolvivel(
    * o lado seguro: o custo é uma conversa parada continuar com quem está; o
    * outro lado é o laço.
    */
-  if (l.devolvida_em) {
+  /*
+   * ⚠️ 2026-11-05, regra do Gabriel: "se ninguém respondeu, ele precisa ir para
+   * outro". Com a JANELA DO ATENDENTE (abaixo, 202609101830) o laço já não
+   * existe: cada novo dono tem os próprios 20 min úteis antes de perder. Então a
+   * exigência de mensagem nova do cliente só vale quando o carimbo falta.
+   */
+  if (l.devolvida_em && l.minutos_com_atendente == null) {
     if (!l.ultima_do_cliente) return false;
     if (new Date(l.devolvida_em) >= new Date(l.ultima_do_cliente)) return false;
   }
