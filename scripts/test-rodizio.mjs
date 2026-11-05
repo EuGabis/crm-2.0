@@ -606,7 +606,17 @@ eq(
 // 1) LACO: devolvida agora e o cliente nao escreveu depois -> nao devolve de novo.
 eq(
   "ja devolvida e cliente nao escreveu depois -> NAO (era o laco)",
-  devolvivel(linha({ devolvida_em: "2026-09-08T13:05:00Z" }), CANAIS),
+  devolvivel(linha({ devolvida_em: "2026-09-08T13:05:00Z", minutos_com_atendente: null }), CANAIS),
+  false,
+);
+eq(
+  "ja devolvida, cliente calado, novo dono teve 20 min e nao respondeu -> devolve (2026-11-05)",
+  devolvivel(linha({ devolvida_em: "2026-09-08T13:05:00Z", minutos_com_atendente: 25 }), CANAIS, 20),
+  true,
+);
+eq(
+  "ja devolvida, novo dono ainda dentro dos 20 min -> NAO",
+  devolvivel(linha({ devolvida_em: "2026-09-08T13:05:00Z", minutos_com_atendente: 5 }), CANAIS, 20),
   false,
 );
 eq(
@@ -620,14 +630,14 @@ eq(
 eq(
   "devolucao e mensagem no MESMO instante -> NAO (sem brecha para o laco)",
   devolvivel(
-    linha({ devolvida_em: "2026-09-08T13:00:00Z", ultima_do_cliente: "2026-09-08T13:00:00Z" }),
+    linha({ devolvida_em: "2026-09-08T13:00:00Z", ultima_do_cliente: "2026-09-08T13:00:00Z", minutos_com_atendente: null }),
     CANAIS,
   ),
   false,
 );
 eq(
   "devolvida antes e sem data do cliente -> NAO (lado seguro)",
-  devolvivel(linha({ devolvida_em: "2026-09-08T13:05:00Z", ultima_do_cliente: null }), CANAIS),
+  devolvivel(linha({ devolvida_em: "2026-09-08T13:05:00Z", ultima_do_cliente: null, minutos_com_atendente: null }), CANAIS),
   false,
 );
 
