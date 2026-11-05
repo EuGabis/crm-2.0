@@ -4,7 +4,7 @@ import { redirectUri, signState } from "@/lib/google-ads/state";
 export const dynamic = "force-dynamic";
 
 /** Monta a URL de consentimento do Google e redireciona o usuário. Autenticada. */
-export async function GET() {
+export async function GET(request: Request) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -26,7 +26,7 @@ export async function GET() {
   });
 
   // Vincula o state ao navegador que iniciou o fluxo (defesa extra além da assinatura HMAC).
-  const isHttps = (process.env.NEXT_PUBLIC_APP_URL || "").startsWith("https");
+  const isHttps = new URL(request.url).protocol === "https:";
   const cookie = [
     `ga_oauth_state=${state}`,
     "HttpOnly",
