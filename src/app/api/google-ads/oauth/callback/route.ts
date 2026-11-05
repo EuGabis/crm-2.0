@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { exchangeCode, getCustomerInfo, listAccessibleCustomers } from "@/lib/google-ads/client";
 import { redirectUri, verifyState } from "@/lib/google-ads/state";
+import { originDaRequisicao } from "@/lib/config/app-url";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export const dynamic = "force-dynamic";
@@ -19,7 +20,10 @@ function back(base: string, params: string) {
 
 /** Recebe o code do Google, troca por tokens, pega a 1ª conta e salva a conexão. */
 export async function GET(request: Request) {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  // Volta pelo domínio por onde a pessoa chegou: NEXT_PUBLIC_APP_URL ainda
+  // aponta para o domínio aposentado (404), e era para lá que o callback
+  // mandava — o erro do Google nunca aparecia na tela.
+  const appUrl = originDaRequisicao(request);
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
