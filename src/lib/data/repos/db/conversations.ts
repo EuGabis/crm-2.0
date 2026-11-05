@@ -293,6 +293,30 @@ export const MAX_MEDIA_BYTES = 15 * 1024 * 1024; // 15 MB
 // atividade recente (busca, contadores, relatório do período) sem puxar o
 // histórico inteiro da empresa. O resto de cada conversa vem sob demanda.
 const RECENT_MESSAGES_LIMIT = 3000;
+
+/**
+ * As mensagens mais recentes da caixa, pela função `mensagens_recentes`
+ * (202611051000) e não pela RLS: a policy de `messages` roda seis funções POR
+ * MENSAGEM, e para quem enxerga pouco a leitura estourava os 8 s (registrado na
+ * tela de Saúde). Sem a função no banco, cai na consulta antiga.
+ */
+async function mensagensRecentes(supabase: ReturnType<typeof createClient>) {
+  await useDbStore.getState().ensureSession();
+  const loc = useDbStore.getState().locationId;
+  if (loc) {
+    const viaFuncao = await supabase.rpc("mensagens_recentes", {
+      p_location: loc,
+      p_limite: RECENT_MESSAGES_LIMIT,
+    });
+    if (!viaFuncao.error) return viaFuncao;
+  }
+  return supabase
+    .from("messages")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(RECENT_MESSAGES_LIMIT);
+}
+
 // Teto por conversa ao abrir (loadMessagesFor). Fundo de histórico mais que
 // suficiente para o thread; o Realtime cuida do que chega depois.
 const CONVERSATION_MESSAGES_LIMIT = 500;
@@ -361,11 +385,7 @@ export const useConvStore = create<ConvState>((set, get) => ({
         parcial = linhas;
         aplicar(linhas);
       }),
-      supabase
-        .from("messages")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(RECENT_MESSAGES_LIMIT),
+      mensagensRecentes(supabase),
       supabase.from("snippets").select("*").order("created_at"),
       supabase.from("inbox_views").select("*").order("created_at"),
     ]);

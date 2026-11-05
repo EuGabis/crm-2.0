@@ -33,8 +33,13 @@ async function medir(url: string, init?: RequestInit) {
   }
 }
 
+/*
+ * 2 s e não 1,5 s: o retrato da Saúde junta crons, filas e conexões numa
+ * consulta só, e com o banco tranquilo ele já passa de 1,5 s — o alerta
+ * acendia sem problema nenhum, o que ensina a ignorar a tela.
+ */
 function porLatencia(ms: number): Status {
-  return porLimite(ms, 1500, 4000);
+  return porLimite(ms, 2000, 4000);
 }
 
 /**
@@ -135,7 +140,7 @@ export async function GET() {
     add({
       id: "latencia", grupo: "Banco de dados", nome: "Tempo de resposta", status: porLatencia(banco.ms),
       resumo: `${banco.ms} ms para montar este retrato`,
-      detalhe: banco.ms > 1500 ? "O banco está respondendo devagar — veja as consultas lentas abaixo." : undefined,
+      detalhe: banco.ms > 2000 ? "O banco está respondendo devagar — veja as consultas lentas abaixo." : undefined,
     });
     const b = d.banco ?? {};
     if (b.erro) {
