@@ -878,32 +878,11 @@ function DepartmentDialog({
 
           {usaRodizio && (
             <>
-            <Label className="ml-4 flex cursor-pointer items-start gap-2.5 rounded-lg border border-dashed p-3">
-              <Checkbox
-                checked={rodizioOffline}
-                onCheckedChange={(v) => setRodizioOffline(v === true)}
-                className="mt-0.5"
-              />
-              <span className="space-y-0.5">
-                <span className="block text-xs font-semibold text-slate-800">
-                  Offline também recebe (vai para Pendentes)
-                </span>
-                {/*
-                  ⚠️ O texto mudou junto com a regra de 2026-09-11. Antes dizia
-                  "desligado (recomendado)" — e continua sendo o certo para a
-                  SECRETARIA, onde o cliente está numa fila de atendimento. Para
-                  VENDAS a regra é a oposta, porque o lead é trabalhado pelo dono
-                  e não há ninguém esperando na linha.
-                */}
-                <span className="block text-[11px] font-normal leading-relaxed text-slate-500">
-                  Ligado: quem está <strong>offline continua no rodízio</strong> e o lead cai na{" "}
-                  <strong>caixa de Pendentes</strong> dele — continua sendo dele, e estar offline
-                  não faz perder a vez. Desligado: só quem está online recebe; se ninguém estiver,
-                  o lead fica na <strong>fila do setor</strong>, visível para todos.{" "}
-                  <strong>Quem marcou &quot;Ausente&quot; nunca recebe</strong>, nos dois casos.
-                </span>
-              </span>
-            </Label>
+            {/*
+              "Offline também recebe" saiu em 2026-11-05: offline não recebe mais em
+              setor nenhum (ver distributeOne). A coluna rodizio_offline segue no banco,
+              sem efeito na distribuição — a caixa prometia o que não acontece.
+            */}
 
             <Label className="ml-4 flex cursor-pointer items-start gap-2.5 rounded-lg border border-dashed p-3">
               <Checkbox

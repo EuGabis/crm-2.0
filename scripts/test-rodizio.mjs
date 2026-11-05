@@ -1250,40 +1250,27 @@ function comFila(st, convs) {
 }
 
 {
-  // Todos offline: dividem por igual, em Pendentes.
+  /*
+   * 🔴 REGRA DE 2026-11-05 (revê 29/10 e 19/10): OFFLINE NÃO RECEBE, nem com o
+   * setor inteiro offline. Caso real: ~93 leads da madrugada em Pendentes do
+   * Jefferson, devolvidos de uma vez às 09:40 (49 Alberto, 44 Paulo).
+   */
   const st = vendasRegraNova({ paulo: "offline", alberto: "offline", rogerio: "offline" });
   comFila(st, [naFila("k1"), naFila("k2"), naFila("k3"), naFila("k4"), naFila("k5"), naFila("k6")]);
   const db = fakeDb(st);
-  await distribuirFilaDoSetor(db, "loc1");
-  const por = contarPorPessoa(db);
-  eq("[regra 29/10] todos offline: 2 para cada", [por.paulo, por.alberto, por.rogerio], [2, 2, 2]);
-  eq(
-    "[regra 29/10] todos offline: tudo em Pendentes",
-    db.atribuicoes().every((e) => e.patch.assigned_offline === true),
-    true,
-  );
+  const r = await distribuirFilaDoSetor(db, "loc1");
+  eq("[regra 05/11] todos offline: ninguém recebe", db.atribuicoes().length, 0);
+  eq("[regra 05/11] todos offline: os 6 esperam na fila do setor", r.naFila, 6);
 }
 
 {
-  /*
-   * 🔴 REGRA DE 2026-10-19 (revê a de 13/10): offline ≠ ausente.
-   * Offline (CRM fechado/inativo) recebe e vai para Pendentes; AUSENTE declarou
-   * que não quer lead e NÃO recebe — e a fatia dele não fica reservada (13/10:
-   * 271 leads presos). Caso real: o Rogério, ausente, recebeu 60 leads num dia.
-   */
+  // Ausente + offline, ninguém online: ninguém recebe.
   const st = vendasRegraNova({ alberto: "ausente", rogerio: "offline" });
   comFila(st, [naFila("k1"), naFila("k2"), naFila("k3"), naFila("k4")]);
   const db = fakeDb(st);
   const r = await distribuirFilaDoSetor(db, "loc1");
-  const por = contarPorPessoa(db);
-  eq("[regra 19/10] ausente NAO recebe", por.alberto ?? 0, 0);
-  eq("[regra 19/10] o offline recebe tudo (fatia do ausente nao fica presa)", por.rogerio, 4);
-  eq("[regra 19/10] nada fica preso na fila", r.naFila, 0);
-  eq(
-    "[regra 19/10] o do offline vai para PENDENTES",
-    db.atribuicoes().every((e) => e.patch.assigned_offline === true),
-    true,
-  );
+  eq("[regra 05/11] ausente e offline: ninguém recebe", db.atribuicoes().length, 0);
+  eq("[regra 05/11] os 4 esperam na fila", r.naFila, 4);
 }
 
 {

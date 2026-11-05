@@ -988,7 +988,15 @@ export async function distributeOne(
    * recebem.** Offline só recebe (em Pendentes) quando o setor inteiro está
    * offline — e, assim que um entra, os leads novos passam a ir só para ele.
    */
-  const list = semExcluidos(alwaysAll && online.length === 0 ? elegiveis : online);
+  /*
+   * 🔴 Revisto em 2026-11-05 (Gabriel): **offline NÃO recebe, nem com o setor
+   * inteiro offline.** Na madrugada de 05/11 o Jefferson recebeu ~93 leads em
+   * Pendentes; voltou às 09:20, e às 09:40 o prazo de 20 min venceu para todos
+   * ao mesmo tempo — 49 foram para o Alberto e 44 para o Paulo de uma vez.
+   * Agora o lead da madrugada espera na FILA DO SETOR, visível a todos, e a
+   * varredura o entrega a quem estiver online.
+   */
+  const list = semExcluidos(online);
   const baseCota = alwaysAll ? elegiveis : pool;
 
   /*
@@ -1253,7 +1261,8 @@ export async function distributeDepartment(
   // Pendentes), AUSENTE não recebe e a fatia dele não fica reservada.
   // Regra de 29/10: havendo alguém online, só os online recebem; offline só
   // quando o setor inteiro está offline (mesma regra de `distributeOne`).
-  const list = dep?.rodizio_offline === true && online.length === 0 ? elegiveis : online;
+  // Offline não recebe (2026-11-05): ver `distributeOne`.
+  const list = online;
   const baseCota = dep?.rodizio_offline === true ? elegiveis : pool;
   if (!list.length) return { atribuidas: 0, retidas: convs.length };
 
