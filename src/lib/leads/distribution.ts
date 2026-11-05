@@ -1627,6 +1627,8 @@ export async function devolverInativas(
 ): Promise<{ devolvidas: number; redistribuidas: number }> {
   let devolvidas = 0;
   let redistribuidas = 0;
+  // Vendedores que já perderam um lead neste tique (sem rajada — ver abaixo).
+  const perdeuNesteTique = new Set<string>();
 
   /*
    * ⚠️ Tolera a coluna nova não existir: o código vai ao ar ANTES da migração, e
@@ -1751,6 +1753,16 @@ export async function devolverInativas(
     for (const conv of convs ?? []) {
       const anterior = conv.assigned_to as string;
       /*
+       * 🔴 **Sem rajada: no máximo 1 lead por vendedor por tique (1/min).**
+       * Caso real de 05/11: o Jefferson recebeu ~93 leads de madrugada em
+       * Pendentes (todos offline — regra que continua), voltou às 09:20 e às
+       * 09:40 o prazo venceu para TODOS de uma vez: 49 foram para o Alberto e
+       * 44 para o Paulo em três minutos. Devolvendo um por minuto, quem volta
+       * com fila tem tempo de responder — e cada resposta tira o lead da
+       * devolução (`ja_respondida`).
+       */
+      if (perdeuNesteTique.has(anterior)) continue;
+      /*
        * ⚠️ Solta ANTES de redistribuir, e num passo separado: se o rodízio não
        * achar ninguém disponível, a conversa fica na FILA DO SETOR (visível para
        * todos) em vez de continuar presa com quem não respondeu. Redistribuir
@@ -1759,7 +1771,14 @@ export async function devolverInativas(
       const esperou = Math.round(
         Number(parados.find((p: any) => p.conversation_id === conv.id)?.espera_util_min ?? limite),
       );
-      await db
+      /*
+       * 🔴 **Soltar só se ainda estiver com quem não respondeu** (compare-and-set).
+       * Caso real de 05/11, 09:41: dois tiques sobrepostos leram a mesma lista,
+       * os dois soltaram e os dois redistribuíram — a conversa ficou "Atribuída
+       * a Paulo" e "Atribuída a Alberto" no mesmo minuto. É a corrida que a
+       * varredura da fila já fechou em 18/09 (`exigirSemDono`).
+       */
+      const solta = await db
         .from("conversations")
         .update({
           assigned_to: null,
@@ -1780,8 +1799,13 @@ export async function devolverInativas(
           // O gatilho `log_atribuicao` escreve o evento; aqui só vai o motivo.
           assign_reason: `devolvida: cliente esperava ${esperou} min sem resposta`,
         })
-        .eq("id", conv.id);
+        .eq("id", conv.id)
+        .eq("assigned_to", anterior)
+        .select("id");
+      // UPDATE que não casa linha volta sem erro: outro tique já a soltou.
+      if (solta?.error || !(solta?.data?.length ?? 0)) continue;
       devolvidas++;
+      perdeuNesteTique.add(anterior);
 
       const novo = await distributeOne(db, {
         locationId,
@@ -1794,6 +1818,8 @@ export async function devolverInativas(
         // respondeu — o cursor não sabe de onde a conversa veio, e o resultado
         // seria um evento de transferência a cada tique, para sempre.
         excluir: [anterior],
+        // Só atribui se ninguém atribuiu no meio (o outro tique da corrida).
+        exigirSemDono: true,
         /*
          * ⚠️ Autoriza o card a trocar de dono NESTE caso e só nele: quem não
          * respondeu não trabalhou o lead, e deixar o card no nome dela gravaria
