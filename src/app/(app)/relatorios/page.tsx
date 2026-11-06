@@ -23,6 +23,7 @@ import { TOOLTIP_STYLE } from "@/components/dashboard/opportunity-widgets";
 import { GoogleAdsReport } from "@/components/reports/google-ads-report";
 import { ServiceSlaReport } from "@/components/reports/service-sla-report";
 import { LogDoBot } from "@/components/reports/log-do-bot";
+import { LinhaDoTempoPresenca } from "@/components/reports/linha-do-tempo-presenca";
 import { Button } from "@/components/ui/button";
 import { formatBRL } from "@/lib/data/repos/opportunities";
 import { usePipelineDb } from "@/lib/data/repos/db/pipeline";
@@ -525,6 +526,10 @@ function AgentesReport() {
                         semMedida={a.dias_sem_medida}
                         atividade={a.atividade_sem_medida}
                       />
+                      <p className="mb-2 mt-4 text-[11px] font-semibold text-slate-600">
+                        Linha do tempo · entradas, ausências e saídas
+                      </p>
+                      <LinhaDoTempoPresenca userId={a.userId} periodo={periodo} />
                     </td>
                   </tr>
                 )}
