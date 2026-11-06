@@ -46,11 +46,21 @@ const contar = (ts: number[], a: string, b: string) => {
   return ts.filter((t) => t >= x && t < y).length;
 };
 
-function Leads({ n }: { n: number }) {
+function Leads({ n, perdidos = 0 }: { n: number; perdidos?: number }) {
   return (
-    <span className={n ? "font-semibold text-indigo-700" : "text-slate-400"}>
-      · {n} lead{n === 1 ? "" : "s"}
-    </span>
+    <>
+      <span className={n ? "font-semibold text-indigo-700" : "text-slate-400"}>
+        · {n} lead{n === 1 ? "" : "s"}
+      </span>
+      {perdidos > 0 && (
+        <span
+          className="font-semibold text-red-600"
+          title="Devolvidos ao rodízio porque o cliente ficou sem resposta"
+        >
+          · perdeu {perdidos}
+        </span>
+      )}
+    </>
   );
 }
 
@@ -67,6 +77,8 @@ export function LinhaDoTempoPresenca({
   const [sessoes, setSessoes] = useState<Sessao[] | null>(null);
   /** Instantes (ms) em que um lead foi atribuído a esta pessoa. */
   const [leads, setLeads] = useState<number[]>([]);
+  /** Instantes (ms) em que um lead dele foi DEVOLVIDO por falta de resposta. */
+  const [perdas, setPerdas] = useState<number[]>([]);
   const [erro, setErro] = useState<string | null>(null);
 
   useEffect(() => {
@@ -104,10 +116,11 @@ export function LinhaDoTempoPresenca({
        */
       const padrao = `Atribuída a ${nome.replace(/[%_]/g, "_")} %`; // % no nome viraria curinga
       const ts: number[] = [];
+      const convs = new Set<string>();
       for (let p = 0; p < 20; p++) {
         const { data, error } = await supabase
           .from("messages")
-          .select("created_at")
+          .select("created_at, conversation_id")
           .eq("type", "event")
           .ilike("body", padrao)
           .gte("created_at", de)
@@ -120,9 +133,57 @@ export function LinhaDoTempoPresenca({
           setErro([error.code, error.message].filter(Boolean).join(" · "));
           return;
         }
-        for (const r of data ?? []) ts.push(Date.parse((r as { created_at: string }).created_at));
+        for (const r of (data ?? []) as { created_at: string; conversation_id: string }[]) {
+          ts.push(Date.parse(r.created_at));
+          convs.add(r.conversation_id);
+        }
         if ((data ?? []).length < PAGINA) break;
       }
+      /*
+       * Leads PERDIDOS = devolução por espera ("Devolvida à fila … devolvida:
+       * cliente esperava N min") quando a última atribuição ANTERIOR daquela
+       * conversa era a esta pessoa. O evento de devolução não diz de quem saiu,
+       * por isso o fio da conversa é percorrido em ordem. Finalizar também gera
+       * "Devolvida à fila" e NÃO conta: é atendimento encerrado, não perdido.
+       */
+      const ids = [...convs];
+      const eventos: { c: string; t: number; body: string }[] = [];
+      for (let i = 0; i < ids.length; i += 150) {
+        const lote = ids.slice(i, i + 150);
+        for (let p = 0; p < 20; p++) {
+          const { data, error } = await supabase
+            .from("messages")
+            .select("conversation_id, created_at, body")
+            .eq("type", "event")
+            .in("conversation_id", lote)
+            .or("body.ilike.Atribuída a %,body.ilike.Devolvida à fila%")
+            .gte("created_at", de)
+            .lt("created_at", ate)
+            .order("created_at")
+            .order("id")
+            .range(p * PAGINA, p * PAGINA + PAGINA - 1);
+          if (!ativo) return;
+          if (error) {
+            setErro([error.code, error.message].filter(Boolean).join(" · "));
+            return;
+          }
+          for (const r of (data ?? []) as { conversation_id: string; created_at: string; body: string }[])
+            eventos.push({ c: r.conversation_id, t: Date.parse(r.created_at), body: r.body ?? "" });
+          if ((data ?? []).length < PAGINA) break;
+        }
+      }
+      eventos.sort((a, b) => a.t - b.t);
+      const dono = new Map<string, boolean>();
+      const meuPrefixo = `Atribuída a ${nome} `;
+      const perdidos: number[] = [];
+      for (const e of eventos) {
+        if (e.body.startsWith("Atribuída a ")) dono.set(e.c, e.body.startsWith(meuPrefixo));
+        else {
+          if (dono.get(e.c) && e.body.includes("cliente esperava")) perdidos.push(e.t);
+          dono.set(e.c, false);
+        }
+      }
+      setPerdas(perdidos);
       setLeads(ts);
       setSessoes(todas);
     })();
@@ -163,6 +224,9 @@ export function LinhaDoTempoPresenca({
         const totDia = contar(leads, iniDia, fimDia);
         const antes = contar(leads, iniDia, lista[0].inicio);
         const depois = contar(leads, lista[lista.length - 1].fim, fimDia);
+        const perdDia = contar(perdas, iniDia, fimDia);
+        const pAntes = contar(perdas, iniDia, lista[0].inicio);
+        const pDepois = contar(perdas, lista[lista.length - 1].fim, fimDia);
         return (
           <div key={dia}>
             <p className="mb-1 text-[11px] font-semibold text-slate-700">
@@ -171,13 +235,14 @@ export function LinhaDoTempoPresenca({
               <span className="ml-2 font-normal text-slate-500">
                 online {dur(totOn)} · ausente {dur(totAus)} · {totDia} lead
                 {totDia === 1 ? "" : "s"} recebido{totDia === 1 ? "" : "s"}
+                {perdDia > 0 && <span className="text-red-600"> · {perdDia} perdido{perdDia === 1 ? "" : "s"} sem resposta</span>}
               </span>
             </p>
             <ul className="ml-1 border-l border-slate-200 pl-3">
               {antes > 0 && (
                 <li className="py-0.5 text-[11px] text-slate-400">
                   antes de {HORA.format(new Date(lista[0].inicio))} · sem sinal (offline){" "}
-                  <Leads n={antes} />
+                  <Leads n={antes} perdidos={pAntes} />
                 </li>
               )}
               {lista.map((s, i) => {
@@ -194,13 +259,15 @@ export function LinhaDoTempoPresenca({
                 const prox = lista[i + 1];
                 const fimSeg = prox && minEntre(s.fim, prox.inicio) < LACUNA_MIN ? prox.inicio : s.fim;
                 const nSessao = contar(leads, s.inicio, fimSeg);
+                const pSessao = contar(perdas, s.inicio, fimSeg);
                 const nLacuna = ant && lacuna >= LACUNA_MIN ? contar(leads, ant.fim, s.inicio) : 0;
+                const pLacuna = ant && lacuna >= LACUNA_MIN ? contar(perdas, ant.fim, s.inicio) : 0;
                 return (
                   <li key={s.inicio + i} className="text-[11px]">
                     {lacuna >= LACUNA_MIN && (
                       <div className="py-0.5 text-slate-400">
                         {HORA.format(new Date(ant!.fim))}–{HORA.format(new Date(s.inicio))} · sem sinal
-                        (CRM fechado ou inativo) · {dur(lacuna)} <Leads n={nLacuna} />
+                        (CRM fechado ou inativo) · {dur(lacuna)} <Leads n={nLacuna} perdidos={pLacuna} />
                       </div>
                     )}
                     <div className="flex items-center gap-2 py-0.5">
@@ -215,7 +282,7 @@ export function LinhaDoTempoPresenca({
                         {aus ? "Ausente" : "Online"}
                       </span>
                       <span className="text-slate-500">{dur(minEntre(s.inicio, s.fim))}</span>
-                      <Leads n={nSessao} />
+                      <Leads n={nSessao} perdidos={pSessao} />
                     </div>
                   </li>
                 );
@@ -223,7 +290,7 @@ export function LinhaDoTempoPresenca({
               {depois > 0 && (
                 <li className="py-0.5 text-[11px] text-slate-400">
                   depois de {HORA.format(new Date(lista[lista.length - 1].fim))} · sem sinal
-                  (offline) <Leads n={depois} />
+                  (offline) <Leads n={depois} perdidos={pDepois} />
                 </li>
               )}
             </ul>
