@@ -26,6 +26,8 @@ export interface Plantao {
   id: string;
   departmentId: string;
   userId: string;
+  /** Todos os plantonistas (titular primeiro). */
+  userIds: string[];
   inicio: string;
   fim: string;
   seAusente: "normal" | "fila";
@@ -36,6 +38,7 @@ const mapa = (r: any): Plantao => ({
   id: r.id,
   departmentId: r.department_id,
   userId: r.user_id,
+  userIds: r.user_ids?.length ? r.user_ids : [r.user_id],
   inicio: r.inicio,
   fim: r.fim,
   seAusente: (r.se_ausente ?? "normal") as Plantao["seAusente"],
@@ -101,7 +104,8 @@ export function usePlantoes(departmentId?: string | null) {
 export const plantaoActions = {
   async criar(input: {
     departmentId: string;
-    userId: string;
+    /** Um ou mais vendedores; o primeiro vira o titular. */
+    userIds: string[];
     inicio: string;
     fim: string;
     seAusente: "normal" | "fila";
@@ -109,10 +113,13 @@ export const plantaoActions = {
     const supabase = createClient();
     const { error } = await supabase.rpc("criar_plantao", {
       p_department: input.departmentId,
-      p_user: input.userId,
+      p_user: input.userIds[0],
       p_inicio: input.inicio,
       p_fim: input.fim,
       p_se_ausente: input.seAusente,
+      // Só manda a lista quando há mais de um: sem a 202611061500 a função
+      // antiga não conhece `p_users`, e um plantão de uma pessoa continua criável.
+      ...(input.userIds.length > 1 ? { p_users: input.userIds } : {}),
     });
     /*
      * ⚠️ O motivo VEM da função e vai para a tela: ela distingue "já existe

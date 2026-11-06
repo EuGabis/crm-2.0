@@ -774,6 +774,8 @@ export async function assignLeadTo(
 export type PlantaoAtivo = {
   id: string;
   user_id: string;
+  /** Todos os plantonistas (202611061500); sem a coluna, só `user_id`. */
+  user_ids?: string[] | null;
   inicio: string;
   fim: string;
   /** O que fazer se o plantonista estiver AUSENTE: cair na normal, ou segurar. */
@@ -802,18 +804,61 @@ export async function plantaoAtivo(
   agora: Date = new Date(),
 ): Promise<PlantaoAtivo | null> {
   const t = agora.toISOString();
-  const { data, error } = await db
-    .from("plantoes")
-    .select("id, user_id, inicio, fim, se_ausente")
-    .eq("department_id", deptId)
-    .is("cancelado_em", null)
-    .lte("inicio", t)
-    .gt("fim", t)
-    .order("inicio", { ascending: false })
-    .limit(1);
+  const consulta = (cols: string) =>
+    db
+      .from("plantoes")
+      .select(cols)
+      .eq("department_id", deptId)
+      .is("cancelado_em", null)
+      .lte("inicio", t)
+      .gt("fim", t)
+      .order("inicio", { ascending: false })
+      .limit(1);
+  let { data, error } = await consulta("id, user_id, user_ids, inicio, fim, se_ausente");
+  // Sem a coluna `user_ids` (código no ar antes da 202611061500): só o titular.
+  if (error) ({ data, error } = await consulta("id, user_id, inicio, fim, se_ausente"));
   if (error) return null;
   const linha = (data ?? [])[0];
   return linha ? ({ ...linha, se_ausente: linha.se_ausente ?? "normal" } as PlantaoAtivo) : null;
+}
+
+/** Todos os plantonistas do plantão, sem repetição, titular primeiro. */
+export function plantonistas(p: PlantaoAtivo): string[] {
+  const ids = p.user_ids?.length ? p.user_ids : [p.user_id];
+  return [...new Set([p.user_id, ...ids].filter(Boolean))];
+}
+
+/** Leads já recebidos NESTE plantão, por pessoa (para dividir por igual). */
+export async function cargaDoPlantao(db: any, plantaoId: string): Promise<Map<string, number>> {
+  const m = new Map<string, number>();
+  // consulta-ok: um plantão de fim de semana recebe dezenas a poucas centenas de leads.
+  const { data, error } = await db
+    .from("conversations")
+    .select("assigned_to")
+    .eq("plantao_id", plantaoId)
+    .not("assigned_to", "is", null)
+    .limit(5000);
+  if (error) return m;
+  for (const r of (data ?? []) as { assigned_to: string }[])
+    m.set(r.assigned_to, (m.get(r.assigned_to) ?? 0) + 1);
+  return m;
+}
+
+/**
+ * Qual plantonista recebe: entre os DISPONÍVEIS (não ausentes), os online têm
+ * preferência; com todos offline, os disponíveis recebem em Pendentes. Dentro
+ * do grupo, quem recebeu MENOS neste plantão; empate na ordem da escala.
+ */
+export function escolherPlantonista(
+  disponiveis: string[],
+  online: string[],
+  carga: Map<string, number>,
+): string | null {
+  const on = disponiveis.filter((u) => online.includes(u));
+  const grupo = on.length ? on : disponiveis;
+  let melhor: string | null = null;
+  for (const u of grupo) if (melhor == null || (carga.get(u) ?? 0) < (carga.get(melhor) ?? 0)) melhor = u;
+  return melhor;
 }
 
 /**
@@ -999,9 +1044,12 @@ export async function distributeOne(
    * plantonista AUSENTE não recebe, e aí vale a contingência configurada.
    */
   const plantao = await plantaoAtivo(db, args.deptId);
-  if (plantao && !args.excluir?.includes(plantao.user_id)) {
-    const ausente = !elegiveis.includes(plantao.user_id);
-    const noPool = pool.includes(plantao.user_id);
+  const escala = plantao ? plantonistas(plantao).filter((u) => !args.excluir?.includes(u)) : [];
+  if (plantao && escala.length) {
+    const naEscala = escala.filter((u) => pool.includes(u));
+    const disponiveisPlantao = naEscala.filter((u) => elegiveis.includes(u));
+    const ausente = disponiveisPlantao.length === 0;
+    const noPool = naEscala.length > 0;
     if (!noPool) {
       /*
        * ⚠️ Plantonista fora do pool do setor NÃO recebe. Ele provavelmente nem
@@ -1009,14 +1057,19 @@ export async function distributeOne(
        * quem não vê é pior que não entregar: some da fila e ninguém atende.
        */
       console.warn(
-        `[rodizio] plantão ${plantao.id}: ${plantao.user_id} não está no pool do setor ${args.deptId} — usando a distribuição normal`,
+        `[rodizio] plantão ${plantao.id}: nenhum plantonista está no pool do setor ${args.deptId} — usando a distribuição normal`,
       );
     } else if (ausente && plantao.se_ausente === "fila") {
       // Contingência "fila": o lead espera, visível a todos, em vez de cair em
       // quem declarou que não está disponível.
       return null;
     } else if (!ausente) {
-      const offlinePlantao = !online.includes(plantao.user_id);
+      const alvo = escolherPlantonista(
+        disponiveisPlantao,
+        online,
+        await cargaDoPlantao(db, plantao.id),
+      )!;
+      const offlinePlantao = !online.includes(alvo);
       /*
        * ⚠️ **O cursor NÃO avança e a carga não conta** (item 9): "os leads
        * recebidos durante o plantão não devem alterar o equilíbrio da
@@ -1035,10 +1088,10 @@ export async function distributeOne(
           donoAnterior: args.donoAnterior,
           plantaoId: plantao.id,
         },
-        plantao.user_id,
+        alvo,
         offlinePlantao,
       );
-      return plantao.user_id;
+      return alvo;
     }
     // Ausente + contingência "normal": segue o caminho de sempre, abaixo.
   }
@@ -1268,18 +1321,24 @@ export async function distributeDepartment(
    * motivo pelo qual aquele caminho passa por cima de presença e ausência.
    */
   const plantao = await plantaoAtivo(db, deptId);
-  if (plantao && pool.includes(plantao.user_id)) {
+  const naEscala = plantao ? plantonistas(plantao).filter((u) => pool.includes(u)) : [];
+  if (plantao && naEscala.length) {
     /*
      * ⚠️ Ausente é perguntado DIRETO, e não deduzido de `list`: quando o setor
      * não distribui para offline, `list` é só quem está online — e "não está na
      * lista" ali significa offline, não ausente. Confundir os dois é exatamente
      * o que esta regra veio separar.
      */
-    const ausente = !elegiveis.includes(plantao.user_id);
+    const disponiveisPlantao = naEscala.filter((u) => elegiveis.includes(u));
+    const ausente = disponiveisPlantao.length === 0;
     if (!ausente) {
       const take = Math.min(convs.length, Math.max(1, Math.ceil(convs.length * fraction)));
-      const offlinePlantao = !online.includes(plantao.user_id);
+      // Lida UMA vez e mutada a cada entrega, para o lote se dividir por igual.
+      const carga = await cargaDoPlantao(db, plantao.id);
       for (let i = 0; i < take; i++) {
+        const alvo = escolherPlantonista(disponiveisPlantao, online, carga)!;
+        const offlinePlantao = !online.includes(alvo);
+        carga.set(alvo, (carga.get(alvo) ?? 0) + 1);
         await assignLeadTo(
           db,
           {
@@ -1290,7 +1349,7 @@ export async function distributeDepartment(
             reason: `plantão${offlinePlantao ? " (estava offline — foi para Pendentes)" : ""}`,
             plantaoId: plantao.id,
           },
-          plantao.user_id,
+          alvo,
           offlinePlantao,
         );
       }
