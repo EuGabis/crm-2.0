@@ -529,7 +529,7 @@ function AgentesReport() {
                       <p className="mb-2 mt-4 text-[11px] font-semibold text-slate-600">
                         Linha do tempo · entradas, ausências e saídas
                       </p>
-                      <LinhaDoTempoPresenca userId={a.userId} periodo={periodo} />
+                      <LinhaDoTempoPresenca userId={a.userId} nome={a.nome} periodo={periodo} />
                     </td>
                   </tr>
                 )}
