@@ -42,7 +42,7 @@ export function PlantaoCard({
   const confirm = useConfirm();
   const [abrindo, setAbrindo] = useState(false);
   const [salvando, setSalvando] = useState(false);
-  const [user, setUser] = useState("");
+  const [users, setUsers] = useState<string[]>([]);
   const [inicio, setInicio] = useState("");
   const [fim, setFim] = useState("");
   const [seAusente, setSeAusente] = useState<"normal" | "fila">("normal");
@@ -50,10 +50,11 @@ export function PlantaoCard({
   const vigente = useMemo(() => plantoes.find((p) => estaVigente(p)) ?? null, [plantoes]);
   const futuros = useMemo(() => plantoes.filter((p) => !estaVigente(p)), [plantoes]);
   const nomeDe = (id: string) => membros.find((m) => m.userId === id)?.name ?? "—";
+  const nomesDe = (ids: string[]) => ids.map(nomeDe).join(" e ");
 
   const salvar = async () => {
-    if (!user) {
-      toast.error("Escolha o vendedor de plantão");
+    if (!users.length) {
+      toast.error("Escolha ao menos um vendedor de plantão");
       return;
     }
     if (!inicio || !fim) {
@@ -69,7 +70,7 @@ export function PlantaoCard({
      */
     const r = await plantaoActions.criar({
       departmentId,
-      userId: user,
+      userIds: users,
       inicio: new Date(inicio).toISOString(),
       fim: new Date(fim).toISOString(),
       seAusente,
@@ -81,7 +82,7 @@ export function PlantaoCard({
     }
     toast.success("Plantão ativado");
     setAbrindo(false);
-    setUser("");
+    setUsers([]);
     setInicio("");
     setFim("");
     recarregar();
@@ -119,8 +120,8 @@ export function PlantaoCard({
             <CalendarClock className="size-3.5" /> Plantão de fim de semana
           </Label>
           <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">
-            No período, <strong>todos</strong> os leads novos do setor vão para o vendedor
-            escolhido e a distribuição normal fica suspensa. Ela volta sozinha quando o plantão
+            No período, <strong>todos</strong> os leads novos do setor vão para os vendedores
+            escolhidos (divididos por igual entre eles) e a distribuição normal fica suspensa. Ela volta sozinha quando o plantão
             termina.
           </p>
         </div>
@@ -147,7 +148,7 @@ export function PlantaoCard({
             <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2.5">
               <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-800">
                 <span aria-hidden className="size-2 rounded-full bg-emerald-500" />
-                Plantão ativo · {nomeDe(vigente.userId)}
+                Plantão ativo · {nomesDe(vigente.userIds)}
               </p>
               <p className="mt-0.5 text-[11px] text-emerald-700">{janela(vigente)}</p>
               <p className="mt-0.5 text-[11px] text-emerald-700">
@@ -158,7 +159,7 @@ export function PlantaoCard({
               </p>
               {podeEditar && (
                 <button
-                  onClick={() => void cancelar(vigente.id, nomeDe(vigente.userId))}
+                  onClick={() => void cancelar(vigente.id, nomesDe(vigente.userIds))}
                   className="mt-1 text-[11px] font-medium text-emerald-800 underline"
                 >
                   Cancelar plantão
@@ -175,11 +176,11 @@ export function PlantaoCard({
                   className="flex items-center justify-between gap-2 rounded-md border border-dashed px-2.5 py-1.5 text-[11px]"
                 >
                   <span className="text-slate-600">
-                    <strong className="text-slate-800">{nomeDe(p.userId)}</strong> · {janela(p)}
+                    <strong className="text-slate-800">{nomesDe(p.userIds)}</strong> · {janela(p)}
                   </span>
                   {podeEditar && (
                     <button
-                      onClick={() => void cancelar(p.id, nomeDe(p.userId))}
+                      onClick={() => void cancelar(p.id, nomesDe(p.userIds))}
                       className="shrink-0 font-medium text-slate-500 underline"
                     >
                       Cancelar
@@ -201,32 +202,33 @@ export function PlantaoCard({
       {abrindo && (
         <div className="mt-3 space-y-2 rounded-lg border bg-slate-50/60 p-3">
           <div>
-            <Label className="text-[11px] font-semibold">Vendedor</Label>
+            <Label className="text-[11px] font-semibold">Vendedores de plantão</Label>
             {/*
-              `<select>` nativo, como nos outros seletores de pessoa do CRM: dá
-              busca por digitação e a rolagem do sistema de graça.
-
-              ⚠️ O estado de presença vai no TEXTO da opção, não só numa cor:
-              escolher para o plantão alguém que está ausente muda o que vai
-              acontecer (entra a contingência), e isso precisa estar visível na
-              hora da escolha.
+              Caixas e não seletor: o plantão pode ter mais de um vendedor, e os
+              leads se dividem por igual entre eles (online primeiro).
+              ⚠️ A presença vai no TEXTO: escolher alguém ausente muda o que
+              acontece (entra a contingência).
             */}
-            <select
-              value={user}
-              onChange={(e) => setUser(e.target.value)}
-              className="mt-1 h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
-            >
-              <option value="">Selecionar...</option>
+            <div className="mt-1 max-h-40 space-y-0.5 overflow-auto rounded-md border border-slate-200 bg-white p-1.5">
               {membros.map((m) => {
                 const p = presenca[m.userId];
                 const estado = estadoDePresenca(p?.lastSeenAt ?? null, p?.disponibilidade ?? null);
+                const marcado = users.includes(m.userId);
                 return (
-                  <option key={m.userId} value={m.userId}>
-                    {m.name} · {rotuloDePresenca(estado)}
-                  </option>
+                  <label key={m.userId} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-xs hover:bg-slate-50">
+                    <input
+                      type="checkbox"
+                      checked={marcado}
+                      onChange={() =>
+                        setUsers((u) => (marcado ? u.filter((x) => x !== m.userId) : [...u, m.userId]))
+                      }
+                    />
+                    {m.name}
+                    <span className="text-slate-400">· {rotuloDePresenca(estado)}</span>
+                  </label>
                 );
               })}
-            </select>
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
@@ -250,7 +252,7 @@ export function PlantaoCard({
             </div>
           </div>
           <div>
-            <Label className="text-[11px] font-semibold">Se o vendedor estiver ausente</Label>
+            <Label className="text-[11px] font-semibold">Se todos estiverem ausentes</Label>
             <select
               value={seAusente}
               onChange={(e) => setSeAusente(e.target.value as "normal" | "fila")}
