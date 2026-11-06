@@ -845,17 +845,17 @@ export async function cargaDoPlantao(db: any, plantaoId: string): Promise<Map<st
 }
 
 /**
- * Qual plantonista recebe: entre os DISPONÍVEIS (não ausentes), os online têm
- * preferência; com todos offline, os disponíveis recebem em Pendentes. Dentro
- * do grupo, quem recebeu MENOS neste plantão; empate na ordem da escala.
+ * Qual plantonista recebe (regra de 2026-11-06: "quem estiver online dos 2 é
+ * que vai recebendo"): só os ONLINE e não ausentes. Quem recebeu MENOS neste
+ * plantão; empate na ordem da escala. Nenhum online → null, e vale a
+ * contingência do plantão (fila ou distribuição normal).
  */
 export function escolherPlantonista(
   disponiveis: string[],
   online: string[],
   carga: Map<string, number>,
 ): string | null {
-  const on = disponiveis.filter((u) => online.includes(u));
-  const grupo = on.length ? on : disponiveis;
+  const grupo = disponiveis.filter((u) => online.includes(u));
   let melhor: string | null = null;
   for (const u of grupo) if (melhor == null || (carga.get(u) ?? 0) < (carga.get(melhor) ?? 0)) melhor = u;
   return melhor;
@@ -1047,7 +1047,8 @@ export async function distributeOne(
   const escala = plantao ? plantonistas(plantao).filter((u) => !args.excluir?.includes(u)) : [];
   if (plantao && escala.length) {
     const naEscala = escala.filter((u) => pool.includes(u));
-    const disponiveisPlantao = naEscala.filter((u) => elegiveis.includes(u));
+    // Só quem está ONLINE e não ausente recebe; ninguém → contingência.
+    const disponiveisPlantao = naEscala.filter((u) => elegiveis.includes(u) && online.includes(u));
     const ausente = disponiveisPlantao.length === 0;
     const noPool = naEscala.length > 0;
     if (!noPool) {
@@ -1329,7 +1330,8 @@ export async function distributeDepartment(
      * lista" ali significa offline, não ausente. Confundir os dois é exatamente
      * o que esta regra veio separar.
      */
-    const disponiveisPlantao = naEscala.filter((u) => elegiveis.includes(u));
+    // Só quem está ONLINE e não ausente recebe; ninguém → contingência.
+    const disponiveisPlantao = naEscala.filter((u) => elegiveis.includes(u) && online.includes(u));
     const ausente = disponiveisPlantao.length === 0;
     if (!ausente) {
       const take = Math.min(convs.length, Math.max(1, Math.ceil(convs.length * fraction)));
