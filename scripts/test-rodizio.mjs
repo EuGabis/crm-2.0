@@ -1363,15 +1363,35 @@ const plantaoDe = (user, extra = {}) => ({
 }
 
 {
-  // Plantonista OFFLINE recebe igual, e vai para Pendentes (item 7).
+  // 🔴 Regra de 2026-11-06: plantonista OFFLINE não recebe — vale a contingência
+  // (aqui "normal": o online do rodízio recebe). Revê o item 7 de 11/09.
   const st = vendasRegraNova({ paulo: "online", rogerio: "offline" });
   st.plantoes = [plantaoDe("rogerio")];
   comFila(st, [naFila("k1")]);
   const db = fakeDb(st);
   await distribuirFilaDoSetor(db, "loc1");
   const at = db.atribuicoes()[0];
-  eq("[plantao] offline recebe do mesmo jeito", at.patch.assigned_to, "rogerio");
-  eq("[plantao] e o lead fica em Pendentes", at.patch.assigned_offline, true);
+  eq("[plantao] offline nao recebe; contingencia normal", at.patch.assigned_to, "paulo");
+}
+
+{
+  // Dois plantonistas: só o online recebe, e recebe tudo.
+  const st = vendasRegraNova({ paulo: "online", rogerio: "offline" });
+  st.plantoes = [{ ...plantaoDe("rogerio"), user_ids: ["rogerio", "paulo"] }];
+  comFila(st, [naFila("k1"), naFila("k2"), naFila("k3")]);
+  const db = fakeDb(st);
+  await distribuirFilaDoSetor(db, "loc1");
+  eq("[plantao 2] so o online recebe", contarPorPessoa(db), { paulo: 3 });
+}
+
+{
+  // Dois plantonistas online: divide por igual.
+  const st = vendasRegraNova({ paulo: "online", rogerio: "online" });
+  st.plantoes = [{ ...plantaoDe("rogerio"), user_ids: ["rogerio", "paulo"] }];
+  comFila(st, [naFila("k1"), naFila("k2"), naFila("k3"), naFila("k4")]);
+  const db = fakeDb(st);
+  await distribuirFilaDoSetor(db, "loc1");
+  eq("[plantao 2] divide por igual", contarPorPessoa(db), { rogerio: 2, paulo: 2 });
 }
 
 {

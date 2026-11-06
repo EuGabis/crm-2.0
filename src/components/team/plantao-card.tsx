@@ -121,7 +121,7 @@ export function PlantaoCard({
           </Label>
           <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">
             No período, <strong>todos</strong> os leads novos do setor vão para os vendedores
-            escolhidos (divididos por igual entre eles) e a distribuição normal fica suspensa. Ela volta sozinha quando o plantão
+            escolhidos que estiverem <strong>online</strong> (divididos por igual entre eles) e a distribuição normal fica suspensa. Ela volta sozinha quando o plantão
             termina.
           </p>
         </div>
@@ -252,7 +252,7 @@ export function PlantaoCard({
             </div>
           </div>
           <div>
-            <Label className="text-[11px] font-semibold">Se todos estiverem ausentes</Label>
+            <Label className="text-[11px] font-semibold">Se nenhum estiver online</Label>
             <select
               value={seAusente}
               onChange={(e) => setSeAusente(e.target.value as "normal" | "fila")}
@@ -264,8 +264,9 @@ export function PlantaoCard({
             <p className="mt-1 flex gap-1 text-[11px] leading-relaxed text-slate-500">
               <ShieldAlert className="mt-px size-3 shrink-0" aria-hidden />
               <span>
-                Vale só para <strong>Ausente</strong>. Offline recebe do mesmo jeito — o lead
-                fica em <strong>Pendentes</strong> e continua sendo dele.
+                Só recebe quem está <strong>online</strong>. Se só um estiver online, ele recebe
+                todos; quando o outro entrar, os próximos passam a ser divididos. Esta opção vale
+                quando nenhum dos escolhidos está online (offline ou ausente).
               </span>
             </p>
           </div>
