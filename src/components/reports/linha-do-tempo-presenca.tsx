@@ -184,9 +184,16 @@ export function LinhaDoTempoPresenca({
                 const ant = lista[i - 1];
                 const lacuna = ant ? minEntre(ant.fim, s.inicio) : 0;
                 const aus = s.tipo === "ausente";
-                // Lacuna curta (escondida) não é saída: seus leads vão para a sessão.
-                const iniSeg = ant && lacuna < LACUNA_MIN ? ant.fim : s.inicio;
-                const nSessao = contar(leads, iniSeg, s.fim);
+                /*
+                 * Lacuna curta (escondida) não é saída: os leads dela ficam com a
+                 * sessão ANTERIOR. O status só muda no ping seguinte, então até lá
+                 * a pessoa ainda estava no status anterior. Atribuir à sessão
+                 * seguinte punha no "Ausente" os leads que a varredura entregou
+                 * segundos depois de ela entrar online.
+                 */
+                const prox = lista[i + 1];
+                const fimSeg = prox && minEntre(s.fim, prox.inicio) < LACUNA_MIN ? prox.inicio : s.fim;
+                const nSessao = contar(leads, s.inicio, fimSeg);
                 const nLacuna = ant && lacuna >= LACUNA_MIN ? contar(leads, ant.fim, s.inicio) : 0;
                 return (
                   <li key={s.inicio + i} className="text-[11px]">
