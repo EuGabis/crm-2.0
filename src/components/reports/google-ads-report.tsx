@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   googleAdsActions,
   useGoogleAdsConnection,
+  type ContaAds,
   type OverviewData,
 } from "@/lib/data/repos/db/google-ads";
 import { Megaphone } from "lucide-react";
@@ -66,7 +67,7 @@ export function GoogleAdsReport() {
   }, [days]);
 
   useEffect(() => {
-    if (connection) void fetchOverview();
+    if (connection?.active && connection.customerId) void fetchOverview();
   }, [connection, fetchOverview]);
 
   if (!ready) return <p className="text-xs text-slate-400">Carregando…</p>;
@@ -91,6 +92,8 @@ export function GoogleAdsReport() {
       />
     );
   }
+
+  if (!connection.active || !connection.customerId) return <EscolherConta />;
 
   const currency = data?.currency ?? connection.currencyCode ?? "BRL";
 
@@ -192,6 +195,79 @@ export function GoogleAdsReport() {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+/** Passo 2 da conexão: escolher QUAL conta de anúncios ler. */
+function EscolherConta() {
+  const [contas, setContas] = useState<ContaAds[] | null>(null);
+  const [erros, setErros] = useState<string[]>([]);
+  const [erro, setErro] = useState<string | null>(null);
+  const [salvando, setSalvando] = useState<string | null>(null);
+
+  useEffect(() => {
+    void googleAdsActions.listarContas().then((r) => {
+      setContas(r.contas);
+      setErros(r.erros);
+      setErro(r.error ?? null);
+    });
+  }, []);
+
+  return (
+    <div className="space-y-3 rounded-xl border bg-white p-4">
+      <div>
+        <h3 className="text-sm font-semibold text-slate-900">Escolha a conta do Google Ads</h3>
+        <p className="text-xs text-slate-500">
+          O login deu certo. Agora escolha qual conta de anúncios o CRM deve ler.
+        </p>
+      </div>
+      {contas === null && !erro && <p className="text-xs text-slate-400">Buscando contas…</p>}
+      {erro && <p className="text-xs text-red-600">Não foi possível listar as contas: {erro}</p>}
+      {contas && contas.length === 0 && !erro && (
+        <p className="text-xs text-slate-500">Nenhuma conta ativa encontrada para este login do Google.</p>
+      )}
+      <div className="divide-y rounded-lg border">
+        {(contas ?? []).map((c) => (
+          <div key={c.id} className="flex items-center justify-between gap-2 px-3 py-2">
+            <div className="min-w-0">
+              <p className="truncate text-xs font-medium text-slate-900">{c.nome}</p>
+              <p className="text-[11px] text-slate-500">
+                {c.id.replace(/(\d{3})(\d{3})(\d{4})/, "$1-$2-$3")} · {c.moeda}
+                {c.via ? ` · via administrador ${c.via}` : ""}
+                {c.gerente ? " · conta de administrador (sem campanhas)" : ""}
+              </p>
+            </div>
+            <Button
+              size="sm"
+              className="h-8 text-xs"
+              disabled={c.gerente || salvando !== null}
+              onClick={async () => {
+                setSalvando(c.id);
+                const r = await googleAdsActions.escolherConta(c);
+                setSalvando(null);
+                if (r.ok) toast.success(`Google Ads conectado: ${c.nome}`);
+                else toast.error(r.error ?? "Falha ao escolher a conta");
+              }}
+            >
+              {salvando === c.id ? "Conferindo…" : "Usar esta"}
+            </Button>
+          </div>
+        ))}
+      </div>
+      {erros.length > 0 && (
+        <p className="text-[11px] text-amber-700">Algumas contas não puderam ser lidas: {erros.join(" · ")}</p>
+      )}
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-8 text-xs"
+        onClick={async () => {
+          await googleAdsActions.disconnect();
+        }}
+      >
+        Cancelar e desconectar
+      </Button>
     </div>
   );
 }
