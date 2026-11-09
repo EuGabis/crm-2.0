@@ -20,6 +20,7 @@
  * Roda direto no Node 24 (`npm run test:rodizio`), sem runner de teste.
  */
 import {
+  encerraVolta,
   distributeOne,
   distribuirFilaDoSetor,
   devolvivel,

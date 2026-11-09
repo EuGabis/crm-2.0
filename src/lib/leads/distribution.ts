@@ -1668,6 +1668,24 @@ export function devolvivel(
 }
 
 /**
+ * O lead já deu UMA volta no setor e deve parar na fila? (2026-11-09)
+ *
+ * Só para lead QUENTE. Com um time de N, o primeiro dono mais N-1 devoluções já
+ * passou por todos; a próxima devolução (a de número N, contando as anteriores
+ * desde a última mensagem do cliente = N-1) leva para a fila do setor em vez de
+ * reatribuir. Frio e sem nota seguem circulando.
+ */
+export function encerraVolta(
+  temperatura: TemperaturaLead | null | undefined,
+  devolucoesAnteriores: number,
+  tamanhoTime: number,
+): boolean {
+  if (temperatura !== "quente") return false;
+  if (!(tamanhoTime > 0)) return false;
+  return devolucoesAnteriores >= tamanhoTime - 1;
+}
+
+/**
  * Devolve ao rodízio as conversas cujo aluno está esperando há tempo demais.
  *
  * ⚠️ **Existe porque respeitar presença não basta.** Relato de 2026-08-28: a
@@ -1808,6 +1826,16 @@ export async function devolverInativas(
     if (!parados.length) continue;
 
     const ids = parados.map((l: any) => l.conversation_id);
+
+    /*
+     * Regra do Gabriel (2026-11-09): o lead QUENTE dá UMA volta no setor (passa
+     * por cada vendedor uma vez) e, se ninguém respondeu, vai para a FILA DO
+     * SETOR e para de circular. O FRIO (e o sem nota) continua dando volta.
+     * Ver `encerraVolta`.
+     */
+    const temperaturas = await temperaturasDasConversas(db, ids);
+    const tamanhoTime = (await departmentPool(db, locationId, dep.id)).pool.length;
+
     const { data: convs } = await db
       .from("conversations")
       .select("id, contact_id, assigned_to")
@@ -1835,9 +1863,24 @@ export async function devolverInativas(
        * todos) em vez de continuar presa com quem não respondeu. Redistribuir
        * primeiro e soltar depois deixaria a conversa parada no caso ruim.
        */
-      const esperou = Math.round(
-        Number(parados.find((p: any) => p.conversation_id === conv.id)?.espera_util_min ?? limite),
-      );
+      const linhaParada = parados.find((p: any) => p.conversation_id === conv.id);
+      const esperou = Math.round(Number(linhaParada?.espera_util_min ?? limite));
+
+      // Quantas vezes já foi devolvida desde a última mensagem do cliente.
+      let devolucoes = 0;
+      const quente = temperaturas.get(conv.id) === "quente";
+      if (quente && linhaParada?.ultima_do_cliente) {
+        const { count, error: eCount } = await db
+          .from("messages")
+          .select("id", { count: "exact", head: true })
+          .eq("conversation_id", conv.id)
+          .eq("type", "event")
+          .like("body", "Devolvida à fila%esperava%")
+          .gt("created_at", linhaParada.ultima_do_cliente);
+        // Contagem que falhou não decide nada: segue a regra de sempre.
+        if (!eCount) devolucoes = count ?? 0;
+      }
+      const vaiParaFila = encerraVolta(quente ? "quente" : null, devolucoes, tamanhoTime);
       /*
        * 🔴 **Soltar só se ainda estiver com quem não respondeu** (compare-and-set).
        * Caso real de 05/11, 09:41: dois tiques sobrepostos leram a mesma lista,
@@ -1849,7 +1892,9 @@ export async function devolverInativas(
         .from("conversations")
         .update({
           assigned_to: null,
-          awaiting_distribution: true,
+          // Quente que fechou a volta fica na fila do setor SEM a marca de
+          // distribuição: a varredura não o pega, e ele para de circular.
+          awaiting_distribution: !vaiParaFila,
           assigned_offline: false,
           /*
            * 🔴 **A MEMÓRIA que faltava, e sem ela nada mais importa.** Devolver
@@ -1864,7 +1909,9 @@ export async function devolverInativas(
            */
           devolvida_em: new Date().toISOString(),
           // O gatilho `log_atribuicao` escreve o evento; aqui só vai o motivo.
-          assign_reason: `devolvida: cliente esperava ${esperou} min sem resposta`,
+          assign_reason: vaiParaFila
+            ? `lead quente passou por todo o time sem resposta — fica na fila do setor (cliente esperava ${esperou} min)`
+            : `devolvida: cliente esperava ${esperou} min sem resposta`,
         })
         .eq("id", conv.id)
         .eq("assigned_to", anterior)
@@ -1873,6 +1920,7 @@ export async function devolverInativas(
       if (solta?.error || !(solta?.data?.length ?? 0)) continue;
       devolvidas++;
       perdeuNesteTique.add(anterior);
+      if (vaiParaFila) continue;
 
       const novo = await distributeOne(db, {
         locationId,
