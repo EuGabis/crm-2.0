@@ -254,7 +254,7 @@ function AssignPicker({
 
 /** Resumo curto de uma mensagem para a prévia da citação (texto ou mídia). */
 function quoteSnippet(m: Message): string {
-  if (m.type === "image") return "🖼️ Imagem";
+  if (m.type === "image") return m.mediaName?.startsWith("sticker.") ? "💟 Figurinha" : "🖼️ Imagem";
   if (m.type === "video") return "🎬 Vídeo";
   if (m.type === "audio") return "🎧 Áudio";
   if (m.type === "file") return `📎 ${m.mediaName ?? "Arquivo"}`;
@@ -733,7 +733,11 @@ export function MediaContent({ message, out }: { message: Message; out: boolean 
         <img
           src={url}
           alt={message.mediaName ?? "imagem"}
-          className="max-h-64 max-w-full rounded-lg object-cover"
+          className={
+            message.mediaName?.startsWith("sticker.")
+              ? "h-32 w-32 object-contain"
+              : "max-h-64 max-w-full rounded-lg object-cover"
+          }
         />
       </a>
     ) : (

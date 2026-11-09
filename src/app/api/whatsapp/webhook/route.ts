@@ -292,7 +292,7 @@ function previaDeMidia(msgType: string, legenda: string, nomeArquivo?: string): 
           ? `📎 ${texto}`
           : texto;
   }
-  if (msgType === "image") return "📷 Imagem";
+  if (msgType === "image") return nomeArquivo?.startsWith("sticker.") ? "💟 Figurinha" : "📷 Imagem";
   if (msgType === "video") return "🎬 Vídeo";
   if (msgType === "audio") return "🎤 Áudio";
   if (msgType === "file") return `📎 ${nomeArquivo || "Arquivo"}`;
@@ -435,12 +435,15 @@ async function handleIncoming(db: any, channel: any, value: any, m: any) {
     m.type === "image" ||
     m.type === "audio" ||
     m.type === "video" ||
-    m.type === "document"
+    m.type === "document" ||
+    m.type === "sticker"
   ) {
     // Documento (PDF etc.) é guardado como `file` — o tipo `document` não existe
     // no CHECK de messages. Os demais mantêm o próprio tipo.
+    // Figurinha (.webp) vira IMAGEM: o CHECK de messages não tem `sticker`, e o
+    // nome "sticker.webp" é o que faz o balão desenhá-la pequena e sem corte.
     const isDoc = m.type === "document";
-    msgType = isDoc ? "file" : m.type;
+    msgType = isDoc ? "file" : m.type === "sticker" ? "image" : m.type;
     const node = m[m.type] ?? {};
     body = node.caption ?? "";
     try {
