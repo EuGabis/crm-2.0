@@ -44,6 +44,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { RespostaRapidaDialog } from "./resposta-rapida-dialog";
+import { MAX_FIGURINHA, StickerPicker } from "./sticker-picker";
 import { ScheduleDialog } from "./schedule-dialog";
 import { channelLabel } from "@/components/shared/channel-icon";
 import {
@@ -395,6 +396,49 @@ export function Composer({ conversationId }: { conversationId: string }) {
    * MOTIVO da falha continua voltando, senão o resumo diria "2 falharam" sem
    * dizer por quê, que é o defeito que este projeto já pagou caro no áudio.
    */
+  /**
+   * Figurinha: entra no inbox como imagem `sticker.webp` (o balão a desenha
+   * pequena) e vai ao cliente como `type: "sticker"` — sem legenda, que a Meta
+   * não aceita em figurinha. Só WEBP, até 500 KB (limite da Meta).
+   */
+  const enviarFigurinha = async (file: File) => {
+    if (file.size > MAX_FIGURINHA) {
+      toast.error("Figurinha maior que 500 KB — o WhatsApp não aceita.");
+      return;
+    }
+    setUploading(true);
+    try {
+      const res = await conversationActions.sendMedia(conversationId, {
+        file,
+        kind: "image",
+        channel,
+      });
+      if (!res.ok || !res.messageId || !res.mediaPath) {
+        toast.error(res.error ?? "Não foi possível enviar a figurinha");
+        return;
+      }
+      if (isWhatsapp) {
+        const wa = await whatsappActions.sendMedia({
+          conversationId,
+          channelId: conversation?.channelId,
+          messageId: res.messageId,
+          mediaPath: res.mediaPath,
+          mime: "image/webp",
+          kind: "sticker",
+        });
+        if (!wa.ok) {
+          toast.error(
+            wa.needsTemplate
+              ? "Janela de 24h fechada — envie um template antes."
+              : wa.error ?? "A figurinha ficou no inbox, mas falhou ao enviar no WhatsApp."
+          );
+        }
+      }
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const uploadFile = async (
     file: File,
     caption?: string,
@@ -1299,6 +1343,8 @@ export function Composer({ conversationId }: { conversationId: string }) {
               ))}
             </PopoverContent>
           </Popover>
+          {/* Figurinha — só faz sentido no WhatsApp */}
+          {isWhatsapp && <StickerPicker disabled={uploading} onPick={enviarFigurinha} />}
 
           {/* Anexo (imagem, vídeo, áudio, PDF ou DOCX) — vários de uma vez */}
           <input
