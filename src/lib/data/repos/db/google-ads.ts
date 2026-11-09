@@ -82,7 +82,35 @@ export function useGoogleAdsConnection() {
   return { connection, ready: loaded && !loading };
 }
 
+export interface ContaAds {
+  id: string;
+  nome: string;
+  moeda: string;
+  gerente: boolean;
+  via: string | null;
+}
+
 export const googleAdsActions = {
+  async listarContas(): Promise<{ contas: ContaAds[]; erros: string[]; error?: string }> {
+    const res = await fetch("/api/google-ads/contas");
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) return { contas: [], erros: [], error: json?.error ?? `Falha (${res.status})` };
+    return { contas: json.contas ?? [], erros: json.erros ?? [] };
+  },
+
+  async escolherConta(conta: ContaAds): Promise<{ ok: boolean; error?: string }> {
+    const res = await fetch("/api/google-ads/contas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: conta.id, via: conta.via }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: json?.error ?? `Falha (${res.status})` };
+    useConnStore.setState({ loaded: false, loading: false });
+    await useConnStore.getState().load();
+    return { ok: true };
+  },
+
   startConnectPath(): string {
     return "/api/google-ads/oauth/start";
   },

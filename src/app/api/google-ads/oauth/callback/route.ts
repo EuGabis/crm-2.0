@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { exchangeCode, getCustomerInfo, listAccessibleCustomers } from "@/lib/google-ads/client";
+import { exchangeCode } from "@/lib/google-ads/client";
 import { redirectUri, verifyState } from "@/lib/google-ads/state";
 import { originDaRequisicao } from "@/lib/config/app-url";
 
@@ -12,7 +12,7 @@ function back(base: string, params: string) {
   return new Response(null, {
     status: 302,
     headers: {
-      Location: `${base.replace(/\/$/, "")}/relatorios?${params}`,
+      Location: `${base.replace(/\/$/, "")}/relatorios?tab=Google%20Ads&${params}`,
       "Set-Cookie": "ga_oauth_state=; Path=/api/google-ads/oauth; Max-Age=0",
     },
   });
@@ -54,28 +54,29 @@ export async function GET(request: Request) {
   if (!locationId) return back(appUrl, "error=sem_empresa");
 
   try {
-    const { refreshToken, accessToken } = await exchangeCode(code, redirectUri());
-    const customers = await listAccessibleCustomers(accessToken);
-    if (customers.length === 0) return back(appUrl, "error=nenhuma_conta");
-    const customerId = customers[0]; // decisão: primeira conta acessível
-    const info = await getCustomerInfo(customerId, null, accessToken);
-
+    const { refreshToken } = await exchangeCode(code, redirectUri());
+    /*
+     * A conta NÃO é escolhida aqui (antes: `customers[0]`, que costuma ser a MCC,
+     * sem campanhas; e `login_customer_id` ficava sempre nulo, o que faz o Google
+     * recusar conta que fica embaixo de uma MCC). Grava só o token, inativo, e a
+     * tela lista as contas para a pessoa escolher (`/api/google-ads/contas`).
+     */
     const admin = createAdminClient();
     const { error } = await admin.from("google_ads_connections").upsert(
       {
         location_id: locationId,
-        customer_id: customerId,
+        customer_id: "",
         login_customer_id: null,
         refresh_token: refreshToken,
         connected_email: user.email ?? "",
-        currency_code: info.currencyCode || "BRL",
+        currency_code: "BRL",
         connected_at: new Date().toISOString(),
-        active: true,
+        active: false,
       },
       { onConflict: "location_id" },
     );
     if (error) return back(appUrl, `error=${encodeURIComponent(error.message)}`);
-    return back(appUrl, "connected=1");
+    return back(appUrl, "escolher=1");
   } catch (e) {
     return back(appUrl, `error=${encodeURIComponent(e instanceof Error ? e.message : "falha")}`);
   }
