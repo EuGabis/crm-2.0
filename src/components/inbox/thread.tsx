@@ -1,5 +1,6 @@
 "use client";
 
+import { juntarRedistribuicoes } from "@/lib/inbox/juntar-eventos";
 import { useEffect, useRef, useState } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -1762,7 +1763,7 @@ export function Thread({
             </p>
           </div>
         )}
-        {messages.map((m) => {
+        {juntarRedistribuicoes(messages).map((m) => {
           const day = format(new Date(m.at), "d 'de' MMMM", { locale: ptBR });
           const showDay = day !== lastDay;
           lastDay = day;

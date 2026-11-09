@@ -1,5 +1,6 @@
 "use client";
 
+import { juntarRedistribuicoes } from "@/lib/inbox/juntar-eventos";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { format, isSameDay } from "date-fns";
@@ -210,8 +211,8 @@ function Fio({ conv, contatoNome }: { conv: ConversaDoContato; contatoNome: stri
   }
   return (
     <div>
-      {conv.mensagens.map((m, i) => {
-        const anterior = conv.mensagens[i - 1];
+      {juntarRedistribuicoes(conv.mensagens).map((m, i, lista) => {
+        const anterior = lista[i - 1];
         const novoDia = !anterior || !isSameDay(new Date(anterior.at), new Date(m.at));
         return (
           <div key={m.id}>
