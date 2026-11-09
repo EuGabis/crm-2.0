@@ -215,7 +215,7 @@ export const whatsappActions = {
     messageId: string;
     mediaPath: string;
     mime?: string;
-    kind: "image" | "audio" | "video" | "document";
+    kind: "image" | "audio" | "video" | "document" | "sticker";
     caption?: string;
     filename?: string;
   }): Promise<{ ok: boolean; needsTemplate?: boolean; error?: string }> {

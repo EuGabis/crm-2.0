@@ -150,12 +150,12 @@ export async function POST(request: Request) {
     return Response.json({ error: "payload inválido" }, { status: 400 });
   }
   const { conversationId, channelId, messageId, mediaPath, mime, caption, filename } = body ?? {};
-  let kind = body?.kind as "image" | "audio" | "video" | "document";
+  let kind = body?.kind as "image" | "audio" | "video" | "document" | "sticker";
   if (
     !conversationId ||
     !messageId ||
     !mediaPath ||
-    !["image", "audio", "video", "document"].includes(kind)
+    !["image", "audio", "video", "document", "sticker"].includes(kind)
   ) {
     return Response.json({ error: "parâmetros ausentes" }, { status: 400 });
   }
@@ -295,7 +295,9 @@ export async function POST(request: Request) {
     }
   }
 
-  const sendMime = mimeParaUpload(bytes, mime || blob.type || "", kind === "audio");
+  // Figurinha é sempre WEBP para a Meta (é o único formato que ela aceita).
+  const sendMime =
+    kind === "sticker" ? "image/webp" : mimeParaUpload(bytes, mime || blob.type || "", kind === "audio");
 
   /*
    * ⚠️ **Conferir o áudio ANTES de mandar, porque a Meta mente sobre o momento

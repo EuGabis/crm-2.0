@@ -308,7 +308,7 @@ export const AUDIO_VOICE_PADRAO = false;
 export function sendMediaMessage(
   phoneNumberId: string,
   to: string,
-  kind: "image" | "audio" | "video" | "document",
+  kind: "image" | "audio" | "video" | "document" | "sticker",
   /** `{ id }` para mídia já subida, `{ link }` para a Meta buscar sozinha. */
   origem: { id: string } | { link: string },
   caption?: string,
@@ -320,7 +320,7 @@ export function sendMediaMessage(
   voice?: boolean,
 ) {
   const media: Record<string, unknown> = "id" in origem ? { id: origem.id } : { link: origem.link };
-  if (caption && kind !== "audio") media.caption = caption; // áudio não leva caption
+  if (caption && kind !== "audio" && kind !== "sticker") media.caption = caption; // áudio não leva caption
   if (kind === "document" && filename) media.filename = filename; // nome do arquivo p/ o cliente
   // Explícito e sempre, para áudio: o padrão do servidor deixa de decidir.
   if (kind === "audio") media.voice = voice ?? AUDIO_VOICE_PADRAO;
