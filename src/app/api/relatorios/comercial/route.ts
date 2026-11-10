@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { ehDiaValido, hojeSP } from "@/lib/periodo";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -36,7 +37,8 @@ export async function GET(request: Request) {
     return Response.json({ error: "período inválido" }, { status: 400 });
   }
 
-  const { data, error } = await supabase.rpc("relatorio_comercial", {
+  // Service role: sem o limite de 8 s do `authenticated`; admin já conferido acima.
+  const { data, error } = await createAdminClient().rpc("relatorio_comercial", {
     p_location: membership.location_id,
     p_de: de,
     p_ate: ate,

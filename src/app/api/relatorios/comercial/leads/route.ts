@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { ehDiaValido, hojeSP } from "@/lib/periodo";
 import { paginarRpc } from "@/lib/supabase/paginar-rpc";
 
@@ -43,8 +44,9 @@ export async function GET(request: Request) {
     return Response.json({ error: "parâmetros inválidos" }, { status: 400 });
   }
 
+  // Service role: sem o limite de 8 s do `authenticated`; admin já conferido acima.
   const { data, truncado, error } = await paginarRpc(
-    supabase,
+    createAdminClient() as any,
     "relatorio_comercial_leads",
     { p_location: membership.location_id, p_de: de, p_ate: ate, p_usuario: usuario, p_metrica: metrica },
     [{ coluna: "quando", desc: true }, { coluna: "ref" }]
