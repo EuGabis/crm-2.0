@@ -246,6 +246,8 @@ interface AgenteRow {
   /** Desde quando há medida para esta pessoa (ISO). */
   online_desde?: string | null;
   templates_enviados_30d: number;
+  /** Conversas abertas com a pessoa AGORA; null = não deu para contar. */
+  leads_agora?: number | null;
   ganhos: number;
   perdidos: number;
   receita_ganha: number;
@@ -427,6 +429,7 @@ function AgentesReport() {
               <tr className="border-b text-[11px] text-slate-400">
                 {[
                   "Atendente",
+                  "Com ele agora",
                   "Conversas",
                   // ⚠️ "Resposta típica" e não "Tempo médio": agora é MEDIANA de
                   // minutos ÚTEIS. Neste banco a média era 675 min contra
@@ -449,6 +452,12 @@ function AgentesReport() {
                 <Fragment key={a.userId}>
                 <tr className="border-b last:border-0">
                   <td className="px-4 py-2.5 font-medium text-slate-800">{a.nome}</td>
+                  <td
+                    className="px-4 py-2.5 font-semibold text-slate-900"
+                    title="Conversas abertas (não finalizadas nem arquivadas) atribuídas a esta pessoa neste momento"
+                  >
+                    {a.leads_agora == null ? "—" : a.leads_agora}
+                  </td>
                   <td className="px-4 py-2.5">{a.conversas_atribuidas}</td>
                   <td className="px-4 py-2.5" title={`Mediana de ${a.respostas_medidas} respostas, em minutos de expediente`}>
                     {a.resposta_tipica}
@@ -516,7 +525,7 @@ function AgentesReport() {
                 </tr>
                 {aberto === a.userId && porDia && (
                   <tr className="border-b bg-slate-50/70">
-                    <td colSpan={9} className="px-4 py-3">
+                    <td colSpan={11} className="px-4 py-3">
                       <p className="mb-2 text-[11px] font-semibold text-slate-600">
                         Tempo online por dia · {a.nome}
                       </p>
@@ -537,7 +546,7 @@ function AgentesReport() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-6 text-center text-slate-400">
+                  <td colSpan={11} className="px-4 py-6 text-center text-slate-400">
                     Sem dados de equipe ainda.
                   </td>
                 </tr>

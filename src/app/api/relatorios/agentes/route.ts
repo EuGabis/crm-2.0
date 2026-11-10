@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { ehDiaValido, hojeSP, somaDias } from "@/lib/periodo";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -180,8 +181,32 @@ export async function GET(request: Request) {
         ? porUsuario.get(id)?.minutos ?? 0
         : null;
 
+  /*
+   * CARTEIRA ATUAL (pedido da direção, 10/11): conversas ABERTAS que estão com a
+   * pessoa agora — não finalizadas nem arquivadas. É o estado de AGORA, não do
+   * período. Lido com a service role (a rota já exigiu admin): sob a RLS, contar
+   * as 8 mil conversas para o admin custa segundos. Uma contagem `head` por
+   * atendente, em paralelo. Falha vira `null` ("—"), nunca zero.
+   */
+  const admin = createAdminClient();
+  const carteira = new Map<string, number | null>();
+  await Promise.all(
+    ((data ?? []) as any[]).map(async (r) => {
+      const { count, error: e } = await admin
+        .from("conversations")
+        .select("id", { count: "exact", head: true })
+        .eq("location_id", membership.location_id)
+        .eq("assigned_to", r.user_id)
+        .is("closed_at", null)
+        .is("archived_at", null);
+      carteira.set(r.user_id, e ? null : (count ?? 0));
+    })
+  );
+
   const agentes = (data ?? [])
     .map((r: any) => ({
+      /** Conversas abertas com a pessoa AGORA; null = não deu para contar. */
+      leads_agora: carteira.get(r.user_id) ?? null,
       userId: r.user_id,
       nome: r.nome,
       papel: r.papel,
