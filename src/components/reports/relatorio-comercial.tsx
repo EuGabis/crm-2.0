@@ -6,6 +6,7 @@ import { PeriodoPicker } from "@/components/shared/period-picker";
 import { formatBRL } from "@/lib/data/repos/opportunities";
 import { hojeSP } from "@/lib/periodo";
 import { cn } from "@/lib/utils";
+import { RelatorioComercialLeads, type AlvoLeads } from "@/components/reports/relatorio-comercial-leads";
 
 interface Linha {
   usuario: string;
@@ -43,6 +44,7 @@ export function RelatorioComercial() {
   const [erro, setErro] = useState<string | null>(null);
   const [departamento, setDepartamento] = useState<string>("");
   const [todos, setTodos] = useState(false);
+  const [alvo, setAlvo] = useState<AlvoLeads | null>(null);
 
   useEffect(() => {
     let ativo = true;
@@ -189,20 +191,36 @@ export function RelatorioComercial() {
                       <p className="font-medium text-slate-800">{l.nome}</p>
                       {l.departamento && <p className="text-[10px] text-slate-400">{l.departamento}</p>}
                     </td>
-                    <td className="px-3 py-2.5 font-semibold">{l.recebidos}</td>
-                    <td className="px-3 py-2.5 text-emerald-700">{l.quentes}</td>
-                    <td className="px-3 py-2.5 text-sky-700">{l.frios}</td>
+                    <td className="px-3 py-2.5 font-semibold">
+                      <Num l={l} k="recebidos" rotulo="Recebidos" abrir={setAlvo} />
+                    </td>
+                    <td className="px-3 py-2.5 text-emerald-700">
+                      <Num l={l} k="quentes" rotulo="Quentes" abrir={setAlvo} />
+                    </td>
+                    <td className="px-3 py-2.5 text-sky-700">
+                      <Num l={l} k="frios" rotulo="Frios" abrir={setAlvo} />
+                    </td>
                     <td className={cn("px-3 py-2.5", l.perdidos_espera > 0 && "font-semibold text-red-600")}>
-                      {l.perdidos_espera}
+                      <Num l={l} k="perdidos_espera" rotulo="Perdidos por espera" abrir={setAlvo} />
                     </td>
-                    <td className="px-3 py-2.5 font-semibold">{l.com_ele_agora}</td>
+                    <td className="px-3 py-2.5 font-semibold">
+                      <Num l={l} k="com_ele_agora" rotulo="Com ele agora" abrir={setAlvo} />
+                    </td>
                     <td className={cn("px-3 py-2.5", l.sem_resposta > 0 && "font-semibold text-red-600")}>
-                      {l.sem_resposta}
+                      <Num l={l} k="sem_resposta" rotulo="Sem resposta agora" abrir={setAlvo} />
                     </td>
-                    <td className="px-3 py-2.5 text-amber-700">{l.pendentes}</td>
-                    <td className="px-3 py-2.5 text-emerald-600">{l.ganhos_funil}</td>
-                    <td className="px-3 py-2.5 text-slate-500">{l.perdidos_funil}</td>
-                    <td className="px-3 py-2.5 font-semibold text-emerald-700">{l.vendas_guru}</td>
+                    <td className="px-3 py-2.5 text-amber-700">
+                      <Num l={l} k="pendentes" rotulo="Pendentes" abrir={setAlvo} />
+                    </td>
+                    <td className="px-3 py-2.5 text-emerald-600">
+                      <Num l={l} k="ganhos_funil" rotulo="Ganhos (funil)" abrir={setAlvo} />
+                    </td>
+                    <td className="px-3 py-2.5 text-slate-500">
+                      <Num l={l} k="perdidos_funil" rotulo="Perdidos (funil)" abrir={setAlvo} />
+                    </td>
+                    <td className="px-3 py-2.5 font-semibold text-emerald-700">
+                      <Num l={l} k="vendas_guru" rotulo="Vendas (Guru)" abrir={setAlvo} />
+                    </td>
                     <td className="whitespace-nowrap px-3 py-2.5">{formatBRL(l.receita_guru)}</td>
                     <td className="px-3 py-2.5 font-semibold">{pct(l.vendas_guru, l.recebidos)}</td>
                     <td className="px-3 py-2.5">{pct(l.vendas_guru, l.quentes)}</td>
@@ -213,6 +231,28 @@ export function RelatorioComercial() {
           </div>
         </>
       )}
+      <RelatorioComercialLeads alvo={alvo} periodo={periodo} onClose={() => setAlvo(null)} />
     </>
+  );
+}
+
+/** Número clicável: abre a lista de leads. Zero não é clicável (lista vazia não responde nada). */
+function Num({
+  l, k, rotulo, abrir,
+}: {
+  l: Linha;
+  k: keyof Linha;
+  rotulo: string;
+  abrir: (a: AlvoLeads) => void;
+}) {
+  const v = l[k] as number;
+  if (!v) return <>{v}</>;
+  return (
+    <button
+      onClick={() => abrir({ usuario: l.usuario, nome: l.nome, metrica: k, rotulo })}
+      className="rounded px-1 underline decoration-dotted underline-offset-2 hover:bg-indigo-50 hover:text-indigo-700"
+    >
+      {v}
+    </button>
   );
 }
