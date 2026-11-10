@@ -9852,3 +9852,20 @@ do número que deixava de ser conferido. Três peças fecham isso:
    `conversas_paradas`). Antes de entregar, meça **como o usuário de cada setor**
    (Secretaria e Financeiro enxergam pouco e pagam mais caro), não só como admin:
    o sino levava 5 ms para o Paulo e 10,5 s para a Jenifer.
+
+## Relatório comercial (Relatórios → aba própria, migração 202611101500)
+
+Pedido da diretoria (2026-11-10): vendedores PJ recebem por conversão. Por
+vendedor e período: recebidos (leads DISTINTOS atribuídos, pelos eventos
+"Atribuída a" do fio), quentes/frios, perdidos por espera, ganhos/perdidos do
+funil (por `updated_at` — o CRM não guarda a data do ganho), vendas e receita
+da Guru e conversão (vendas ÷ recebidos e ÷ quentes). Estado atual: com ele
+agora, sem resposta agora (última mensagem é do cliente), pendentes.
+
+- A venda (`payment_new_sales`) casa com o contato por CPF → telefone → e-mail e
+  vai para quem tinha a ÚLTIMA atribuição da conversa do contato antes da venda
+  (regra da diretoria: "convertido se o vendedor vender para ele").
+- `public.relatorio_comercial` é `security definer` com `is_admin` na primeira
+  linha. Sem a migração aplicada, a aba diz isso (PGRST202).
+- Medido em 10/11 (consulta pura, como postgres): roda; carteira de 5–6 mil
+  conversas abertas por vendedor de Vendas — conversas antigas nunca finalizadas.

@@ -23,6 +23,7 @@ import { TOOLTIP_STYLE } from "@/components/dashboard/opportunity-widgets";
 import { GoogleAdsReport } from "@/components/reports/google-ads-report";
 import { ServiceSlaReport } from "@/components/reports/service-sla-report";
 import { LogDoBot } from "@/components/reports/log-do-bot";
+import { RelatorioComercial } from "@/components/reports/relatorio-comercial";
 import { LinhaDoTempoPresenca } from "@/components/reports/linha-do-tempo-presenca";
 import { Button } from "@/components/ui/button";
 import { formatBRL } from "@/lib/data/repos/opportunities";
@@ -1477,6 +1478,7 @@ const TODAS_AS_ABAS = [
   "Leads do dia",
   "Atendimento",
   "Conversas do setor",
+  "Relatório comercial",
   "Agentes",
   "Log do bot",
   "Atribuição",
@@ -1511,6 +1513,7 @@ function RelatoriosPageInner() {
         { label: "Leads do dia" },
         { label: "Atendimento" },
         { label: "Conversas do setor" },
+        { label: "Relatório comercial" },
         { label: "Agentes" },
         /*
          * ⚠️ Admin-only, e a rota confere de novo no servidor: o log mostra nome
@@ -1545,6 +1548,7 @@ function RelatoriosPageInner() {
         {activeTab === "Atendimento" && <ServiceSlaReport />}
         {activeTab === "Leads do dia" && <LeadsDoDiaReport />}
         {activeTab === "Conversas do setor" && isSupervisor && <SectorReport />}
+        {activeTab === "Relatório comercial" && isAdmin && <RelatorioComercial />}
         {activeTab === "Agentes" && isAdmin && <AgentesReport />}
         {activeTab === "Log do bot" && isAdmin && <LogDoBot />}
         {activeTab === "Atribuição" && (
