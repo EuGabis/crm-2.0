@@ -40,7 +40,11 @@ export async function updateSession(request: NextRequest) {
   // e não pode ser desviada para o painel antes de ela escolher a senha nova.
   const isRecovery = path.startsWith("/login/redefinir");
 
-  if (!user && !isAuthRoute && !isPublicApi) {
+  // Política de Privacidade e Termos: o Google exige links PÚBLICOS na tela de
+  // consentimento do OAuth (Google Ads). Sem isto, viravam redirecionamento ao login.
+  const isPublicPage = path === "/privacidade" || path === "/termos";
+
+  if (!user && !isAuthRoute && !isPublicApi && !isPublicPage) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
