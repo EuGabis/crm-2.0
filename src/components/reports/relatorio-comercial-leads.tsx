@@ -5,6 +5,11 @@ import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatBRL } from "@/lib/data/repos/opportunities";
+import { fetchContactById } from "@/lib/data/repos/db/contacts";
+import type { Contact } from "@/lib/data/types";
+import { ContactConversations } from "@/components/contacts/contact-conversations";
+import { ContactActivity } from "@/components/contacts/contact-activity";
+import { ContactPaymentsPanel } from "@/components/payments/lead-payments-panel";
 
 interface Lead {
   ref: string;
@@ -94,6 +99,9 @@ export function RelatorioComercialLeads({
   }, [leads, busca]);
 
   const ehVenda = alvo?.metrica === "vendas_guru";
+  // Funil é sobre cards: ali não há cruzamento por contato a mostrar.
+  const mostraChave = !!alvo && !["ganhos_funil", "perdidos_funil"].includes(alvo.metrica);
+  const [contatoAberto, setContatoAberto] = useState<string | null>(null);
 
   return (
     <Dialog open={!!alvo} onOpenChange={(o) => !o && onClose()}>
@@ -135,7 +143,7 @@ export function RelatorioComercialLeads({
                       <th className="px-2 py-2 font-medium">Contato</th>
                       <th className="px-2 py-2 font-medium">Quando</th>
                       <th className="px-2 py-2 font-medium">Informação</th>
-                      {ehVenda && <th className="px-2 py-2 font-medium">Cruzado por</th>}
+                      {mostraChave && <th className="px-2 py-2 font-medium">Cruzado na Guru por</th>}
                       {ehVenda && <th className="px-2 py-2 font-medium">Valor</th>}
                       <th className="px-2 py-2 font-medium" />
                     </tr>
@@ -151,11 +159,15 @@ export function RelatorioComercialLeads({
                         </td>
                         <td className="whitespace-nowrap px-2 py-2 text-slate-600">{dataHora(l.quando)}</td>
                         <td className="px-2 py-2 text-slate-700">{l.detalhe}</td>
-                        {ehVenda && (
+                        {mostraChave && (
                           <td className="whitespace-nowrap px-2 py-2">
+                            {l.chave ? (
                             <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
-                              {l.chave ?? "—"}
+                              {l.chave}
                             </span>
+                            ) : (
+                              <span className="text-[10px] text-slate-400">sem compra</span>
+                            )}
                           </td>
                         )}
                         {ehVenda && (
@@ -163,9 +175,12 @@ export function RelatorioComercialLeads({
                         )}
                         <td className="whitespace-nowrap px-2 py-2 text-right">
                           {l.contactId && (
-                            <Link href={`/contatos/${l.contactId}`} className="mr-2 text-indigo-600 hover:underline">
+                            <button
+                              onClick={() => setContatoAberto(l.contactId)}
+                              className="mr-2 text-indigo-600 hover:underline"
+                            >
                               Contato
-                            </Link>
+                            </button>
                           )}
                           {l.conversationId && (
                             <Link href={`/conversas?c=${l.conversationId}`} className="text-indigo-600 hover:underline">
@@ -180,6 +195,67 @@ export function RelatorioComercialLeads({
               )}
             </div>
           </>
+        )}
+      </DialogContent>
+      <ContatoPopup contactId={contatoAberto} onClose={() => setContatoAberto(null)} />
+    </Dialog>
+  );
+}
+
+/**
+ * Contato em janela, sem sair do relatório: dados, compras na Guru, conversas
+ * (só leitura — não marca nada como lido) e atividade. "Abrir cadastro
+ * completo" é link de verdade, para quem quiser a página inteira.
+ */
+function ContatoPopup({ contactId, onClose }: { contactId: string | null; onClose: () => void }) {
+  const [contato, setContato] = useState<Contact | null>(null);
+  const [erro, setErro] = useState(false);
+  useEffect(() => {
+    if (!contactId) return;
+    let ativo = true;
+    setContato(null);
+    setErro(false);
+    fetchContactById(contactId)
+      .then((c) => {
+        if (!ativo) return;
+        if (c) setContato(c);
+        else setErro(true);
+      })
+      .catch(() => ativo && setErro(true));
+    return () => {
+      ativo = false;
+    };
+  }, [contactId]);
+  const nome = contato ? `${contato.firstName ?? ""} ${contato.lastName ?? ""}`.trim() || "Sem nome" : "";
+  return (
+    <Dialog open={!!contactId} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle className="text-sm">{contato ? nome : "Contato"}</DialogTitle>
+        </DialogHeader>
+        {erro && <p className="text-xs text-amber-700">Não foi possível carregar o contato.</p>}
+        {!contato && !erro && (
+          <div className="flex items-center gap-2 p-4 text-xs text-slate-500">
+            <Loader2 className="size-4 animate-spin" /> Carregando...
+          </div>
+        )}
+        {contato && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-2 rounded-xl border bg-white p-3 text-xs">
+              <p><span className="text-slate-400">Telefone:</span> {contato.phone || "—"}</p>
+              <p><span className="text-slate-400">E-mail:</span> {contato.email || "—"}</p>
+              <p><span className="text-slate-400">CPF/CNPJ:</span> {contato.doc || "—"}</p>
+              <p><span className="text-slate-400">Etiquetas:</span> {(contato.tags ?? []).join(", ") || "—"}</p>
+              <p className="col-span-2">
+                <Link href={`/contatos/${contato.id}`} target="_blank" className="text-indigo-600 hover:underline">
+                  Abrir cadastro completo
+                </Link>
+              </p>
+            </div>
+            <ContactPaymentsPanel contact={contato} />
+            <ContactConversations contactId={contato.id} contatoNome={nome} />
+            <ContactActivity contactId={contato.id} />
+          </div>
         )}
       </DialogContent>
     </Dialog>
