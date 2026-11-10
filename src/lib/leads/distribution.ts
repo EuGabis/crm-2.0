@@ -1848,6 +1848,13 @@ export async function devolverInativas(
     for (const conv of convs ?? []) {
       const anterior = conv.assigned_to as string;
       /*
+       * Regra do Gabriel (2026-11-10): lead FRIO não roda pela devolução — fica
+       * com quem recebeu, mesmo sem resposta em 20 min. Só o QUENTE entra.
+       * ⚠️ "Sem nota" (Secretaria não pontua) segue como antes: lá a devolução
+       * é a régua da fila de alunos.
+       */
+      if (temperaturas.get(conv.id) === "frio") continue;
+      /*
        * 🔴 **Sem rajada: no máximo 1 lead por vendedor por tique (1/min).**
        * Caso real de 05/11: o Jefferson recebeu ~93 leads de madrugada em
        * Pendentes (todos offline — regra que continua), voltou às 09:20 e às
