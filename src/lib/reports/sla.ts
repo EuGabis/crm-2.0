@@ -27,6 +27,13 @@ export interface SlaLinha {
   dentro_da_meta: boolean;
   fechada: boolean;
   respondida_por_bot: boolean;
+  /** Quem finalizou (finalizar solta o responsável). Ausente sem a migração 202611121500. */
+  closed_by?: string | null;
+}
+
+/** Com quem a conversa "está": o responsável, ou quem a finalizou. */
+export function donoDe(l: SlaLinha): string | null {
+  return l.assigned_to ?? (l.fechada ? (l.closed_by ?? null) : null);
 }
 
 export type Situacao = "na_meta" | "fora_da_meta" | "sem_resposta" | "esperando";
@@ -142,7 +149,7 @@ export function aplicarFiltros(linhas: SlaLinha[], f: SlaFiltros): SlaLinha[] {
     if (f.faixa && faixaDe(l) !== f.faixa) return false;
     if (f.dia && diaBr(l.primeira_entrada) !== f.dia) return false;
     if (f.responsaveis.length > 0) {
-      const chave = l.assigned_to ?? SEM_RESPONSAVEL;
+      const chave = donoDe(l) ?? SEM_RESPONSAVEL;
       if (!f.responsaveis.includes(chave)) return false;
     }
     if (f.hora !== null && horaBr(l.primeira_entrada) !== f.hora) return false;
@@ -280,11 +287,12 @@ export function agregar(
     { nome: string; conversas: number; naMeta: number; esperas: number[]; semResposta: number }
   >();
   for (const l of linhas) {
-    const chave = l.assigned_to ?? SEM_RESPONSAVEL;
+    const dono = donoDe(l);
+    const chave = dono ?? SEM_RESPONSAVEL;
     const cur =
       porAgente.get(chave) ??
       {
-        nome: l.assigned_to ? (nomeDe[l.assigned_to] ?? "Atendente") : "Sem responsável",
+        nome: dono ? (nomeDe[dono] ?? "Atendente") : "Sem responsável",
         conversas: 0,
         naMeta: 0,
         esperas: [] as number[],
@@ -319,7 +327,7 @@ export function agregar(
     .slice(0, 100)
     .map((l) => ({
       ...l,
-      responsavel: l.assigned_to ? (nomeDe[l.assigned_to] ?? "Atendente") : null,
+      responsavel: donoDe(l) ? (nomeDe[donoDe(l)!] ?? "Atendente") : null,
     }));
 
   return {

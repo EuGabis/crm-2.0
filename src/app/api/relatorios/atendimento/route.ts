@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { paginarRpc } from "@/lib/supabase/paginar-rpc";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { canAccess } from "@/lib/auth/module-access";
-import { diaBr, type SlaLinha } from "@/lib/reports/sla";
+import { diaBr, donoDe, type SlaLinha } from "@/lib/reports/sla";
 import { diasEntre, ehDiaValido, PERIODO_MAX_DIAS, somaDias } from "@/lib/periodo";
 
 export const dynamic = "force-dynamic";
@@ -157,6 +157,7 @@ export async function GET(req: Request) {
       dentro_da_meta: r.dentro_da_meta,
       fechada: r.fechada,
       respondida_por_bot: r.respondida_por_bot,
+      closed_by: r.closed_by ?? null,
     })
   );
 
@@ -166,7 +167,7 @@ export async function GET(req: Request) {
   const dias_do_periodo = [...new Set(rows.map((r) => diaBr(r.primeira_entrada)))].sort();
 
   // Só a equipe que aparece — o seletor de responsável não precisa da empresa toda.
-  const usados = new Set(rows.map((r) => r.assigned_to).filter(Boolean) as string[]);
+  const usados = new Set(rows.map((r) => donoDe(r)).filter(Boolean) as string[]);
   const nomes: Record<string, string> = {};
   for (const p of (profiles ?? []) as any[]) {
     if (usados.has(p.id)) nomes[p.id] = p.name;
