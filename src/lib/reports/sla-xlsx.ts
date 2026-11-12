@@ -1,5 +1,5 @@
 import type { SlaAgregado, SlaLinha } from "./sla";
-import { FAIXA_SEM_RESPOSTA, faixaDe, dur, DIAS_SEMANA, diaSemanaBr, horaBr } from "./sla";
+import { FAIXA_SEM_RESPOSTA, faixaDe, dur, DIAS_SEMANA, donoDe, diaSemanaBr, horaBr } from "./sla";
 import { pngCumprimentoPorDia, pngDistribuicao } from "./sla-graficos";
 
 /**
@@ -366,7 +366,7 @@ export async function montarWorkbook(d: DadosDoRelatorio) {
     ws6.addRow([
       l.contato,
       l.canal,
-      l.assigned_to ? (d.nomes[l.assigned_to] ?? "—") : "Sem responsável",
+      donoDe(l) ? (d.nomes[donoDe(l)!] ?? "—") : "Sem responsável",
       situacao,
       Math.round(l.espera_util_min * 10) / 10,
       Math.round(l.espera_corrida_min * 10) / 10,
