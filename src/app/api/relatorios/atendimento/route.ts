@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { paginarRpc } from "@/lib/supabase/paginar-rpc";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { canAccess } from "@/lib/auth/module-access";
 import { diaBr, type SlaLinha } from "@/lib/reports/sla";
 
@@ -84,8 +85,23 @@ export async function GET(req: Request) {
    * só por `primeira_entrada`: sem desempate, duas páginas da mesma consulta
    * podem repetir uma conversa e PULAR outra — e a pulada some do relatório.
    */
+  const args = {
+    p_location: membership.location_id,
+    p_from: de.toISOString(),
+    p_to: ate.toISOString(),
+    p_target_min: meta,
+  };
+  // Caminho rápido (202611121000): UMA chamada, jsonb, pela service role. Em 90
+  // dias são ~32 mil conversas e paginar repetia a função inteira por página
+  // (3 s cada) até o 57014. Sem a migração, cai no caminho paginado.
+  const rapido = await (createAdminClient() as any).rpc("sla_conversations_json", {
+    p_user: user.id,
+    ...args,
+  });
   const [{ data: linhas, truncado, error }, { data: profiles }] = await Promise.all([
-    paginarRpc(
+    !rapido.error && Array.isArray(rapido.data)
+      ? Promise.resolve({ data: rapido.data as any[], truncado: false, error: null as any })
+      : paginarRpc(
       supabase,
       "sla_conversations",
       {
