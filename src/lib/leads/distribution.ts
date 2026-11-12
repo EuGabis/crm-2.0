@@ -17,6 +17,8 @@ import { normalize } from "@/lib/bot/types";
 export { PRESENCE_MS } from "@/lib/presence";
 import { PRESENCE_MS } from "@/lib/presence";
 import { temperaturaDe } from "@/lib/leads/temperatura";
+import { cursoDasEtiquetas } from "@/lib/bot/curso";
+import { atendeCurso, chaveDoGrupo } from "@/lib/leads/curso-rodizio";
 
 /** Status da oportunidade deduzido do nome da etapa (igual ao pipeline.ts). */
 function statusForStageName(name: string): "open" | "won" | "lost" {
@@ -289,6 +291,138 @@ export async function recebidosNoDiaPorAtendente(
     if (u) cargas.set(u, (cargas.get(u) ?? 0) + 1);
   }
   return cargas;
+}
+
+/* ------------------------------------------------------------------ *
+ * Rodízio por CURSO (location_members.cursos_rodizio, 202611121400)
+ * ------------------------------------------------------------------ */
+
+/**
+ * Quem do pool tem restrição de curso, e quais cursos. Só entra no mapa quem
+ * TEM lista — mapa vazio = ninguém restrito = o rodízio de sempre, sem nenhuma
+ * consulta a mais por lead.
+ *
+ * ⚠️ Tolera a coluna não existir (código no ar antes da migração): devolve mapa
+ * vazio, que é exatamente a regra de antes.
+ */
+export async function cursosPermitidosDoPool(
+  db: any,
+  locationId: string,
+  pool: string[],
+): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  if (!pool.length) return out;
+  const { data, error } = await db
+    .from("location_members")
+    .select("user_id, cursos_rodizio")
+    .eq("location_id", locationId)
+    .in("user_id", pool);
+  if (error) return out;
+  for (const r of data ?? []) {
+    const lista = Array.isArray(r.cursos_rodizio)
+      ? (r.cursos_rodizio as string[]).filter((c) => c?.trim())
+      : [];
+    if (lista.length) out.set(r.user_id, lista);
+  }
+  return out;
+}
+
+/**
+ * O curso de cada contato, para o rodízio: o card mais recente COM curso (que
+ * não esteja ganho — venda fechada é de outro momento) e, sem card, a etiqueta
+ * "INTERESSADO …" que o bot põe na hora em que o lead escolhe o curso.
+ *
+ * ⚠️ A etiqueta é a rede para o caso comum: no fluxo de Vendas o card nasce no
+ * `sync_card`, e a etiqueta já está no contato desde a pergunta do curso.
+ */
+export async function cursosDosContatos(
+  db: any,
+  contactIds: string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const ids = [...new Set(contactIds.filter(Boolean))];
+  for (let i = 0; i < ids.length; i += 200) {
+    const fatia = ids.slice(i, i + 200);
+    const { data: opps } = await db
+      // consulta-ok: no máximo 200 contatos por fatia, poucos cards cada (≤3 medido).
+      .from("opportunities")
+      .select("contact_id, course, status, created_at")
+      .in("contact_id", fatia)
+      .not("course", "is", null)
+      .neq("status", "won")
+      .order("created_at", { ascending: false });
+    for (const o of opps ?? []) {
+      if (!out.has(o.contact_id) && o.course?.trim()) out.set(o.contact_id, o.course);
+    }
+    const semCard = fatia.filter((c) => !out.has(c));
+    if (!semCard.length) continue;
+    const { data: cs } = await db.from("contacts").select("id, tags").in("id", semCard);
+    for (const c of cs ?? []) {
+      const curso = cursoDasEtiquetas(c.tags);
+      if (curso) out.set(c.id, curso);
+    }
+  }
+  return out;
+}
+
+/** Leads do dia por GRUPO de curso e por atendente. MUTÁVEL, como `cargas`. */
+export type CargasPorCurso = Map<string, Map<string, number>>;
+
+/**
+ * Quantos leads de cada CURSO cada atendente recebeu hoje (mesmo recorte de
+ * `recebidosNoDiaPorAtendente`: atribuídos hoje, nos números do setor, sem
+ * plantão).
+ *
+ * 🔴 Existe por causa do vendedor restrito: ele recebe só Comissário, então o
+ * TOTAL do dia dele é uma fração do dos outros — e equilibrando pelo total ele
+ * levaria TODO lead de Comissário até "alcançá-los". A regra pedida é dividir
+ * os leads de Comissário entre os quatro; por isso, quando há vendedor restrito
+ * no rodízio de um lead, o equilíbrio é pelo curso.
+ */
+export async function recebidosNoDiaPorCurso(
+  db: any,
+  locationId: string,
+  channelIds: string[],
+  pool: string[],
+): Promise<CargasPorCurso> {
+  const out: CargasPorCurso = new Map();
+  if (!pool.length || !channelIds.length) return out;
+  const { data, error } = await todasAsLinhas(() =>
+    db
+      .from("conversations")
+      .select("id, assigned_to, contact_id")
+      .eq("location_id", locationId)
+      .in("channel_id", channelIds)
+      .in("assigned_to", pool)
+      .gte("atribuida_em", inicioDoDiaSP())
+      .is("plantao_id", null),
+  );
+  if (error || !data?.length) return out;
+  const cursos = await cursosDosContatos(
+    db,
+    data.map((c: any) => c.contact_id as string),
+  );
+  for (const c of data) {
+    const k = chaveDoGrupo(cursos.get(c.contact_id));
+    if (!k || !c.assigned_to) continue;
+    const m = mapaDoCurso(out, k, pool);
+    m.set(c.assigned_to, (m.get(c.assigned_to) ?? 0) + 1);
+  }
+  return out;
+}
+
+/** O mapa de um grupo, criado zerado (e guardado no cache) se ainda não existe. */
+export function mapaDoCurso(
+  cache: CargasPorCurso,
+  chave: string,
+  pool: string[],
+): Map<string, number> {
+  let m = cache.get(chave);
+  if (!m) {
+    m = new Map<string, number>(pool.map((u) => [u, 0]));
+    cache.set(chave, m);
+  }
+  return m;
 }
 
 /** Temperatura de cada lead: "quente" | "frio". Lead sem nota não entra. */
@@ -924,10 +1058,46 @@ export async function distributeOne(
      * como `cargas`). Sem ele, é lido do banco.
      */
     cargasTemp?: CargasPorTemperatura;
+    /**
+     * Curso do lead quando quem chama já sabe (o bot guarda em `vars._curso`
+     * antes de o card existir). Sem ele, é lido do card/etiqueta do contato —
+     * e só quando há alguém com restrição de curso no pool.
+     */
+    curso?: string | null;
+    /** Leads do dia por curso, compartilhado pelo laço da varredura (MUTÁVEL). */
+    cargasCurso?: CargasPorCurso;
   },
 ): Promise<string | null> {
-  const { pool, cursor } = await departmentPool(db, args.locationId, args.deptId);
+  const dp = await departmentPool(db, args.locationId, args.deptId);
+  const cursor = dp.cursor;
+  let pool = dp.pool;
   if (!pool.length) return null; // sem pool/departamento → segura (aguardando)
+  /*
+   * 🔴 **Rodízio por curso** (2026-11-12, vendedor novo começando por Comissário).
+   *
+   * O pool é recortado ANTES de tudo — presença, cota, plantão e cursor passam a
+   * ver só quem atende o curso deste lead. Quem não tem lista atende todos, então
+   * com ninguém configurado nada aqui muda (nem consulta a mais por lead além da
+   * leitura das listas).
+   *
+   * ⚠️ `segmentado` = há alguém COM restrição entre os que podem receber este
+   * lead. Só aí o equilíbrio passa a ser pelo curso (ver
+   * `recebidosNoDiaPorCurso`); num lead de curso que o restrito não atende, o
+   * rodízio dos outros segue exatamente o de antes.
+   */
+  const restricoes = await cursosPermitidosDoPool(db, args.locationId, pool);
+  let chaveCurso: string | null = null;
+  let segmentado = false;
+  if (restricoes.size) {
+    const curso =
+      args.curso?.trim() ||
+      (await cursosDosContatos(db, [args.contactId])).get(args.contactId) ||
+      null;
+    chaveCurso = chaveDoGrupo(curso);
+    pool = pool.filter((u) => atendeCurso(restricoes.get(u), curso));
+    segmentado = !!chaveCurso && pool.some((u) => restricoes.has(u));
+    if (!pool.length) return null;
+  }
   const online = await disponiveisOrdered(db, args.locationId, pool);
   // Departamento pode distribuir mesmo pra offline (0083): usa o pool inteiro
   // independente da presença. Senão, o padrão: online primeiro, offline só se
@@ -1126,7 +1296,8 @@ export async function distributeOne(
      * esqueceu, e o próximo que alguém escrever esqueceria de novo.
      */
     let channelIds = args.channelIds ?? [];
-    if (!args.cargas && !channelIds.length) {
+    const precisaCurso = segmentado && !args.cargasCurso;
+    if ((!args.cargas || precisaCurso) && !channelIds.length) {
       const { data: dcs } = await db
         .from("department_channels")
         .select("channel_id")
@@ -1146,14 +1317,37 @@ export async function distributeOne(
     if (tempLead && !cargasTemp) {
       cargasTemp = await recebidosNoDiaPorTemperatura(db, args.locationId, channelIds, pool);
     }
-    const mapaTemp = tempLead ? cargasTemp?.get(tempLead) : undefined;
-    user = escolherPorCarga(list, cargas, baseCota, args.filaRestante ?? 1, cursor, baseCota, mapaTemp);
+    /*
+     * ⚠️ Com vendedor restrito no rodízio, a temperatura SAI do desempate: a
+     * contagem dela é do dia inteiro (todos os cursos), então o restrito — que
+     * recebe só um curso — teria sempre menos quentes e levaria todo lead
+     * daquele curso até "alcançar" os outros. O equilíbrio ali é o do curso.
+     */
+    const mapaTemp = tempLead && !segmentado ? cargasTemp?.get(tempLead) : undefined;
+    // Vendedor restrito neste rodízio: equilibra pelos leads do MESMO curso.
+    let mapaCurso: Map<string, number> | undefined;
+    if (segmentado && chaveCurso) {
+      const cache =
+        args.cargasCurso ??
+        (await recebidosNoDiaPorCurso(db, args.locationId, channelIds, dp.pool));
+      mapaCurso = mapaDoCurso(cache, chaveCurso, dp.pool);
+    }
+    user = escolherPorCarga(
+      list,
+      mapaCurso ?? cargas,
+      baseCota,
+      args.filaRestante ?? 1,
+      cursor,
+      baseCota,
+      mapaTemp,
+    );
     if (!user) return null;
     // O mapa acompanha a atribuição: o próximo lead do MESMO tique já vê a carga
     // nova e vai para outra pessoa. Sem isso, dez leads seguidos iriam todos
     // para quem estava mais leve na primeira leitura.
     cargas.set(user, (cargas.get(user) ?? 0) + 1);
     if (mapaTemp) mapaTemp.set(user, (mapaTemp.get(user) ?? 0) + 1);
+    if (mapaCurso) mapaCurso.set(user, (mapaCurso.get(user) ?? 0) + 1);
   } else {
     // Comportamento de sempre nos demais setores: a vez do cursor.
     user = list[cursor % list.length];
@@ -1380,9 +1574,29 @@ export async function distributeDepartment(
   const cargasTemp = porCota && tempsDosLeads.size
     ? await recebidosNoDiaPorTemperatura(db, locationId, channelIds ?? [], pool)
     : null;
+  /*
+   * Rodízio por CURSO: mesma regra de `distributeOne`, aplicada lead a lead —
+   * neste botão a lista é uma só para o clique inteiro, então o recorte por
+   * curso tem de ser feito dentro do laço.
+   */
+  const restricoes = await cursosPermitidosDoPool(db, locationId, pool);
+  const cursosConv = restricoes.size
+    ? await cursosDosContatos(db, convs.slice(0, take).map((c) => c.contact_id))
+    : new Map<string, string>();
+  const cargasCurso = restricoes.size
+    ? await recebidosNoDiaPorCurso(db, locationId, channelIds ?? [], pool)
+    : null;
   let feitas = 0;
   for (let i = 0; i < take; i++) {
     const conv = convs[i];
+    const cursoC = cursosConv.get(conv.contact_id) ?? null;
+    const atende = (u: string) => !restricoes.size || atendeCurso(restricoes.get(u), cursoC);
+    const listaC = list.filter(atende);
+    const baseC = baseCota.filter(atende);
+    // Ninguém que atenda este curso disponível: o lead fica na fila.
+    if (!listaC.length) continue;
+    const chaveC = restricoes.size ? chaveDoGrupo(cursoC) : null;
+    const segC = !!chaveC && listaC.some((u) => restricoes.has(u));
     let user: string | null;
     if (porCota && cargas) {
       /*
@@ -1393,15 +1607,28 @@ export async function distributeDepartment(
        */
       // Mesmo denominador do outro caminho: o TIME. Ver `poolParaCota`.
       const t = tempsDosLeads.get(conv.id);
-      const mapaTemp = t ? cargasTemp?.get(t) : undefined;
-      user = escolherPorCarga(list, cargas, baseCota, convs.length - feitas, cursor + feitas, baseCota, mapaTemp);
+      // Com vendedor restrito neste lead, equilibra pelo curso e sem temperatura
+      // (ver `distributeOne`).
+      const mapaTemp = t && !segC ? cargasTemp?.get(t) : undefined;
+      const mapaCurso =
+        segC && chaveC && cargasCurso ? mapaDoCurso(cargasCurso, chaveC, pool) : undefined;
+      user = escolherPorCarga(
+        listaC,
+        mapaCurso ?? cargas,
+        baseC,
+        convs.length - feitas,
+        cursor + feitas,
+        baseC,
+        mapaTemp,
+      );
       // Ninguém abaixo da cota: o RESTO FICA NA FILA, visível a todos, em vez de
       // ser empurrado para quem já está cheio. "Todos" pode não levar todos.
       if (!user) break;
       cargas.set(user, (cargas.get(user) ?? 0) + 1);
       if (mapaTemp) mapaTemp.set(user, (mapaTemp.get(user) ?? 0) + 1);
+      if (mapaCurso) mapaCurso.set(user, (mapaCurso.get(user) ?? 0) + 1);
     } else {
-      user = list[(cursor + feitas) % list.length];
+      user = listaC[(cursor + feitas) % listaC.length];
     }
     await assignLeadTo(
       db,
@@ -2264,8 +2491,15 @@ export async function distribuirFilaDoSetor(
     // Mesma ideia para a temperatura: lida uma vez, compartilhada e mutada.
     const cargasTemp = await recebidosNoDiaPorTemperatura(db, locationId, channelIds, poolDoSetor);
     const filaTotal = prontas.length + retidas;
+    // Rodízio por curso: carga por curso lida uma vez (só se houver alguém
+    // restrito) e compartilhada pelo laço, como as outras.
+    const temRestricao = (await cursosPermitidosDoPool(db, locationId, poolDoSetor)).size > 0;
+    const cargasCurso = temRestricao
+      ? await recebidosNoDiaPorCurso(db, locationId, channelIds, poolDoSetor)
+      : undefined;
     for (const conv of aEntregar) {
       const user = await distributeOne(db, {
+        cargasCurso,
         locationId,
         deptId: dep.id,
         conversationId: conv.id,
@@ -2284,6 +2518,14 @@ export async function distribuirFilaDoSetor(
       });
       if (user) {
         feitasAqui++;
+      } else if (temRestricao) {
+        /*
+         * ⚠️ Com rodízio por curso, "ninguém para ESTE lead" não quer dizer
+         * "ninguém no setor": o lead de Mecânico pode não ter quem receba e o de
+         * Comissário seguinte, sim (o vendedor restrito online). Pular em vez de
+         * parar a fila inteira.
+         */
+        naFila++;
       } else {
         /*
          * `distributeOne` devolveu null = ninguém online no setor. Não há por que

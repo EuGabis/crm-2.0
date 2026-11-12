@@ -9869,3 +9869,28 @@ agora, sem resposta agora (última mensagem é do cliente), pendentes.
   linha. Sem a migração aplicada, a aba diz isso (PGRST202).
 - Medido em 10/11 (consulta pura, como postgres): roda; carteira de 5–6 mil
   conversas abertas por vendedor de Vendas — conversas antigas nunca finalizadas.
+
+## Rodízio por CURSO, por vendedor (202611121400)
+
+Pedido (2026-11-12): o vendedor novo de Vendas (Guilherme) começa recebendo só
+leads de Comissário; depois Comissário + Mecânico; depois + Piloto; por fim
+todos — sem mudar a regra dos outros. Os leads de Comissário são DIVIDIDOS entre
+ele e os demais.
+
+- `location_members.cursos_rodizio text[]`: NULL/vazio = todos os cursos (todo
+  mundo). Configura em Configurações → Departamentos → editar o setor → "Cursos:
+  alterar" ao lado do nome. **Limpar a lista = voltar à regra normal.**
+- `src/lib/leads/curso-rodizio.ts`: o curso do lead vira um GRUPO
+  ("Comissário de Bordo Teórico" → "Comissário"), casando pelo COMEÇO do nome —
+  "Combate ao Fogo Comissário" é curso avulso e não entra.
+- O curso do lead: `vars._curso` do bot → card mais recente com curso (não ganho)
+  → etiqueta "INTERESSADO …". Lead sem curso NÃO vai para quem é restrito.
+- O pool é recortado ANTES de presença/cota/plantão, nos três caminhos (bot e
+  varredura por `distributeOne`, botão do Relatório por `distributeDepartment`).
+- ⚠️ Com restrito no rodízio de um lead, o equilíbrio é pelos leads do MESMO
+  curso no dia (`recebidosNoDiaPorCurso`) e a temperatura sai do desempate:
+  pelo total, o restrito (que só recebe um curso) levaria todo lead daquele curso
+  até "alcançar" os outros. Num lead de curso que ele não atende, nada muda.
+- Na varredura, "ninguém para este lead" passa a PULAR o lead em vez de parar a
+  fila (o de Mecânico pode não ter quem receba e o de Comissário seguinte, sim).
+- `npm run test:rodizio` (18 asserções novas).

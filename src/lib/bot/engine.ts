@@ -608,6 +608,8 @@ async function distributeLead(
    * fluxo está offline: sem isso o cursor poderia escolher justamente ele.
    */
   excluir?: string[],
+  /** Curso escolhido no bot (`vars._curso`) — rodízio por curso. */
+  curso?: string | null,
 ) {
   const deptId = await channelDepartmentId(ctx.db, ctx.channel.id);
   if (deptId) {
@@ -629,6 +631,7 @@ async function distributeLead(
       contactId: ctx.contact.id,
       pipelineName: node.pipeline,
       excluir,
+      curso,
       reason: excluir?.length ? "rodízio (atendente do fluxo offline)" : "rodízio do bot",
     });
     if (user) return; // assignLeadTo já registrou o log da transferência
@@ -752,7 +755,7 @@ async function advance(
       return;
     } else if (node.type === "distribute") {
       if (node.text) await botSend(ctx, render(node.text, vars));
-      await distributeLead(ctx, node);
+      await distributeLead(ctx, node, undefined, vars._curso);
       await saveSession(ctx, nodeId, "concluido", vars);
       return;
     } else if (node.type === "handoff") {
@@ -802,13 +805,13 @@ async function advance(
           );
           // `excluir` para o rodízio não devolver a conversa para quem está fora:
           // sem isso, o cursor poderia escolher justamente a pessoa offline.
-          await distributeLead(ctx, {}, [node.assignTo]);
+          await distributeLead(ctx, {}, [node.assignTo], vars._curso);
         }
       } else {
         // "humano" = passar pro atendimento: distribui por rodízio (escolhe UM
         // atendente e registra pra quem foi), igual ao nó "distribuir". Assim o
         // lead nunca fica sem dono e o log nomeia quem recebeu.
-        await distributeLead(ctx, {});
+        await distributeLead(ctx, {}, undefined, vars._curso);
       }
       await saveSession(ctx, nodeId, "concluido", vars);
       return;
