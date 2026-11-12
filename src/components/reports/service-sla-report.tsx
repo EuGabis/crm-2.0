@@ -747,7 +747,7 @@ export function ServiceSlaReport() {
             </div>
           </div>
 
-          <div className="grid gap-3 rounded-xl border bg-white p-4 text-xs sm:grid-cols-3 lg:grid-cols-6">
+          <div className="grid gap-3 rounded-xl border bg-white p-4 text-xs sm:grid-cols-3 lg:grid-cols-7">
             <Detalhe
               rotulo="Conversas recebidas"
               valor={k.recebidas.toLocaleString("pt-BR")}
@@ -759,6 +759,14 @@ export function ServiceSlaReport() {
             <Detalhe
               rotulo="Finalizadas"
               valor={k.finalizadas.toLocaleString("pt-BR")}
+              ativo={filtros.estado === "fechada"}
+              onClick={() => alternar("estado", "fechada")}
+            />
+            <Detalhe
+              rotulo="Abertas"
+              valor={(k.recebidas - k.finalizadas).toLocaleString("pt-BR")}
+              ativo={filtros.estado === "aberta"}
+              onClick={() => alternar("estado", "aberta")}
             />
             <Detalhe
               rotulo="9 de cada 10 respondidas em até"
@@ -1125,12 +1133,34 @@ function KpiBotao({
   );
 }
 
-function Detalhe({ rotulo, valor }: { rotulo: string; valor: string }) {
-  return (
-    <div>
+function Detalhe({
+  rotulo,
+  valor,
+  onClick,
+  ativo,
+}: {
+  rotulo: string;
+  valor: string;
+  onClick?: () => void;
+  ativo?: boolean;
+}) {
+  const corpo = (
+    <>
       <p className="text-[11px] text-slate-400">{rotulo}</p>
       <p className="mt-0.5 text-sm font-semibold text-slate-800">{valor}</p>
-    </div>
+    </>
+  );
+  if (!onClick) return <div>{corpo}</div>;
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "rounded-lg p-1 text-left hover:bg-slate-50",
+        ativo && "bg-indigo-50 ring-1 ring-indigo-200"
+      )}
+    >
+      {corpo}
+    </button>
   );
 }
 
