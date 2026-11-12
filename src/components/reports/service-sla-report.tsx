@@ -41,7 +41,6 @@ import {
   type SlaFiltros,
   type SlaLinha,
   DIAS_SEMANA,
-  donoDe,
   type Fatia,
 } from "@/lib/reports/sla";
 import { baixarRelatorioXlsx } from "@/lib/reports/sla-xlsx";
@@ -168,9 +167,13 @@ export function ServiceSlaReport() {
   const responsaveisDoPeriodo = useMemo(() => {
     const mapa = new Map<string, string>();
     for (const l of linhas) {
-      const dono = donoDe(l);
-      const chave = dono ?? SEM_RESPONSAVEL;
-      mapa.set(chave, dono ? (dados?.nomes[dono] ?? "Atendente") : "Sem responsável");
+      const chave = l.assigned_to ?? SEM_RESPONSAVEL;
+      mapa.set(
+        chave,
+        l.assigned_to
+          ? (dados?.nomes[l.assigned_to] ?? "Atendente")
+          : "Sem responsável",
+      );
     }
     return [...mapa.entries()].sort((a, b) => a[1].localeCompare(b[1]));
   }, [linhas, dados]);
