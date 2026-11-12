@@ -62,6 +62,11 @@ export interface TeamMember {
   /** Só as exceções ao departamento. Vazio = segue o departamento à risca. */
   permissions: ModulePermissions;
   departmentId: string | null;
+  /**
+   * Rodízio por curso (202611121400): vazio = recebe leads de TODOS os cursos
+   * (a regra normal). Preenchido = só entra no rodízio desses cursos.
+   */
+  cursosRodizio: string[];
   /** Última presença (heartbeat). Online = ≤ 5 min. null = nunca visto. */
   lastSeenAt: string | null;
   createdAt: string;
@@ -189,6 +194,7 @@ export const useTeamStore = create<TeamState>((set, get) => ({
         onlyAssigned: m.only_assigned,
         permissions: m.permissions ?? {},
         departmentId: m.department_id ?? null,
+        cursosRodizio: Array.isArray(m.cursos_rodizio) ? m.cursos_rodizio : [],
         lastSeenAt: m.last_seen_at ?? null,
         createdAt: m.created_at,
       };
@@ -642,6 +648,40 @@ export const teamActions = {
     } catch {
       return { ok: false, error: "Falha de conexão ao enviar o link" };
     }
+  },
+
+  /**
+   * Cursos que este vendedor atende no rodízio. Lista vazia = todos (a regra
+   * normal) — é assim que se volta atrás quando o período de entrada acabar.
+   *
+   * ⚠️ Confere as LINHAS devolvidas: UPDATE recusado pela RLS (só admin edita
+   * `location_members`) volta sem erro, e a tela diria "salvo" sem ter salvo.
+   */
+  async setCursosRodizio(userId: string, cursos: string[]): Promise<{ ok: boolean; error?: string }> {
+    const loc = locationId();
+    if (!loc) return { ok: false, error: "Empresa não encontrada" };
+    const lista = [...new Set(cursos.map((c) => c.trim()).filter(Boolean))];
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("location_members")
+      .update({ cursos_rodizio: lista.length ? lista : null })
+      .eq("location_id", loc)
+      .eq("user_id", userId)
+      .select("user_id");
+    if (error) {
+      return {
+        ok: false,
+        error: /cursos_rodizio/.test(error.message)
+          ? "Falta aplicar a migração 202611121400 no banco"
+          : `Não foi possível salvar: ${error.message}`,
+      };
+    }
+    if (!data?.length) return { ok: false, error: "Sem permissão para alterar este usuário" };
+    const s = useTeamStore.getState();
+    s.patch({
+      members: s.members.map((m) => (m.userId === userId ? { ...m, cursosRodizio: lista } : m)),
+    });
+    return { ok: true };
   },
 
   async removeMember(userId: string): Promise<{ ok: boolean; error?: string }> {

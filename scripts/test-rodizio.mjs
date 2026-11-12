@@ -34,6 +34,7 @@ import {
   elegiveisOrdered,
   PRESENCE_MS,
 } from "../src/lib/leads/distribution.ts";
+import { grupoDoCurso, atendeCurso } from "../src/lib/leads/curso-rodizio.ts";
 
 let ok = 0;
 let falhas = 0;
@@ -1612,6 +1613,112 @@ console.log("escolherPorCarga() - equilibrio por temperatura");
     escolherPorCarga(POOL3, tot(8, 2, 5), POOL3, 1, 0, POOL3), "alberto");
   eq("ausente fora da lista nunca recebe, mesmo sendo o mais atras em quentes",
     escolherPorCarga(["alberto", "rogerio"], tot(5, 5, 5), POOL3, 3, 0, POOL3, tot(0, 3, 3)) !== "paulo", true);
+}
+
+/* ==================================================================
+ * Rodízio por CURSO (2026-11-12): vendedor novo começando por Comissário
+ * ==================================================================
+ *
+ * Pedido: "os leads de Comissário vão ser divididos entre os vendedores que já
+ * existem e o Guilherme" — e os outros cursos seguem só com os de sempre.
+ */
+console.log("\nRodizio por curso\n");
+{
+  eq("grupo: nome do bot", grupoDoCurso("Comissário"), "Comissário");
+  eq("grupo: formação completa vira o grupo", grupoDoCurso("Comissário de Bordo Teórico + Selva"), "Comissário");
+  eq("grupo: mecânico de aeronaves", grupoDoCurso("Mecânico de Aeronaves Básico + Célula"), "Mecânico");
+  eq("grupo: curso AVULSO que só menciona comissário NÃO é a formação",
+    grupoDoCurso("Combate ao Fogo Comissário"), "Combate ao Fogo Comissário");
+  eq("grupo: pós-graduação", grupoDoCurso("Pós-Graduação Especialista Engenheira Aeronáutico"), "Pós de Engenheiros");
+  eq("grupo: vazio -> null", grupoDoCurso("  "), null);
+  eq("atende: sem lista = todos", atendeCurso(null, "Mecânico"), true);
+  eq("atende: lista vazia = todos (voltar à regra normal)", atendeCurso([], null), true);
+  eq("atende: restrito a Comissário recebe Comissário de Bordo", atendeCurso(["Comissário"], "Comissário de Bordo Teórico"), true);
+  eq("atende: restrito a Comissário NÃO recebe Mecânico", atendeCurso(["Comissário"], "Mecânico"), false);
+  eq("atende: restrito NÃO recebe lead sem curso", atendeCurso(["Comissário"], null), false);
+  eq("atende: lista ampliada", atendeCurso(["Comissário", "Mecânico"], "mecanico"), true);
+}
+
+/** Time de vendas com o Guilherme restrito. Cursos por contato via card. */
+function vendasComGuilherme(status, cursosGui, cursosPorContato) {
+  const st = vendasRegraNova(status);
+  st.location_members.find((m) => m.user_id === "guilherme").cursos_rodizio = cursosGui;
+  st.opportunities = Object.entries(cursosPorContato).map(([contact_id, course], i) => ({
+    id: `o${i}`,
+    contact_id,
+    course,
+    status: "open",
+    created_at: "2026-11-12",
+  }));
+  return st;
+}
+const TIME4 = { paulo: "online", alberto: "online", rogerio: "online", guilherme: "online" };
+
+{
+  // 8 de Comissário + 6 de Mecânico, os quatro online.
+  const fila = filaDe(14);
+  const cursos = {};
+  fila.forEach((c, i) => (cursos[c.contact_id] = i < 8 ? "Comissário" : "Mecânico"));
+  const st = vendasComGuilherme(TIME4, ["Comissário"], cursos);
+  const db = fakeDb(st);
+  const r = await distributeDepartment(db, "loc1", "dep1", fila, 1, null, ["ch1"]);
+  const doGui = db.atribuicoes().filter((e) => e.patch.assigned_to === "guilherme");
+  eq("[curso] os 14 saem", r.atribuidas, 14);
+  eq("[curso] Guilherme leva 1/4 dos de Comissário (2 de 8)", doGui.length, 2);
+  eq(
+    "[curso] Guilherme NÃO recebe nenhum de Mecânico",
+    doGui.every((e) => cursos[`c${e.filtros.id.slice(1)}`] === "Comissário"),
+    true,
+  );
+  const por = contarPorPessoa(db);
+  eq("[curso] os outros três dividem o resto por igual (4/4/4)", [por.paulo, por.alberto, por.rogerio], [4, 4, 4]);
+}
+
+{
+  // Sem ninguém restrito: exatamente a regra de antes (os quatro dividem tudo).
+  const fila = filaDe(12);
+  const cursos = Object.fromEntries(fila.map((c) => [c.contact_id, "Mecânico"]));
+  const st = vendasComGuilherme(TIME4, null, cursos);
+  const db = fakeDb(st);
+  await distributeDepartment(db, "loc1", "dep1", fila, 1, null, ["ch1"]);
+  eq("[curso] lista limpa = regra normal: 3 para cada", Object.values(contarPorPessoa(db)), [3, 3, 3, 3]);
+}
+
+{
+  // Caminho do BOT (distributeOne) com o curso vindo de vars._curso.
+  const st = vendasComGuilherme(
+    { paulo: "offline", alberto: "offline", rogerio: "offline", guilherme: "online" },
+    ["Comissário"],
+    {},
+  );
+  const db = fakeDb(st);
+  const mec = await distributeOne(db, {
+    locationId: "loc1", deptId: "dep1", conversationId: "b1", contactId: "cb1", curso: "Mecânico",
+  });
+  eq("[curso/bot] Mecânico com só o Guilherme online -> vai para um dos três (Pendentes)",
+    ["paulo", "alberto", "rogerio"].includes(mec), true);
+  eq("[curso/bot] e vai como offline (Pendentes)", db.atribuicoes()[0].patch.assigned_offline, true);
+  const com = await distributeOne(db, {
+    locationId: "loc1", deptId: "dep1", conversationId: "b2", contactId: "cb2", curso: "Comissário",
+  });
+  eq("[curso/bot] Comissário com só o Guilherme online -> Guilherme", com, "guilherme");
+  const sem = await distributeOne(db, {
+    locationId: "loc1", deptId: "dep1", conversationId: "b3", contactId: "cb3",
+  });
+  eq("[curso/bot] lead SEM curso não vai para o Guilherme", sem !== "guilherme" && sem !== null, true);
+}
+
+{
+  // Sem card: o curso sai da etiqueta que o bot põe na hora da pergunta.
+  const st = vendasComGuilherme(
+    { paulo: "offline", alberto: "offline", rogerio: "offline", guilherme: "online" },
+    ["Comissário"],
+    {},
+  );
+  st.contacts = [{ id: "ct1", tags: ["INTERESSADO COMISSÁRIO"] }];
+  const db = fakeDb(st);
+  const u = await distributeOne(db, { locationId: "loc1", deptId: "dep1", conversationId: "t1", contactId: "ct1" });
+  eq("[curso] etiqueta INTERESSADO COMISSÁRIO basta (card ainda não existe)", u, "guilherme");
 }
 
 console.log(`\n${ok} assercoes ok, ${falhas} falha(s)\n`);

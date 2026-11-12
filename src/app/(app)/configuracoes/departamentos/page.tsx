@@ -57,6 +57,7 @@ import {
 import { useWhatsappChannels } from "@/lib/data/repos/db/whatsapp";
 import { PlantaoCard } from "@/components/team/plantao-card";
 import { cn } from "@/lib/utils";
+import { GRUPOS_DE_CURSO } from "@/lib/leads/curso-rodizio";
 
 import { useConfirm } from "@/components/shared/confirm";
 const ROLE_LABEL: Record<MemberRole, string> = {
@@ -638,6 +639,89 @@ function ModuleGrid({
 
 /* --------------------------- Criar/editar departamento --------------------------- */
 
+/**
+ * Rodízio por CURSO de um vendedor (202611121400). Nenhum curso marcado = recebe
+ * todos — a regra normal; marcar cursos restringe o rodízio dele a esses leads.
+ *
+ * ⚠️ Grava NA HORA, sem o "Salvar" do departamento: é atributo da PESSOA, não do
+ * setor, e um clique que só valesse depois de outro botão é o tipo de coisa que
+ * fica pela metade sem ninguém perceber.
+ */
+function CursosDoVendedor({ membro, podeEditar }: { membro: TeamMember; podeEditar: boolean }) {
+  const [aberto, setAberto] = useState(false);
+  const [salvando, setSalvando] = useState(false);
+  const atuais = membro.cursosRodizio;
+  const restrito = atuais.length > 0;
+  const marcado = (g: string) =>
+    atuais.some((c) => c.trim().toLowerCase() === g.toLowerCase());
+
+  const gravar = async (lista: string[]) => {
+    setSalvando(true);
+    const r = await teamActions.setCursosRodizio(membro.userId, lista);
+    setSalvando(false);
+    if (!r.ok) toast.error(r.error ?? "Não foi possível salvar");
+  };
+  const alternar = (g: string) =>
+    gravar(marcado(g) ? atuais.filter((c) => c.trim().toLowerCase() !== g.toLowerCase()) : [...atuais, g]);
+
+  return (
+    <div className="ml-6 text-[10px] text-slate-500">
+      <span>
+        Cursos:{" "}
+        <span className={cn("font-medium", restrito ? "text-amber-700" : "text-slate-600")}>
+          {restrito ? `só ${atuais.join(", ")}` : "todos"}
+        </span>
+      </span>
+      {podeEditar && (
+        <button
+          type="button"
+          className="ml-1.5 text-indigo-600 hover:underline"
+          onClick={() => setAberto((a) => !a)}
+        >
+          {aberto ? "fechar" : "alterar"}
+        </button>
+      )}
+      {salvando && <Loader2 className="ml-1 inline size-3 animate-spin" />}
+      {aberto && podeEditar && (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {GRUPOS_DE_CURSO.map((g) => (
+            <button
+              key={g}
+              type="button"
+              disabled={salvando}
+              onClick={() => alternar(g)}
+              className={cn(
+                "rounded-full border px-2 py-0.5",
+                marcado(g)
+                  ? "border-indigo-300 bg-indigo-50 font-medium text-indigo-700"
+                  : "border-slate-200 text-slate-500 hover:bg-slate-50"
+              )}
+            >
+              {g}
+            </button>
+          ))}
+          {restrito && (
+            <button
+              type="button"
+              disabled={salvando}
+              onClick={() => gravar([])}
+              className="rounded-full border border-slate-200 px-2 py-0.5 text-slate-500 hover:bg-slate-50"
+            >
+              Todos os cursos (regra normal)
+            </button>
+          )}
+          <p className="w-full leading-tight text-slate-400">
+            Nenhum marcado = recebe todos. Marcados = só entra no rodízio dos leads
+            desses cursos; os leads de Comissário, por exemplo, passam a ser
+            divididos igualmente entre ele e os demais. Lead sem curso não vai para
+            ele.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DepartmentDialog({
   department,
   open,
@@ -981,21 +1065,25 @@ function DepartmentDialog({
             ) : (
               <div className="mt-1 space-y-1.5 rounded-lg border p-3">
                 {deptMembers.map((m) => (
-                  <Label
-                    key={m.userId}
-                    className="flex items-center gap-2 text-[11px] font-normal text-slate-600"
-                  >
-                    <Checkbox
-                      checked={poolChecked(m.userId)}
-                      onCheckedChange={() => togglePool(m.userId)}
-                    />
-                    <span className="font-medium text-slate-700">{m.name}</span>
-                    {m.role === "admin" && (
-                      <span className="rounded bg-slate-100 px-1 text-[9px] font-semibold text-slate-500">
-                        admin
-                      </span>
+                  <div key={m.userId} className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Label className="flex flex-1 items-center gap-2 text-[11px] font-normal text-slate-600">
+                        <Checkbox
+                          checked={poolChecked(m.userId)}
+                          onCheckedChange={() => togglePool(m.userId)}
+                        />
+                        <span className="font-medium text-slate-700">{m.name}</span>
+                        {m.role === "admin" && (
+                          <span className="rounded bg-slate-100 px-1 text-[9px] font-semibold text-slate-500">
+                            admin
+                          </span>
+                        )}
+                      </Label>
+                    </div>
+                    {poolChecked(m.userId) && (
+                      <CursosDoVendedor membro={m} podeEditar={isAdmin} />
                     )}
-                  </Label>
+                  </div>
                 ))}
               </div>
             )}
