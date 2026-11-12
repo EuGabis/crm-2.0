@@ -34,8 +34,12 @@ export type Situacao = "na_meta" | "fora_da_meta" | "sem_resposta" | "esperando"
 export interface SlaFiltros {
   faixa: string | null;
   dia: string | null;
-  /** userId, ou `SEM_RESPONSAVEL` para as que ninguém assumiu. */
-  responsavel: string | null;
+  /** userIds (ou `SEM_RESPONSAVEL`); vazio = todos. Vários = qualquer um deles. */
+  responsaveis: string[];
+  /** Hora (0–23, São Paulo) em que o cliente escreveu. */
+  hora: number | null;
+  /** Dia da semana (0 = domingo) em que o cliente escreveu. */
+  diaSemana: number | null;
   canal: string | null;
   situacao: Situacao | null;
   estado: "aberta" | "fechada" | null;
@@ -48,7 +52,9 @@ export const SEM_RESPONSAVEL = "__sem__";
 export const FILTROS_VAZIOS: SlaFiltros = {
   faixa: null,
   dia: null,
-  responsavel: null,
+  responsaveis: [],
+  hora: null,
+  diaSemana: null,
   canal: null,
   situacao: null,
   estado: null,
@@ -59,7 +65,9 @@ export function temFiltro(f: SlaFiltros): boolean {
   return (
     f.faixa !== null ||
     f.dia !== null ||
-    f.responsavel !== null ||
+    f.responsaveis.length > 0 ||
+    f.hora !== null ||
+    f.diaSemana !== null ||
     f.canal !== null ||
     f.situacao !== null ||
     f.estado !== null ||
@@ -92,6 +100,25 @@ export function diaBr(iso: string): string {
   return new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
 }
 
+const FMT_HORA = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Sao_Paulo",
+  hour: "numeric",
+  hourCycle: "h23",
+});
+const FMT_SEMANA = new Intl.DateTimeFormat("en-US", { timeZone: "America/Sao_Paulo", weekday: "short" });
+const SEMANA_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+export const DIAS_SEMANA = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+
+/** Hora (0–23) no fuso de São Paulo — o servidor e o navegador podem estar em outro. */
+export function horaBr(iso: string): number {
+  return Number(FMT_HORA.format(new Date(iso))) % 24;
+}
+
+/** Dia da semana (0 = domingo) no fuso de São Paulo. */
+export function diaSemanaBr(iso: string): number {
+  return SEMANA_EN.indexOf(FMT_SEMANA.format(new Date(iso)));
+}
+
 export function rotuloDia(dia: string): string {
   return `${dia.slice(8, 10)}/${dia.slice(5, 7)}`;
 }
@@ -114,10 +141,12 @@ export function aplicarFiltros(linhas: SlaLinha[], f: SlaFiltros): SlaLinha[] {
   return linhas.filter((l) => {
     if (f.faixa && faixaDe(l) !== f.faixa) return false;
     if (f.dia && diaBr(l.primeira_entrada) !== f.dia) return false;
-    if (f.responsavel) {
+    if (f.responsaveis.length > 0) {
       const chave = l.assigned_to ?? SEM_RESPONSAVEL;
-      if (chave !== f.responsavel) return false;
+      if (!f.responsaveis.includes(chave)) return false;
     }
+    if (f.hora !== null && horaBr(l.primeira_entrada) !== f.hora) return false;
+    if (f.diaSemana !== null && diaSemanaBr(l.primeira_entrada) !== f.diaSemana) return false;
     if (f.canal && l.canal !== f.canal) return false;
     if (f.estado === "aberta" && l.fechada) return false;
     if (f.estado === "fechada" && !l.fechada) return false;
@@ -133,6 +162,36 @@ export function aplicarFiltros(linhas: SlaLinha[], f: SlaFiltros): SlaLinha[] {
   });
 }
 
+/** Um recorte (hora, dia da semana) com o mesmo conjunto de números. */
+export interface Fatia {
+  chave: number;
+  rotulo: string;
+  recebidas: number;
+  respondidas: number;
+  sem_resposta: number;
+  pct_na_meta: number;
+  mediana_min: number | null;
+  p90_min: number | null;
+}
+
+function fatias(linhas: SlaLinha[], n: number, chaveDe: (l: SlaLinha) => number, rotulo: (i: number) => string): Fatia[] {
+  const grupos: SlaLinha[][] = Array.from({ length: n }, () => []);
+  for (const l of linhas) grupos[chaveDe(l)]?.push(l);
+  return grupos.map((g, i) => {
+    const esperas = g.filter((l) => l.respondida).map((l) => l.espera_util_min);
+    return {
+      chave: i,
+      rotulo: rotulo(i),
+      recebidas: g.length,
+      respondidas: esperas.length,
+      sem_resposta: g.length - esperas.length,
+      pct_na_meta: pct(g.filter((l) => l.dentro_da_meta).length, g.length),
+      mediana_min: percentil(esperas, 0.5),
+      p90_min: percentil(esperas, 0.9),
+    };
+  });
+}
+
 export interface SlaAgregado {
   kpis: {
     recebidas: number;
@@ -145,6 +204,11 @@ export interface SlaAgregado {
     p90_min: number | null;
     maior_espera_aberta: number | null;
     so_o_bot: number;
+    /** Média, só para contexto: puxada pelos extremos, por isso a mediana é o principal. */
+    media_min: number | null;
+    /** Tempo corrido (relógio de parede) da mediana — mostra o efeito do expediente. */
+    mediana_corrida_min: number | null;
+    finalizadas: number;
   };
   distribuicao: { faixa: string; conversas: number; violacao: boolean }[];
   serie: { dia: string; rotulo: string; recebidas: number; pct_na_meta: number }[];
@@ -157,6 +221,10 @@ export interface SlaAgregado {
     p90_min: number | null;
     sem_resposta: number;
   }[];
+  /** Sempre 24 linhas: hora sem conversa aparece como zero, não some do eixo. */
+  porHora: Fatia[];
+  /** Sempre 7 linhas, domingo primeiro. */
+  porDiaSemana: Fatia[];
   canais: { canal: string; conversas: number; pct_na_meta: number; mediana_min: number | null }[];
   criticos: (SlaLinha & { situacao: "esperando" | "violou"; responsavel: string | null })[];
 }
@@ -270,7 +338,12 @@ export function agregar(
         ? Math.max(...esperando.map((l) => l.espera_util_min))
         : null,
       so_o_bot: semResposta.filter((l) => l.respondida_por_bot).length,
+      media_min: esperas.length ? esperas.reduce((a, b) => a + b, 0) / esperas.length : null,
+      mediana_corrida_min: percentil(respondidas.map((l) => l.espera_corrida_min), 0.5),
+      finalizadas: linhas.filter((l) => l.fechada).length,
     },
+    porHora: fatias(linhas, 24, (l) => horaBr(l.primeira_entrada), (h) => `${String(h).padStart(2, "0")}h`),
+    porDiaSemana: fatias(linhas, 7, (l) => diaSemanaBr(l.primeira_entrada), (d) => DIAS_SEMANA[d]),
     distribuicao,
     serie,
     agentes: [...porAgente.entries()]

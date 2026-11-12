@@ -3,6 +3,7 @@ import { paginarRpc } from "@/lib/supabase/paginar-rpc";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { canAccess } from "@/lib/auth/module-access";
 import { diaBr, type SlaLinha } from "@/lib/reports/sla";
+import { diasEntre, ehDiaValido, PERIODO_MAX_DIAS, somaDias } from "@/lib/periodo";
 
 export const dynamic = "force-dynamic";
 
@@ -68,10 +69,31 @@ export async function GET(req: Request) {
   }
 
   const url = new URL(req.url);
-  const dias = PERIODOS[url.searchParams.get("dias") ?? "30"] ?? 30;
   const meta = Number(url.searchParams.get("meta") ?? SLA_TARGET_MIN) || SLA_TARGET_MIN;
-  const ate = new Date();
-  const de = new Date(ate.getTime() - dias * 24 * 60 * 60 * 1000);
+  // Período por DATA (AAAA-MM-DD, dia de São Paulo). Sem `de`/`ate`, cai nos
+  // últimos N `dias`. Data malformada é 400: período diferente do pedido em
+  // silêncio é a tela que mente.
+  const pDe = url.searchParams.get("de");
+  const pAte = url.searchParams.get("ate");
+  let de: Date;
+  let ate: Date;
+  if (pDe || pAte) {
+    if (!ehDiaValido(pDe) || !ehDiaValido(pAte) || pDe > pAte) {
+      return Response.json({ error: "período inválido" }, { status: 400 });
+    }
+    if (diasEntre(pDe, pAte) > PERIODO_MAX_DIAS) {
+      return Response.json({ error: `período maior que ${PERIODO_MAX_DIAS} dias` }, { status: 400 });
+    }
+    // Meia-noite de São Paulo (-03:00, sem horário de verão desde 2019).
+    de = new Date(`${pDe}T00:00:00-03:00`);
+    ate = new Date(new Date(`${somaDias(pAte, 1)}T00:00:00-03:00`).getTime());
+    if (ate.getTime() > Date.now()) ate = new Date();
+  } else {
+    const n = PERIODOS[url.searchParams.get("dias") ?? "30"] ?? 30;
+    ate = new Date();
+    de = new Date(ate.getTime() - n * 24 * 60 * 60 * 1000);
+  }
+  const dias = Math.max(1, Math.round((ate.getTime() - de.getTime()) / 86400000));
 
   /*
    * 🔴 **PAGINA.** Era uma chamada só, e o PostgREST corta em 1000 linhas SEM

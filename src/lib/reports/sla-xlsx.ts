@@ -1,5 +1,5 @@
 import type { SlaAgregado, SlaLinha } from "./sla";
-import { FAIXA_SEM_RESPOSTA, faixaDe, dur } from "./sla";
+import { FAIXA_SEM_RESPOSTA, faixaDe, dur, DIAS_SEMANA, diaSemanaBr, horaBr } from "./sla";
 import { pngCumprimentoPorDia, pngDistribuicao } from "./sla-graficos";
 
 /**
@@ -34,6 +34,10 @@ export interface DadosDoRelatorio {
   usuario: string;
   /** Recorte ativo em texto ("Responsável: Cibelle"), vazio quando não há. */
   recorte: string[];
+  /** Datas do período (AAAA-MM-DD) — vão no nome do arquivo. */
+  periodo?: { de: string; ate: string };
+  /** false = só os totais; senão inclui a aba "Atendimentos" (uma linha por conversa). */
+  detalhado?: boolean;
 }
 
 /**
@@ -299,6 +303,39 @@ export async function montarWorkbook(d: DadosDoRelatorio) {
   });
   barraDeDados(ws5, "E", ws5.rowCount, VERMELHO);
 
+  // --- Por hora e por dia da semana ---
+  const recortes: [string, string, typeof d.ag.porHora][] = [
+    ["Por hora", "Hora", d.ag.porHora],
+    ["Por dia da semana", "Dia", d.ag.porDiaSemana],
+  ];
+  for (const [nome, col, fatias] of recortes) {
+    const ws = wb.addWorksheet(nome, { views: [{ showGridLines: false }] });
+    cabecalho(ws, [
+      { h: col, w: 12 },
+      { h: "Conversas", w: 12 },
+      { h: "Respondidas", w: 13 },
+      { h: "Sem resposta", w: 14 },
+      { h: "Dentro da meta", w: 15 },
+      { h: "Mediana (min úteis)", w: 18 },
+      { h: "P90 (min úteis)", w: 16 },
+    ]);
+    fatias.forEach((f) =>
+      ws.addRow([
+        f.rotulo,
+        f.recebidas,
+        f.respondidas,
+        f.sem_resposta,
+        f.recebidas ? fracao(f.pct_na_meta) : null,
+        f.mediana_min === null ? null : Math.round(f.mediana_min * 10) / 10,
+        f.p90_min === null ? null : Math.round(f.p90_min * 10) / 10,
+      ])
+    );
+    ws.getColumn(5).numFmt = "0.0%";
+    barraDeDados(ws, "B", ws.rowCount, "FF6366F1");
+  }
+
+  if (d.detalhado === false) return wb;
+
   /* --- Atendimentos: é o CSV que saiu, preservado como aba --- */
   const ws6 = wb.addWorksheet("Atendimentos", { views: [{ showGridLines: false }] });
   cabecalho(ws6, [
@@ -313,6 +350,8 @@ export async function montarWorkbook(d: DadosDoRelatorio) {
     { h: "Primeira resposta", w: 20 },
     { h: "Só o bot respondeu", w: 16 },
     { h: "Finalizada", w: 12 },
+    { h: "Dia da semana", w: 13 },
+    { h: "Hora de chegada", w: 14 },
   ]);
   for (const l of d.linhas) {
     // `situacao` já resolvida em texto: a planilha não deveria ter que
@@ -336,6 +375,8 @@ export async function montarWorkbook(d: DadosDoRelatorio) {
       l.primeira_resposta ? new Date(l.primeira_resposta).toLocaleString("pt-BR") : "",
       l.respondida_por_bot ? "sim" : "não",
       l.fechada ? "sim" : "não",
+      DIAS_SEMANA[diaSemanaBr(l.primeira_entrada)],
+      `${String(horaBr(l.primeira_entrada)).padStart(2, "0")}h`,
     ]);
   }
   barraDeDados(ws6, "E", ws6.rowCount, VERMELHO);
@@ -355,9 +396,10 @@ export async function baixarRelatorioXlsx(d: DadosDoRelatorio): Promise<void> {
   a.href = url;
   // O nome carrega o período E se havia recorte: dois downloads do mesmo dia com
   // filtros diferentes não podem virar o mesmo arquivo.
-  a.download = `relatorio-atendimento-${d.dias}d${d.recorte.length ? "-filtrado" : ""}-${new Date()
-    .toISOString()
-    .slice(0, 10)}.xlsx`;
+  const quando = d.periodo ? `${d.periodo.de}_a_${d.periodo.ate}` : `${d.dias}d`;
+  a.download = `relatorio-atendimento-${d.detalhado === false ? "resumo" : "detalhado"}-${quando}${
+    d.recorte.length ? "-filtrado" : ""
+  }.xlsx`;
   a.click();
   URL.revokeObjectURL(url);
 }
