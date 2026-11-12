@@ -15,6 +15,7 @@ import {
 import {
   Bar,
   BarChart,
+  ComposedChart,
   CartesianGrid,
   Cell,
   Line,
@@ -39,14 +40,18 @@ import {
   type Situacao,
   type SlaFiltros,
   type SlaLinha,
+  DIAS_SEMANA,
+  type Fatia,
 } from "@/lib/reports/sla";
 import { baixarRelatorioXlsx } from "@/lib/reports/sla-xlsx";
+import { PeriodoPicker } from "@/components/shared/period-picker";
+import { resolvePreset, type Periodo } from "@/lib/periodo";
 import { useAccount } from "@/lib/data/repos/db/account";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 interface Resposta {
-  periodo: { dias: number };
+  periodo: { dias: number; de: string; ate: string };
   meta: number;
   expediente: string;
   linhas: SlaLinha[];
@@ -62,12 +67,6 @@ function corPct(pct: number): string {
   if (pct >= 50) return "text-amber-600";
   return "text-red-500";
 }
-
-const PERIODOS = [
-  { label: "7 dias", value: 7 },
-  { label: "30 dias", value: 30 },
-  { label: "90 dias", value: 90 },
-];
 
 const SITUACOES: { valor: Situacao; label: string }[] = [
   { valor: "na_meta", label: "Dentro da meta" },
@@ -97,7 +96,7 @@ const SITUACOES: { valor: Situacao; label: string }[] = [
  */
 export function ServiceSlaReport() {
   const router = useRouter();
-  const [dias, setDias] = useState(30);
+  const [periodo, setPeriodo] = useState<Periodo>(() => resolvePreset("30d"));
   const [dados, setDados] = useState<Resposta | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
@@ -111,7 +110,7 @@ export function ServiceSlaReport() {
     void (async () => {
       try {
         setCarregando(true);
-        const res = await fetch(`/api/relatorios/atendimento?dias=${dias}`);
+        const res = await fetch(`/api/relatorios/atendimento?de=${periodo.de}&ate=${periodo.ate}`);
         const json = await res.json().catch(() => ({}));
         if (!ativo) return;
         if (!res.ok) {
@@ -130,7 +129,7 @@ export function ServiceSlaReport() {
     return () => {
       ativo = false;
     };
-  }, [dias]);
+  }, [periodo]);
 
   /**
    * Trocar de período limpa o recorte: um dia específico do período anterior
@@ -138,8 +137,8 @@ export function ServiceSlaReport() {
    * quê. Feito no clique, e não num efeito sobre `dias` — o efeito rodaria
    * também na primeira montagem e disparava renderização em cascata.
    */
-  const trocarPeriodo = (novo: number) => {
-    setDias(novo);
+  const trocarPeriodo = (novo: Periodo) => {
+    setPeriodo(novo);
     setFiltros(FILTROS_VAZIOS);
   };
 
@@ -169,6 +168,14 @@ export function ServiceSlaReport() {
   }, [linhas, dados]);
 
   const k = ag.kpis;
+  /** Liga/desliga uma pessoa no recorte — vários responsáveis somam (OU). */
+  const alternarResponsavel = (id: string) =>
+    setFiltros((f) => ({
+      ...f,
+      responsaveis: f.responsaveis.includes(id)
+        ? f.responsaveis.filter((x) => x !== id)
+        : [...f.responsaveis, id],
+    }));
   /** Alterna um filtro: clicar no que já está ativo remove o recorte. */
   const alternar = <C extends keyof SlaFiltros>(campo: C, valor: SlaFiltros[C]) =>
     setFiltros((f) => ({ ...f, [campo]: f[campo] === valor ? FILTROS_VAZIOS[campo] : valor }));
@@ -188,7 +195,7 @@ export function ServiceSlaReport() {
    * arquivo, senão dois downloads do mesmo dia com filtros diferentes seriam
    * indistinguíveis.
    */
-  const baixarRelatorio = async () => {
+  const baixarRelatorio = async (detalhado: boolean) => {
     if (filtradas.length === 0) {
       toast.error("Nada para exportar neste recorte");
       return;
@@ -200,9 +207,11 @@ export function ServiceSlaReport() {
         linhas: filtradas,
         nomes: dados?.nomes ?? {},
         meta: dados?.meta ?? 15,
-        dias,
-        de: ag.serie[0]?.rotulo ?? "—",
-        ate: ag.serie[ag.serie.length - 1]?.rotulo ?? "—",
+        dias: dados?.periodo.dias ?? 0,
+        de: `${periodo.de.slice(8, 10)}/${periodo.de.slice(5, 7)}/${periodo.de.slice(0, 4)}`,
+        ate: `${periodo.ate.slice(8, 10)}/${periodo.ate.slice(5, 7)}/${periodo.ate.slice(0, 4)}`,
+        periodo,
+        detalhado,
         empresa: company?.name ?? "Minha empresa",
         usuario: profile?.name ?? "—",
         recorte: chipsParaTexto(),
@@ -229,10 +238,20 @@ export function ServiceSlaReport() {
       rotulo: `dia ${filtros.dia.slice(8, 10)}/${filtros.dia.slice(5, 7)}`,
       limpar: () => alternar("dia", null),
     });
-  if (filtros.responsavel)
+  for (const id of filtros.responsaveis)
     chips.push({
-      rotulo: responsaveisDoPeriodo.find(([id]) => id === filtros.responsavel)?.[1] ?? "responsável",
-      limpar: () => alternar("responsavel", null),
+      rotulo: responsaveisDoPeriodo.find(([x]) => x === id)?.[1] ?? "responsável",
+      limpar: () => alternarResponsavel(id),
+    });
+  if (filtros.hora !== null)
+    chips.push({
+      rotulo: `chegou às ${String(filtros.hora).padStart(2, "0")}h`,
+      limpar: () => alternar("hora", null),
+    });
+  if (filtros.diaSemana !== null)
+    chips.push({
+      rotulo: DIAS_SEMANA[filtros.diaSemana],
+      limpar: () => alternar("diaSemana", null),
     });
   if (filtros.canal) chips.push({ rotulo: filtros.canal, limpar: () => alternar("canal", null) });
   if (filtros.situacao)
@@ -276,10 +295,21 @@ export function ServiceSlaReport() {
             size="sm"
             className="h-8 gap-1.5 text-xs"
             disabled={!dados || filtradas.length === 0 || baixando}
-            onClick={() => void baixarRelatorio()}
+            onClick={() => void baixarRelatorio(false)}
           >
             <Download className="size-3.5" />
-            {baixando ? "Gerando..." : "Baixar relatório"}
+            {baixando ? "Gerando..." : "Baixar resumo"}
+          </Button>
+          {/* Detalhado = o resumo + uma linha por conversa (aba Atendimentos). */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            disabled={!dados || filtradas.length === 0 || baixando}
+            onClick={() => void baixarRelatorio(true)}
+          >
+            <Download className="size-3.5" />
+            Baixar detalhado
           </Button>
           <Button
             variant="outline"
@@ -294,38 +324,79 @@ export function ServiceSlaReport() {
               </Badge>
             )}
           </Button>
-          <div className="flex items-center gap-1 rounded-lg border bg-white p-0.5">
-            {PERIODOS.map((p) => (
-              <button
-                key={p.value}
-                onClick={() => trocarPeriodo(p.value)}
-                className={cn(
-                  "rounded-md px-2.5 py-1 text-xs font-medium",
-                  dias === p.value
-                    ? "bg-indigo-50 text-indigo-700"
-                    : "text-slate-500 hover:bg-slate-50"
-                )}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
+          <PeriodoPicker periodo={periodo} onChange={trocarPeriodo} />
         </div>
       </div>
 
       {painelAberto && dados && (
         <div className="mb-4 grid gap-3 rounded-xl border bg-white p-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="space-y-1 sm:col-span-2 lg:col-span-4">
+            <span className="flex items-center gap-2 text-[11px] font-medium text-slate-500">
+              Responsáveis{" "}
+              {filtros.responsaveis.length === 0 ? "(todos)" : `(${filtros.responsaveis.length})`}
+              {filtros.responsaveis.length > 0 && (
+                <button
+                  onClick={() => setFiltros((f) => ({ ...f, responsaveis: [] }))}
+                  className="font-normal text-indigo-600 hover:underline"
+                >
+                  limpar
+                </button>
+              )}
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {responsaveisDoPeriodo.map(([id, nome]) => {
+                const on = filtros.responsaveis.includes(id);
+                return (
+                  <button
+                    key={id}
+                    onClick={() => alternarResponsavel(id)}
+                    className={cn(
+                      "rounded-full border px-2.5 py-1 text-[11px]",
+                      on
+                        ? "border-indigo-300 bg-indigo-50 font-medium text-indigo-700"
+                        : "bg-white text-slate-600 hover:bg-slate-50"
+                    )}
+                  >
+                    {on ? "✓ " : ""}
+                    {nome}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <label className="space-y-1">
-            <span className="text-[11px] font-medium text-slate-500">Responsável</span>
+            <span className="text-[11px] font-medium text-slate-500">Hora em que o cliente escreveu</span>
             <select
-              value={filtros.responsavel ?? ""}
-              onChange={(e) => setFiltros((f) => ({ ...f, responsavel: e.target.value || null }))}
+              value={filtros.hora ?? ""}
+              onChange={(e) =>
+                setFiltros((f) => ({ ...f, hora: e.target.value === "" ? null : Number(e.target.value) }))
+              }
+              className="h-8 w-full rounded-md border bg-white px-2 text-xs"
+            >
+              <option value="">Todas</option>
+              {Array.from({ length: 24 }, (_, h) => (
+                <option key={h} value={h}>
+                  {String(h).padStart(2, "0")}h
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-[11px] font-medium text-slate-500">Dia da semana</span>
+            <select
+              value={filtros.diaSemana ?? ""}
+              onChange={(e) =>
+                setFiltros((f) => ({
+                  ...f,
+                  diaSemana: e.target.value === "" ? null : Number(e.target.value),
+                }))
+              }
               className="h-8 w-full rounded-md border bg-white px-2 text-xs"
             >
               <option value="">Todos</option>
-              {responsaveisDoPeriodo.map(([id, nome]) => (
-                <option key={id} value={id}>
-                  {nome}
+              {DIAS_SEMANA.map((d, i) => (
+                <option key={d} value={i}>
+                  {d}
                 </option>
               ))}
             </select>
@@ -583,6 +654,78 @@ export function ServiceSlaReport() {
             </div>
           </div>
 
+          <div className="grid gap-3 rounded-xl border bg-white p-4 text-xs sm:grid-cols-3 lg:grid-cols-6">
+            <Detalhe rotulo="Conversas recebidas" valor={k.recebidas.toLocaleString("pt-BR")} />
+            <Detalhe rotulo="Respondidas por pessoa" valor={k.respondidas.toLocaleString("pt-BR")} />
+            <Detalhe rotulo="Finalizadas" valor={k.finalizadas.toLocaleString("pt-BR")} />
+            <Detalhe rotulo="p90 (9 de 10 até)" valor={dur(k.p90_min)} />
+            <Detalhe rotulo="Média (puxada por extremos)" valor={dur(k.media_min)} />
+            <Detalhe rotulo="Típica em tempo corrido" valor={dur(k.mediana_corrida_min)} />
+          </div>
+
+          <div className="rounded-xl border bg-white p-4">
+            <p className="text-xs font-semibold text-slate-700">Tempo de resposta por hora do dia</p>
+            <p className="mb-2 text-[11px] text-slate-400">
+              barras = conversas que chegaram naquela hora · linha laranja = resposta típica (min
+              úteis) · clique numa hora para ver só ela
+            </p>
+            <div className="h-60">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart
+                  data={ag.porHora}
+                  margin={{ top: 8, right: 8, bottom: 0, left: -20 }}
+                  onClick={(estado) => {
+                    const rotulo = (estado as { activeLabel?: string })?.activeLabel;
+                    const achado = ag.porHora.find((h) => h.rotulo === rotulo);
+                    if (achado) alternar("hora", achado.chave);
+                  }}
+                  style={{ cursor: "pointer" }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis dataKey="rotulo" tick={{ fontSize: 10 }} interval={1} />
+                  <YAxis yAxisId="n" tick={{ fontSize: 10 }} allowDecimals={false} />
+                  <YAxis yAxisId="min" orientation="right" tick={{ fontSize: 10 }} unit="m" />
+                  <Tooltip content={<DicaFatia />} />
+                  <Bar yAxisId="n" dataKey="recebidas" radius={[3, 3, 0, 0]}>
+                    {ag.porHora.map((h) => (
+                      <Cell
+                        key={h.chave}
+                        fill="#a5b4fc"
+                        opacity={filtros.hora === null || filtros.hora === h.chave ? 1 : 0.3}
+                      />
+                    ))}
+                  </Bar>
+                  <Line
+                    yAxisId="min"
+                    type="monotone"
+                    dataKey="mediana_min"
+                    stroke="#f59e0b"
+                    strokeWidth={2}
+                    dot={{ r: 2 }}
+                    connectNulls
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+            <TabelaFatias
+              titulo="Hora"
+              fatias={ag.porHora.filter((h) => h.recebidas > 0)}
+              ativo={filtros.hora}
+              onClick={(c) => alternar("hora", c)}
+            />
+          </div>
+
+          <div className="rounded-xl border bg-white p-4">
+            <p className="text-xs font-semibold text-slate-700">Por dia da semana</p>
+            <p className="text-[11px] text-slate-400">dia em que o cliente escreveu · clique para filtrar</p>
+            <TabelaFatias
+              titulo="Dia"
+              fatias={ag.porDiaSemana}
+              ativo={filtros.diaSemana}
+              onClick={(c) => alternar("diaSemana", c)}
+            />
+          </div>
+
           <div className="rounded-xl border bg-white">
             <div className="border-b px-4 py-3">
               <p className="text-xs font-semibold text-slate-700">Por responsável da conversa</p>
@@ -590,7 +733,7 @@ export function ServiceSlaReport() {
                   mostra "sem dados" para quase todo mundo, porque 86% das saídas
                   estão sem autor gravado. Aqui o recorte é o responsável. */}
               <p className="text-[11px] text-slate-400">
-                pelo responsável atribuído, não por quem digitou · clique numa linha para filtrar
+                pelo responsável atribuído, não por quem digitou · clique em várias linhas para comparar
               </p>
             </div>
             <div className="overflow-x-auto">
@@ -615,10 +758,10 @@ export function ServiceSlaReport() {
                   {ag.agentes.map((a) => (
                     <tr
                       key={a.userId}
-                      onClick={() => alternar("responsavel", a.userId)}
+                      onClick={() => alternarResponsavel(a.userId)}
                       className={cn(
                         "cursor-pointer border-b last:border-0 hover:bg-slate-50",
-                        filtros.responsavel === a.userId && "bg-indigo-50/60"
+                        filtros.responsaveis.includes(a.userId) && "bg-indigo-50/60"
                       )}
                     >
                       <td className="px-4 py-2.5 font-medium text-slate-800">
@@ -796,5 +939,93 @@ function KpiBotao({
       <p className={cn("mt-1 text-2xl font-bold", corValor ?? "text-slate-900")}>{valor}</p>
       <p className="mt-1 text-[11px] text-slate-400">{nota}</p>
     </button>
+  );
+}
+
+function Detalhe({ rotulo, valor }: { rotulo: string; valor: string }) {
+  return (
+    <div>
+      <p className="text-[11px] text-slate-400">{rotulo}</p>
+      <p className="mt-0.5 text-sm font-semibold text-slate-800">{valor}</p>
+    </div>
+  );
+}
+
+function DicaFatia({ active, payload }: { active?: boolean; payload?: { payload: Fatia }[] }) {
+  if (!active || !payload?.length) return null;
+  const f = payload[0].payload;
+  return (
+    <div className="rounded-lg border bg-white px-3 py-2 text-[11px] shadow-sm">
+      <p className="font-semibold text-slate-800">{f.rotulo}</p>
+      <p className="text-slate-600">
+        {f.recebidas} conversa(s) · {f.pct_na_meta.toLocaleString("pt-BR")}% na meta
+      </p>
+      <p className="text-slate-600">
+        típica {dur(f.mediana_min)} · p90 {dur(f.p90_min)}
+      </p>
+      {f.sem_resposta > 0 && <p className="text-red-500">{f.sem_resposta} sem resposta</p>}
+    </div>
+  );
+}
+
+/** Tabela de um recorte (hora, dia da semana) — clicar na linha vira filtro. */
+function TabelaFatias({
+  titulo,
+  fatias,
+  ativo,
+  onClick,
+}: {
+  titulo: string;
+  fatias: Fatia[];
+  ativo: number | null;
+  onClick: (chave: number) => void;
+}) {
+  return (
+    <div className="mt-3 max-h-64 overflow-auto">
+      <table className="w-full text-left text-xs">
+        <thead className="sticky top-0 bg-white">
+          <tr className="border-b text-[11px] text-slate-400">
+            {[titulo, "Conversas", "Na meta", "Resposta típica", "p90", "Sem resposta"].map((h) => (
+              <th key={h} className="whitespace-nowrap px-3 py-2 font-medium">
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {fatias.map((f) => (
+            <tr
+              key={f.chave}
+              onClick={() => onClick(f.chave)}
+              className={cn(
+                "cursor-pointer border-b last:border-0 hover:bg-slate-50",
+                ativo === f.chave && "bg-indigo-50/60"
+              )}
+            >
+              <td className="px-3 py-2 font-medium text-slate-800">{f.rotulo}</td>
+              <td className="px-3 py-2">{f.recebidas}</td>
+              <td
+                className={cn(
+                  "px-3 py-2 font-semibold",
+                  f.recebidas ? corPct(f.pct_na_meta) : "text-slate-400"
+                )}
+              >
+                {f.recebidas ? `${f.pct_na_meta.toLocaleString("pt-BR")}%` : "—"}
+              </td>
+              <td className="px-3 py-2">{dur(f.mediana_min)}</td>
+              <td className="px-3 py-2 text-slate-500">{dur(f.p90_min)}</td>
+              <td
+                className={cn(
+                  "px-3 py-2",
+                  f.sem_resposta > 0 ? "font-semibold text-red-500" : "text-slate-400"
+                )}
+              >
+                {f.sem_resposta}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
