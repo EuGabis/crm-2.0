@@ -227,6 +227,16 @@ export function mimeParaUpload(
     // um mime declarado correto trocaria um erro por outro.
     if (porBytes) return porBytes;
   }
+  /*
+   * Vídeo: a Cloud API aceita só `video/mp4` e `video/3gpp`. O vídeo do iPhone
+   * chega como `video/quicktime` (.mov) e a Meta recusa no upload com #100
+   * ("Param file must be a file with one of the following types"). O .mov é o
+   * mesmo contêiner ISO-BMFF (caixa `ftyp`) e, com H.264/AAC, é processado como
+   * MP4 — então, quando os BYTES confirmam o contêiner, declara `video/mp4`.
+   */
+  if (limpo.startsWith("video/") && limpo !== "video/mp4" && limpo !== "video/3gpp") {
+    if (containerDe(new Uint8Array(bytes.slice(0, 400))) === "mp4") return "video/mp4";
+  }
   return limpo;
 }
 
